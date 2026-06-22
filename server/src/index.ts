@@ -1,4 +1,8 @@
-import { Server } from '@colyseus/core';
+// Editor'da Unity Services init ~30sn Editor'ı bloklayabiliyor → consume geç kalıp
+// "seat reservation expired" oluyor. Rezervasyon penceresini genişlet (import'tan ÖNCE).
+process.env.COLYSEUS_SEAT_RESERVATION_TIME = '60';
+
+import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer } from 'http';
@@ -17,5 +21,7 @@ const gameServer = new Server({
 // "ellibir" odası — masa. Matchmaking: joinOrCreate("ellibir", {...}).
 gameServer.define('ellibir', EllibirRoom);
 
+try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
+
 gameServer.listen(port);
-console.log(`[Elli Bir] Colyseus dinleniyor: ws://localhost:${port}`);
+console.log(`[Elli Bir] Colyseus dinleniyor: ws://localhost:${port} (seatRes=60s)`);
