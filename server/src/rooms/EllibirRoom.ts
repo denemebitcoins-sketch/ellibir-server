@@ -3,6 +3,7 @@ import { createGame, startNextHand } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
+import { verifyToken, settleMatch } from '../supabase';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -20,6 +21,9 @@ export class EllibirRoom extends Room {
   private busy = false;                        // runEngine yeniden-giriş kilidi
   private readonly STEP_MS = 850;              // bot adımları arası gecikme (animasyon)
   private cfg: any = null;                     // createGame opts (oyun tüm insanlar gelince kurulur)
+  private seatUsers = new Map<number, string>(); // koltuk → Supabase userId (yalnız gerçek oyuncular)
+  private bet = 0;                             // masa bahsi (maç sonu settle için)
+  private settled = false;                     // çift settle koruması
 
   onCreate(options: any) {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
@@ -39,6 +43,7 @@ export class EllibirRoom extends Room {
     const rules: any = { ...DEFAULT_RULES, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
     if (mode === 'duo') rules.teamMode = true;
 
+    this.bet = Number(options?.bet) || 0;
     // Oyunu HEMEN kurma — tüm insan koltukları dolunca başlat (yoksa bekleyen oyuncu
     // bot'larla oynanmış bir el görür). Şimdilik sadece config sakla.
     this.cfg = { seed, playerNames: names, botSeats, rules };
@@ -72,10 +77,17 @@ export class EllibirRoom extends Room {
     console.log(`[EllibirRoom] oluştu seed=${seed} humans=${this.humanSeats}`);
   }
 
+  // Supabase kimliği: token geçerliyse userId döner; denemede token yoksa anon (true) izin.
+  async onAuth(_client: Client, options: any): Promise<any> {
+    const uid = await verifyToken(options?.token);
+    return uid ?? true;
+  }
+
   onJoin(client: Client, _options: any) {
     const taken = new Set(this.seats.values());
     const seat = this.humanSeats.find((s) => !taken.has(s)) ?? this.seats.size;
     this.seats.set(client.sessionId, seat);
+    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
@@ -138,7 +150,16 @@ export class EllibirRoom extends Room {
       if (this.handEndTimer) clearTimeout(this.handEndTimer);
       this.handEndTimer = setTimeout(() => this.continueHand(), 3000);
     }
-    // TODO: matchEnded → Supabase çip settle (auth + bet bağlanınca).
+    if (this.game.phase === 'matchEnded' && !this.settled) {
+      this.settled = true;
+      const r: any = this.game.rules ?? {};
+      settleMatch({
+        seatUsers: this.seatUsers,
+        winnerSeat: Number(this.game.matchWinnerSeat),
+        bet: this.bet,
+        teamMode: !!r.teamMode,
+      }).catch((e) => console.error('[settle] hata:', e?.message));
+    }
   }
 
   private continueHand() {
