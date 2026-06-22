@@ -22,6 +22,7 @@ export class EllibirRoom extends Room {
   private readonly STEP_MS = 850;              // bot adımları arası gecikme (animasyon)
   private cfg: any = null;                     // createGame opts (oyun tüm insanlar gelince kurulur)
   private seatUsers = new Map<number, string>(); // koltuk → Supabase userId (yalnız gerçek oyuncular)
+  private seatNames = new Map<number, string>(); // koltuk → görünen ad (her oyuncu kendi adını yollar)
   private bet = 0;                             // masa bahsi (maç sonu settle için)
   private settled = false;                     // çift settle koruması
 
@@ -83,11 +84,12 @@ export class EllibirRoom extends Room {
     return uid ?? true;
   }
 
-  onJoin(client: Client, _options: any) {
+  onJoin(client: Client, options: any) {
     const taken = new Set(this.seats.values());
     const seat = this.humanSeats.find((s) => !taken.has(s)) ?? this.seats.size;
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
@@ -98,6 +100,11 @@ export class EllibirRoom extends Room {
   private startGameIfReady() {
     if (this.game || this.seats.size < this.humanSeats.length) return;
     this.game = createGame(this.cfg);
+    // Gerçek oyuncuların gönderdiği adları koltuklarına yaz (bot koltukları cfg'deki ad kalır).
+    for (const [seat, name] of this.seatNames) {
+      const p = this.game.players.find((pl: any) => pl.seat === seat);
+      if (p && name) p.name = name;
+    }
     console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
     this.runEngine();
   }
