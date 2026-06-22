@@ -18,6 +18,8 @@ export class EllibirRoom extends Room {
   private seats = new Map<string, number>();   // sessionId → koltuk
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
+  private matchEndTimer: NodeJS.Timeout | null = null;
+  private readonly MATCH_END_MS = 10000;       // maç sonu → yeni maç geri sayımı
   private busy = false;                        // runEngine yeniden-giriş kilidi
   private readonly STEP_MS = 850;              // bot adımları arası gecikme (animasyon)
   private cfg: any = null;                     // createGame opts (oyun tüm insanlar gelince kurulur)
@@ -166,7 +168,25 @@ export class EllibirRoom extends Room {
         bet: this.bet,
         teamMode: !!r.teamMode,
       }).catch((e) => console.error('[settle] hata:', e?.message));
+      // Masa KAPANMAZ: 10sn (yazboz+kazanan gösterilir) sonra AYNI ayarla yeni maç.
+      if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
+      this.matchEndTimer = setTimeout(() => this.newMatch(), this.MATCH_END_MS);
     }
+  }
+
+  /// Aynı masada yeni maç: kartlar toplanır, yazboz/olaylar sıfırlanır, masa ayarı korunur.
+  /// Oyuncu eksikse (biri çıktıysa) bekleme moduna geçer (game=null → "rakip bekleniyor").
+  private newMatch() {
+    if (this.seats.size < this.humanSeats.length) { this.game = null; this.pushViews(); return; }
+    this.game = createGame({ ...this.cfg, seed: Math.floor(Math.random() * 1_000_000_000) });
+    for (const [seat, name] of this.seatNames) {
+      const p = this.game.players.find((pl: any) => pl.seat === seat);
+      if (p && name) p.name = name;
+    }
+    this.settled = false;
+    console.log('[EllibirRoom] yeni maç başladı (aynı masa)');
+    this.pushViews();
+    this.runEngine();
   }
 
   private continueHand() {
@@ -191,5 +211,6 @@ export class EllibirRoom extends Room {
 
   onDispose() {
     if (this.handEndTimer) clearTimeout(this.handEndTimer);
+    if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
   }
 }
