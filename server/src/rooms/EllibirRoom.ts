@@ -10,7 +10,7 @@ import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
  * botların çekip atması istemcide animasyonlu görünür (Edge "frames" modelinin karşılığı).
  */
 export class EllibirRoom extends Room {
-  maxClients = 2;   // gece deneme: 2 insan koltuğu (seat 0,1) + 2 bot (seat 2,3)
+  maxClients = 1;
 
   private game: any;
   private seats = new Map<string, number>();   // sessionId → koltuk
@@ -22,10 +22,21 @@ export class EllibirRoom extends Room {
   onCreate(options: any) {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
-    this.humanSeats = Array.isArray(options?.humanSeats) ? options.humanSeats : [0];
+    const mode = options?.mode === 'duo' ? 'duo' : 'solo';
+
+    // solo: 1 insan (seat 0) + 3 bot. duo (eşli): 2 insan PARTNER (seat 0,2) + 2 bot (seat 1,3).
+    this.humanSeats = mode === 'duo' ? [0, 2] : [0];
+    this.maxClients = this.humanSeats.length;
     const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
-    this.game = createGame({ seed, playerNames: names, botSeats });
-    this.setMetadata({ table: options?.table ?? 0, humans: this.humanSeats.length });
+
+    // Client'tan gelen kural seti (RuleConfig JSON). duo → teamMode garanti.
+    let rules: any;
+    try { rules = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
+    catch { rules = undefined; }
+    if (rules && mode === 'duo') rules.teamMode = true;
+
+    this.game = createGame({ seed, playerNames: names, botSeats, rules });
+    this.setMetadata({ mode, humans: this.humanSeats.length });
 
     // Tek mesaj kanalı: client'ın tüm komutları "cmd" (JSON string) olarak gelir.
     this.onMessage('cmd', (client, raw) => {
