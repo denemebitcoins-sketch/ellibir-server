@@ -80,11 +80,13 @@ export class EllibirRoom extends Room {
     this.busy = true;
     try {
       while (true) {
+        // ÖNCE bekle: bir önceki hamlenin (insanın ıskartası dahil) uçuş animasyonu bitsin,
+        // sonra bot oynasın. Aksi halde sen atarken sıradaki bot kartın havadayken çekiyor.
+        await new Promise((res) => setTimeout(res, this.STEP_MS));
         const r = stepOnce(this.game, (s) => this.isHumanTurn(s));
         if (!r.moved) break;
         this.game = r.state;
         this.pushViews();
-        await new Promise((res) => setTimeout(res, this.STEP_MS));
       }
     } catch (e: any) {
       console.error('[runEngine] hata:', e?.message);

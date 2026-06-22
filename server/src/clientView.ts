@@ -70,7 +70,8 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
       barajTokens:    p.barajTokens   ?? 0,
       openMeldPoints: omp,
       openPairCount:  opc,
-      openSettled:    p.openSettled   ?? false,
+      // Motorda ayrı "settle" yok → açmış oyuncunun yerdeki grupları rozeti tetikler.
+      openSettled:    (p.hasOpened ?? false) && (omp > 0 || opc > 0),
     };
   };
 
