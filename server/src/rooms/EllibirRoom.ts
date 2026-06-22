@@ -123,17 +123,27 @@ export class EllibirRoom extends Room {
     if (seat == null) return;
     // Koltuğu HEMEN bot'a devret → oyun DURMAZ (1. oyuncu beklemede kalmaz).
     this.setAbandoned(seat, true);
+    this.logEvent(`${this.nameOfSeat(seat)} oyundan düştü — bot devraldı`);
     this.runEngine();
     this.pushViews();
     if (consented) { this.cleanupSeat(client.sessionId, seat); return; }
     try {
       await this.allowReconnection(client, 180);  // 3 dk içinde dönerse (uygulama kapansa bile) koltuğu geri al
       this.setAbandoned(seat, false);
+      this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
       this.runEngine();
       this.pushViews();
     } catch {
       this.cleanupSeat(client.sessionId, seat);   // 3 dk geçti → bot kalıcı devralır
     }
+  }
+
+  private nameOfSeat(seat: number): string {
+    return this.game?.players?.find((p: any) => p.seat === seat)?.name ?? this.seatNames.get(seat) ?? 'Oyuncu';
+  }
+
+  private logEvent(msg: string) {
+    if (this.game) this.game.matchLog = [...(this.game.matchLog ?? []), msg];
   }
 
   private cleanupSeat(sessionId: string, seat: number) {
