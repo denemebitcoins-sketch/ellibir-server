@@ -53,7 +53,7 @@ export class EllibirRoom extends Room {
     // bot'larla oynanmış bir el görür). Şimdilik sadece config sakla.
     this.cfg = { seed, playerNames: names, botSeats, rules };
     this.game = null;
-    this.setMetadata({ mode, humans: this.humanSeats.length });
+    this.setMetadata({ mode, table: Number(options?.table) || 1, humans: this.humanSeats.length });
 
     // Tek mesaj kanalı: client'ın tüm komutları "cmd" (JSON string) olarak gelir.
     this.onMessage('cmd', (client, raw) => {

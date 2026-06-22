@@ -18,9 +18,9 @@ const gameServer = new Server({
   transport: new WebSocketTransport({ server: httpServer }),
 });
 
-// "ellibir" odası — masa. Matchmaking: joinOrCreate("ellibir", { mode }).
-// filterBy(mode): solo (1 insan+3 bot) ve duo (2 insan+2 bot eşli) AYRI odalara düşer.
-gameServer.define('ellibir', EllibirRoom).filterBy(['mode']);
+// "ellibir" odası — masa. Matchmaking: joinOrCreate("ellibir", { mode, table }).
+// filterBy(mode,table): aynı mod + aynı masa no → AYNI odada buluşur ("Masa 3'te buluşalım").
+gameServer.define('ellibir', EllibirRoom).filterBy(['mode', 'table']);
 
 try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
 
