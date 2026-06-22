@@ -40,8 +40,7 @@ export class EllibirRoom extends Room {
       this.afterMove();
     });
 
-    // Dağıtıcı bot olabilir → ilk adımları işlet.
-    this.stepBots();
+    // DİKKAT: burada stepBots ÇAĞIRMA — henüz kimse oturmadı, bot tüm eli oynar.
     console.log(`[EllibirRoom] oluştu seed=${seed} humans=${this.humanSeats}`);
   }
 
@@ -51,6 +50,9 @@ export class EllibirRoom extends Room {
     const seat = this.humanSeats.find((s) => !taken.has(s)) ?? this.seats.size;
     this.seats.set(client.sessionId, seat);
     client.send('seat', { seat });
+    console.log(`[onJoin] koltuk=${seat}, dolu koltuklar=`, [...this.seats.values()]);
+    // Oyuncu oturdu → şimdi botları/terk edilmiş koltukları işlet (insan sırasında durur).
+    this.stepBots();
     this.pushViews();
   }
 
