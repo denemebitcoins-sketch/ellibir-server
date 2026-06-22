@@ -150,15 +150,16 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
 const _bot = new HeuristicBot('normal');
 
 /**
- * Sorgu + bot adımlama. isHumanTurn(seat): o koltukta KARAR verecek bağlı insan var mı.
- * Bağlı insan sırası → dur (UI karar verir). Bot/terk → otomatik oyna.
+ * TEK motor adımı: bir sorgu yanıtı VEYA bir bot hamlesi uygula.
+ * moved=false → bağlı insanın sırası / oynanacak bir şey yok (dur).
+ * EllibirRoom bunu döngüde çağırıp her adımı GECİKMELİ ayrı view olarak push eder
+ * (botların çekip atması istemcide animasyonlu görünür).
  */
-export function stepEngine(state: any, isHumanTurn: (seat: number) => boolean): any {
-  let safety = 0;
+export function stepOnce(state: any, isHumanTurn: (seat: number) => boolean): { state: any; moved: boolean } {
   const abandoned: number[] = Array.isArray(state.abandoned) ? state.abandoned : [];
 
   // SORGU: karar bir bot'ta/terk'te ise otomatik yanıtla.
-  while (state.sorgu) {
+  if (state.sorgu) {
     const sg = state.sorgu;
     const sorulanP = state.players?.find((p: any) => p.seat === sg.sorulanSeat);
     let decider: number; let moveObj: any;
@@ -172,16 +173,15 @@ export function stepEngine(state: any, isHumanTurn: (seat: number) => boolean): 
     } else {
       decider = sg.askerSeat; moveObj = { type: 'sorguSonuc', al: false };
     }
-    if (isHumanTurn(decider) && !abandoned.includes(decider)) break;
-    if (++safety > 50) break;
-    state = applyMove(state, moveObj);
+    if (isHumanTurn(decider) && !abandoned.includes(decider)) return { state, moved: false };
+    return { state: applyMove(state, moveObj), moved: true };
   }
 
-  // Normal sıra: bot/terk koltuğu otomatik oyna.
-  while (state.phase === 'draw' || state.phase === 'action') {
-    if (isHumanTurn(state.currentSeat) && !abandoned.includes(state.currentSeat)) break;
-    if (++safety > 200) break;
-    state = applyMove(state, _bot.nextMove(viewFor(state, state.currentSeat)));
+  // Normal sıra: bot/terk koltuğu bir hamle yapar.
+  if (state.phase === 'draw' || state.phase === 'action') {
+    if (isHumanTurn(state.currentSeat) && !abandoned.includes(state.currentSeat)) return { state, moved: false };
+    return { state: applyMove(state, _bot.nextMove(viewFor(state, state.currentSeat))), moved: true };
   }
-  return state;
+
+  return { state, moved: false };
 }

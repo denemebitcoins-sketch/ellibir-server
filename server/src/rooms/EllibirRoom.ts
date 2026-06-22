@@ -1,13 +1,13 @@
 import { Room, Client } from '@colyseus/core';
 import { createGame, startNextHand } from '../../../packages/engine/src/game';
 import { clientViewFor } from '../clientView';
-import { applyClientCommand, stepEngine, CmdError } from '../gameCommands';
+import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
 
 /**
- * Bir MASA = bir oda. Engine state odada bellekte; her komutta oyunculara kendi
- * (Unity-uyumlu) view'ı WebSocket ile PUSH edilir. Client protokolü (openSelected,
- * play, isle, continue, move...) gameCommands ile engine Move'a çevrilir; sorgu/bot
- * otomasyonu stepEngine'de. State senkronu "view mesajı" modeli.
+ * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
+ * play, isle, continue, move...) gameCommands ile engine Move'a çevrilir.
+ * Bot/sorgu adımları TEK TEK, her biri GECİKMELİ ayrı "view" olarak push edilir →
+ * botların çekip atması istemcide animasyonlu görünür (Edge "frames" modelinin karşılığı).
  */
 export class EllibirRoom extends Room {
   maxClients = 4;
@@ -16,6 +16,8 @@ export class EllibirRoom extends Room {
   private seats = new Map<string, number>();   // sessionId → koltuk
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
+  private busy = false;                        // runEngine yeniden-giriş kilidi
+  private readonly STEP_MS = 850;              // bot adımları arası gecikme (animasyon)
 
   onCreate(options: any) {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
@@ -25,7 +27,7 @@ export class EllibirRoom extends Room {
     this.game = createGame({ seed, playerNames: names, botSeats });
     this.setMetadata({ table: options?.table ?? 0, humans: this.humanSeats.length });
 
-    // Tek mesaj kanalı: client'ın tüm komutları "cmd" olarak gelir (t alanı tipi belirler).
+    // Tek mesaj kanalı: client'ın tüm komutları "cmd" (JSON string) olarak gelir.
     this.onMessage('cmd', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
@@ -35,13 +37,13 @@ export class EllibirRoom extends Room {
       try {
         const r = applyClientCommand(this.game, cmd, seat);
         this.game = r.state;
-        if (!r.skipBots) this.game = stepEngine(this.game, (s) => this.isHumanTurn(s));
+        this.pushViews();                       // insan hamlesi anında yansır
+        if (!r.skipBots) this.runEngine();      // botlar gecikmeli oynar
+        else this.checkHandEnd();
       } catch (e: any) {
         if (e instanceof CmdError) client.send('moveError', { code: e.code });
         else { console.error('[cmd] hata:', e?.message, e?.stack); client.send('moveError', { code: 'internal' }); }
-        return;
       }
-      this.afterStep();
     });
 
     console.log(`[EllibirRoom] oluştu seed=${seed} humans=${this.humanSeats}`);
@@ -53,9 +55,8 @@ export class EllibirRoom extends Room {
     this.seats.set(client.sessionId, seat);
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
-    // Oyuncu oturdu → botları/terk koltukları işlet (insan sırasında durur).
-    this.game = stepEngine(this.game, (s) => this.isHumanTurn(s));
     this.pushViews();
+    this.runEngine();   // dağıtıcı bot ise oynamaya başlar (insan sırasında durur)
   }
 
   async onLeave(client: Client, consented: boolean) {
@@ -64,20 +65,36 @@ export class EllibirRoom extends Room {
       await this.allowReconnection(client, 90);
       this.pushViews();
     } catch {
-      // Dönmedi → koltuğu boşalt: bot devralır.
-      this.seats.delete(client.sessionId);
-      this.game = stepEngine(this.game, (s) => this.isHumanTurn(s));
-      this.afterStep();
+      this.seats.delete(client.sessionId);  // bot devralır
+      this.runEngine();
     }
   }
 
-  // O koltukta KARAR verecek bağlı (gerçek) oyuncu var mı?
   private isHumanTurn(seat: number): boolean {
     return [...this.seats.values()].includes(seat);
   }
 
-  private afterStep() {
-    this.pushViews();
+  // Bot/sorgu adımlarını TEK TEK, aralarında gecikmeyle oynat ve her adımı push et.
+  private async runEngine() {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      while (true) {
+        const r = stepOnce(this.game, (s) => this.isHumanTurn(s));
+        if (!r.moved) break;
+        this.game = r.state;
+        this.pushViews();
+        await new Promise((res) => setTimeout(res, this.STEP_MS));
+      }
+    } catch (e: any) {
+      console.error('[runEngine] hata:', e?.message);
+    } finally {
+      this.busy = false;
+    }
+    this.checkHandEnd();
+  }
+
+  private checkHandEnd() {
     if (this.game.phase === 'handEnded') {
       console.log('[el bitti] 3sn sonra yeni el');
       if (this.handEndTimer) clearTimeout(this.handEndTimer);
@@ -88,11 +105,10 @@ export class EllibirRoom extends Room {
 
   private continueHand() {
     if (this.game.phase !== 'handEnded') return;
-    try {
-      this.game = startNextHand(this.game);
-      this.game = stepEngine(this.game, (s) => this.isHumanTurn(s));
-    } catch (e: any) { console.error('[continueHand] hata:', e?.message); return; }
-    this.afterStep();
+    try { this.game = startNextHand(this.game); }
+    catch (e: any) { console.error('[continueHand] hata:', e?.message); return; }
+    this.pushViews();
+    this.runEngine();
   }
 
   private pushViews() {
