@@ -52,8 +52,13 @@ export class EllibirRoom extends Room {
         if (!r.skipBots) this.runEngine();      // botlar gecikmeli oynar
         else this.checkHandEnd();
       } catch (e: any) {
-        if (e instanceof CmdError) client.send('moveError', { code: e.code });
-        else { console.error('[cmd] hata:', e?.message, e?.stack); client.send('moveError', { code: 'internal' }); }
+        // CmdError (protokol) veya MoveError (motor kuralı) → kod+mesaj client'a; gerçek hata → log.
+        if (e instanceof CmdError || e?.name === 'MoveError') {
+          client.send('moveError', { code: e?.code ?? 'err', message: e?.message ?? '' });
+        } else {
+          console.error('[cmd] hata:', e?.message, e?.stack);
+          client.send('moveError', { code: 'internal', message: e?.message ?? '' });
+        }
       }
     });
 
