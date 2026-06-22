@@ -10,7 +10,7 @@ import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
  * botların çekip atması istemcide animasyonlu görünür (Edge "frames" modelinin karşılığı).
  */
 export class EllibirRoom extends Room {
-  maxClients = 4;
+  maxClients = 2;   // gece deneme: 2 insan koltuğu (seat 0,1) + 2 bot (seat 2,3)
 
   private game: any;
   private seats = new Map<string, number>();   // sessionId → koltuk
@@ -70,8 +70,10 @@ export class EllibirRoom extends Room {
     }
   }
 
+  // İnsan koltuğu mu? (bağlı olmasa bile) → o koltuk sırasında oyun BEKLER, bot oynamaz.
+  // Böylece 2. oyuncu masaya gelene kadar onun koltuğunu bot çalmaz.
   private isHumanTurn(seat: number): boolean {
-    return [...this.seats.values()].includes(seat);
+    return this.humanSeats.includes(seat);
   }
 
   // Bot/sorgu adımlarını TEK TEK, aralarında gecikmeyle oynat ve her adımı push et.
