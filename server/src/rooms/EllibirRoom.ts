@@ -73,14 +73,22 @@ export class EllibirRoom extends Room {
     this.stepBots();
     this.pushViews();
     if (this.game.phase === 'handEnded') {
+      console.log('[el bitti] 3sn sonra continueHand');
       if (this.handEndTimer) clearTimeout(this.handEndTimer);
       this.handEndTimer = setTimeout(() => this.continueHand(), 3000);
     }
   }
 
   private continueHand() {
+    console.log('[continueHand] çağrıldı, phase=', this.game.phase);
     if (this.game.phase !== 'handEnded') return;
-    try { this.game = startNextHand(this.game); } catch { return; }
+    try {
+      this.game = startNextHand(this.game);
+      console.log('[continueHand] yeni el OK, phase=', this.game.phase, 'el=', this.game.handNumber);
+    } catch (e: any) {
+      console.error('[continueHand] startNextHand HATA:', e?.message, e?.stack);
+      return;
+    }
     this.stepBots();
     this.pushViews();
   }
