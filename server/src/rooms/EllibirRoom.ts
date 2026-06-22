@@ -1,5 +1,6 @@
 import { Room, Client } from '@colyseus/core';
 import { createGame, startNextHand } from '../../../packages/engine/src/game';
+import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
 
@@ -29,13 +30,16 @@ export class EllibirRoom extends Room {
     this.maxClients = this.humanSeats.length;
     const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
 
-    // Client'tan gelen kural seti (RuleConfig JSON). duo → teamMode garanti.
-    let rules: any;
-    try { rules = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
-    catch { rules = undefined; }
-    if (rules && mode === 'duo') rules.teamMode = true;
+    // Client'tan gelen kural seti (RuleConfig JSON) — eksik/bozuk alanlar olabilir →
+    // DEFAULT_RULES ile MERGE et ki state asla bozulmasın (yoksa emptyView dönerdi). duo → teamMode garanti.
+    let parsed: any = null;
+    try { parsed = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
+    catch { parsed = null; }
+    const rules: any = { ...DEFAULT_RULES, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+    if (mode === 'duo') rules.teamMode = true;
 
     this.game = createGame({ seed, playerNames: names, botSeats, rules });
+    console.log(`[EllibirRoom] mode=${mode} players=${this.game?.players?.length} phase=${this.game?.phase}`);
     this.setMetadata({ mode, humans: this.humanSeats.length });
 
     // Tek mesaj kanalı: client'ın tüm komutları "cmd" (JSON string) olarak gelir.
