@@ -1,0 +1,23 @@
+{
+  "name": "elli-bir-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "51 otorite oyun sunucusu — TS motorunu (elli-bir-engine) sarar; WebSocket + düz ClientView DTO ile Unity istemcisine hizmet verir. Server-authoritative (hile yok). Oda/eşleştirme ileride Colyseus ile.",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "smoke": "tsx src/smoke.ts",
+    "wssmoke": "tsx src/wsSmoke.ts"
+  },
+  "dependencies": {
+    "elli-bir-engine": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "@types/ws": "^8.5.13",
+    "@types/node": "^22.10.2"
+  }
+}

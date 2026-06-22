@@ -1,0 +1,23 @@
+{
+  "name": "ellibir-server",
+  "version": "1.0.0",
+  "description": "51 (Elli Bir) Colyseus gerçek-zaman oyun sunucusu",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "ts-node --transpile-only src/index.ts",
+    "dev": "ts-node-dev --transpile-only --respawn src/index.ts"
+  },
+  "dependencies": {
+    "@colyseus/core": "^0.15.17",
+    "@colyseus/ws-transport": "^0.15.0",
+    "colyseus": "^0.15.17",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "elli-bir-engine",
+  "version": "0.1.0",
+  "description": "51 (Türk kahvehane iskambil oyunu) saf TypeScript oyun motoru. Sıfır React/RN bağımlılığı; Node ve Supabase Edge Functions üzerinde çalışacak şekilde ortam-bağımsız.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "private": true
+}
