@@ -944,6 +944,9 @@ function commitOpening(
             // Çiftle açmak çift statüsü verir (zaten çiftse korunur).
             isCift: p.isCift || openMode === 'pairs',
             openedOnTurn: state.turnCount,
+            // Açış anındaki SABİT değer — sonraki perlemeler bunu DEĞİŞTİRMEZ.
+            openingValue: openMode === 'melds' ? openPoints : (p.openingValue ?? 0),
+            openingPairs: openMode === 'pairs' ? analyses.length : (p.openingPairs ?? 0),
             barajTokens: p.barajTokens + tokens,
             totalScore: p.totalScore + tokenPoints,
           }

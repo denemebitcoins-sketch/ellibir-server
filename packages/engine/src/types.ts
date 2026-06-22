@@ -78,6 +78,9 @@ export interface PlayerState {
   isCift: boolean;
   /** Açtığı tur (elden bitme tespiti için). */
   openedOnTurn: number | null;
+  /** Açış anındaki SABİT değer — perlemeyle değişmez (rozet bunu gösterir). */
+  openingValue?: number;   // seri açışı toplam puanı
+  openingPairs?: number;   // çift açışı çift adedi
   totalScore: number;
   /** Maç boyunca kazanılan baraj jetonu sayısı (yüksek açış ödülü). */
   barajTokens: number;

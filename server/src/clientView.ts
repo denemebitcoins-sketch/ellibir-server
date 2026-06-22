@@ -47,16 +47,10 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
   };
 
   const abandonedArr: number[] = Array.isArray((state as any).abandoned) ? (state as any).abandoned : [];
-  const allMelds: any[] = Array.isArray((state as any).melds) ? (state as any).melds : [];
   const mapSeat = (p: any) => {
-    // Perin solundaki rozet: oyuncunun yere açtığı grupların toplam puanı (çift modunda çift adedi).
-    const seatMelds = allMelds.filter((m) => (m.ownerSeat ?? m.owner_seat) === p.seat);
-    let omp = 0, opc = 0;
-    for (const m of seatMelds) {
-      const n = Array.isArray(m.cards) ? m.cards.length : 0;
-      if (n === 2) opc++;
-      else { try { omp += meldPoints(m.cards, rules) ?? 0; } catch { /* karışık */ } }
-    }
+    // Rozet: AÇIŞ anındaki SABİT değer (perlemeyle artmaz). El kaçla açıldıysa o gösterilir.
+    const omp = p.openingValue ?? 0;
+    const opc = p.openingPairs ?? 0;
     return {
       seat:           p.seat          ?? 0,
       // Terk edilen koltuk BOT kimliği alır: isim "Bot (eskiAd)", isBot=true (UI bot gibi gösterir).

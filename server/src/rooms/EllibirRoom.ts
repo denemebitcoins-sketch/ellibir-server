@@ -117,12 +117,15 @@ export class EllibirRoom extends Room {
         // sonra bot oynasın. Aksi halde sen atarken sıradaki bot kartın havadayken çekiyor.
         await new Promise((res) => setTimeout(res, this.STEP_MS));
         const r = stepOnce(this.game, (s) => this.isHumanTurn(s));
-        if (!r.moved) break;
+        if (!r.moved) {
+          console.log(`[runEngine] DUR phase=${this.game.phase} currentSeat=${this.game.currentSeat} sorgu=${!!this.game.sorgu} humans=${this.humanSeats}`);
+          break;
+        }
         this.game = r.state;
         this.pushViews();
       }
     } catch (e: any) {
-      console.error('[runEngine] hata:', e?.message);
+      console.error('[runEngine] HATA:', e?.message, e?.stack);
     } finally {
       this.busy = false;
     }
