@@ -19,7 +19,9 @@ export class EllibirRoom extends Room {
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
   private matchEndTimer: NodeJS.Timeout | null = null;
+  private startTimer: NodeJS.Timeout | null = null;
   private readonly MATCH_END_MS = 10000;       // maç sonu → yeni maç geri sayımı
+  private readonly START_MS = 7000;            // masa dolunca → oyun başlangıç geri sayımı
   private busy = false;                        // runEngine yeniden-giriş kilidi
   private readonly STEP_MS = 850;              // bot adımları arası gecikme (animasyon)
   private cfg: any = null;                     // createGame opts (oyun tüm insanlar gelince kurulur)
@@ -98,34 +100,61 @@ export class EllibirRoom extends Room {
     this.pushViews();
   }
 
-  /// Tüm insan koltukları dolunca oyunu kur ve ilk bot adımlarını işlet.
+  /// Tüm insan koltukları dolunca 7sn geri sayım → oyunu kur. Geri sayımda biri çıkarsa iptal.
   private startGameIfReady() {
-    if (this.game || this.seats.size < this.humanSeats.length) return;
-    this.game = createGame(this.cfg);
-    // Gerçek oyuncuların gönderdiği adları koltuklarına yaz (bot koltukları cfg'deki ad kalır).
-    for (const [seat, name] of this.seatNames) {
-      const p = this.game.players.find((pl: any) => pl.seat === seat);
-      if (p && name) p.name = name;
-    }
-    console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
-    this.runEngine();
+    if (this.game || this.startTimer || this.seats.size < this.humanSeats.length) return;
+    this.pushViews(); // "oyun başlıyor" overlay (dolu ama henüz başlamadı)
+    this.startTimer = setTimeout(() => {
+      this.startTimer = null;
+      if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
+      this.game = createGame(this.cfg);
+      for (const [seat, name] of this.seatNames) {
+        const p = this.game.players.find((pl: any) => pl.seat === seat);
+        if (p && name) p.name = name;
+      }
+      console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
+      this.pushViews();
+      this.runEngine();
+    }, this.START_MS);
   }
 
   async onLeave(client: Client, consented: boolean) {
-    if (consented) { this.seats.delete(client.sessionId); return; }
+    const seat = this.seats.get(client.sessionId);
+    if (seat == null) return;
+    // Koltuğu HEMEN bot'a devret → oyun DURMAZ (1. oyuncu beklemede kalmaz).
+    this.setAbandoned(seat, true);
+    this.runEngine();
+    this.pushViews();
+    if (consented) { this.cleanupSeat(client.sessionId, seat); return; }
     try {
-      await this.allowReconnection(client, 90);
+      await this.allowReconnection(client, 45);   // 45sn içinde dönerse koltuğu geri al
+      this.setAbandoned(seat, false);
+      this.runEngine();
       this.pushViews();
     } catch {
-      this.seats.delete(client.sessionId);  // bot devralır
-      this.runEngine();
+      this.cleanupSeat(client.sessionId, seat);   // dönmedi → bot kalıcı devralır
     }
   }
 
-  // İnsan koltuğu mu? (bağlı olmasa bile) → o koltuk sırasında oyun BEKLER, bot oynamaz.
-  // Böylece 2. oyuncu masaya gelene kadar onun koltuğunu bot çalmaz.
+  private cleanupSeat(sessionId: string, seat: number) {
+    this.seats.delete(sessionId);
+    this.seatUsers.delete(seat);
+    this.seatNames.delete(seat);
+  }
+
+  // Bir koltuğu terk(abandoned) olarak işaretle/kaldır (state'e yansır → bot devralır/bırakır).
+  private setAbandoned(seat: number, on: boolean) {
+    if (!this.game) return;
+    const arr = new Set<number>(Array.isArray(this.game.abandoned) ? this.game.abandoned : []);
+    if (on) arr.add(seat); else arr.delete(seat);
+    this.game.abandoned = [...arr];
+  }
+
+  // O koltukta KARAR verecek bağlı insan var mı? Terk edilmiş koltuk → bot oynar.
   private isHumanTurn(seat: number): boolean {
-    return this.humanSeats.includes(seat);
+    if (!this.humanSeats.includes(seat)) return false;
+    const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
+    return !ab.includes(seat);
   }
 
   // Bot/sorgu adımlarını TEK TEK, aralarında gecikmeyle oynat ve her adımı push et.
@@ -198,13 +227,15 @@ export class EllibirRoom extends Room {
   }
 
   private pushViews() {
-    // Oyun henüz başlamadıysa (duo'da 2. oyuncu beklenirken) overlay + boş masa (emptyView).
+    // Oyun henüz başlamadıysa overlay + boş masa (emptyView).
     const waiting = !this.game;
+    const starting = waiting && this.seats.size >= this.humanSeats.length; // dolu, 7sn geri sayım
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) return;
       const view: any = clientViewFor(this.game, seat);
       view.waitingForPlayers = waiting;
+      view.starting = starting;
       c.send('view', JSON.stringify(view));
     });
   }
@@ -212,5 +243,6 @@ export class EllibirRoom extends Room {
   onDispose() {
     if (this.handEndTimer) clearTimeout(this.handEndTimer);
     if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
+    if (this.startTimer) clearTimeout(this.startTimer);
   }
 }
