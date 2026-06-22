@@ -116,7 +116,8 @@ export class EllibirRoom extends Room {
   private pushViews() {
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
-      if (seat != null) c.send('view', clientViewFor(this.game, seat));
+      // JSON string gönder → Unity GameClient JsonUtility ile birebir parse eder (ServerNet ile aynı).
+      if (seat != null) c.send('view', JSON.stringify(clientViewFor(this.game, seat)));
     });
   }
 
