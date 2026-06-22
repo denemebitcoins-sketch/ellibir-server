@@ -8,9 +8,8 @@
     "dev": "ts-node-dev --transpile-only --respawn src/index.ts"
   },
   "dependencies": {
-    "@colyseus/core": "^0.17.0",
-    "@colyseus/ws-transport": "^0.17.0",
-    "colyseus": "^0.17.0",
+    "@colyseus/schema": "^4.0.7",
+    "colyseus": "0.17.10",
     "express": "^4.19.2"
   },
   "devDependencies": {
