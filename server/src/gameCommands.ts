@@ -11,7 +11,7 @@ import { HeuristicBot } from '../../packages/engine/src/bot';
 import { sortHandOrder } from './clientView';
 
 export class CmdError extends Error {
-  constructor(public code: string) { super(code); this.name = 'CmdError'; }
+  constructor(public code: string, msg?: string) { super(msg ?? code); this.name = 'CmdError'; }
 }
 
 export interface CmdResult { state: any; skipBots: boolean; noop?: boolean; }
@@ -76,23 +76,24 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
     turnGuard();
     const player = state.players?.find((p: any) => p.seat === seat);
     if (!player) throw new CmdError('invalid_move');
-    const handNoJoker = (player.hand ?? []).filter((c: any) => !c.joker);
+    // Açışa joker DAHİL — joker'e bağımlı seriler de sayılır (yoksa açış puanı düşüp açamıyordu).
+    const handCards = player.hand ?? [];
     const isCift = cmd.t === 'autoOpenCift';
     if (!player.hasOpened) {
       if (isCift) {
-        const plan = bestPairOpening(handNoJoker, state.rules);
+        const plan = bestPairOpening(handCards, state.rules);
         if (plan.count >= pairsOpeningMin(state) && plan.pairs.length > 0) {
           state = applyMove(state, { type: 'openPairs', pairs: plan.pairs });
-        } else return { state, skipBots: true, noop: true };
+        } else throw new CmdError('insufficientOpen', 'Açış için yeterli puanın yok.');
       } else {
-        const plan = bestOpening(handNoJoker, state.rules);
+        const plan = bestOpening(handCards, state.rules);
         if (plan.points >= openingThreshold(state) && plan.melds.length > 0) {
           const melds = plan.melds.map((g: any[]) => g.map((c: any) => c.id));
           state = applyMove(state, { type: 'open', melds });
-        } else return { state, skipBots: true, noop: true };
+        } else throw new CmdError('insufficientOpen', 'Açış için yeterli puanın yok.');
       }
     } else {
-      const solved = solveHand(handNoJoker, state.rules, 'cards');
+      const solved = solveHand(handCards, state.rules, 'cards');
       let remaining = (player.hand ?? []).length;
       for (const meld of solved.melds) {
         if (meld.length >= remaining) break;

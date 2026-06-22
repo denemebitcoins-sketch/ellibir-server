@@ -19,6 +19,7 @@ export class EllibirRoom extends Room {
   private handEndTimer: NodeJS.Timeout | null = null;
   private busy = false;                        // runEngine yeniden-giriş kilidi
   private readonly STEP_MS = 850;              // bot adımları arası gecikme (animasyon)
+  private cfg: any = null;                     // createGame opts (oyun tüm insanlar gelince kurulur)
 
   onCreate(options: any) {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
@@ -38,14 +39,16 @@ export class EllibirRoom extends Room {
     const rules: any = { ...DEFAULT_RULES, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
     if (mode === 'duo') rules.teamMode = true;
 
-    this.game = createGame({ seed, playerNames: names, botSeats, rules });
-    console.log(`[EllibirRoom] mode=${mode} players=${this.game?.players?.length} phase=${this.game?.phase}`);
+    // Oyunu HEMEN kurma — tüm insan koltukları dolunca başlat (yoksa bekleyen oyuncu
+    // bot'larla oynanmış bir el görür). Şimdilik sadece config sakla.
+    this.cfg = { seed, playerNames: names, botSeats, rules };
+    this.game = null;
     this.setMetadata({ mode, humans: this.humanSeats.length });
 
     // Tek mesaj kanalı: client'ın tüm komutları "cmd" (JSON string) olarak gelir.
     this.onMessage('cmd', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
-      if (seat == null) return;
+      if (seat == null || !this.game) return;   // oyun henüz başlamadı (rakip bekleniyor)
       let cmd: any;
       try { cmd = typeof raw === 'string' ? JSON.parse(raw) : raw; }
       catch { client.send('moveError', { code: 'bad_json' }); return; }
@@ -75,8 +78,16 @@ export class EllibirRoom extends Room {
     this.seats.set(client.sessionId, seat);
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
+    this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
     this.pushViews();
-    this.runEngine();   // dağıtıcı bot ise oynamaya başlar (insan sırasında durur)
+  }
+
+  /// Tüm insan koltukları dolunca oyunu kur ve ilk bot adımlarını işlet.
+  private startGameIfReady() {
+    if (this.game || this.seats.size < this.humanSeats.length) return;
+    this.game = createGame(this.cfg);
+    console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
+    this.runEngine();
   }
 
   async onLeave(client: Client, consented: boolean) {
@@ -136,8 +147,8 @@ export class EllibirRoom extends Room {
   }
 
   private pushViews() {
-    // İnsan koltukları henüz dolmadıysa (duo'da 2. oyuncu beklenirken) overlay tetiklenir.
-    const waiting = this.seats.size < this.humanSeats.length;
+    // Oyun henüz başlamadıysa (duo'da 2. oyuncu beklenirken) overlay + boş masa (emptyView).
+    const waiting = !this.game;
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) return;
