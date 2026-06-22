@@ -4,6 +4,7 @@
  */
 import { viewFor, isIslekCard, canSor, canCancelOpen, legalExtendTargets, canRetrieveJoker } from '../../packages/engine/src/game';
 import { analyzeHand } from '../../packages/engine/src/insight';
+import { meldPoints } from '../../packages/engine/src/melds';
 import type { GameState } from '../../packages/engine/src/game';
 
 export function clientViewFor(state: GameState, seat: number): Record<string, unknown> {
@@ -32,30 +33,46 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
     islek: false,
   };
 
-  const mapMeld = (m: any) => ({
-    id:        m.id        ?? '',
-    ownerSeat: m.ownerSeat ?? m.owner_seat ?? 0,
-    type:      m.type      ?? 'run',
-    cards:     Array.isArray(m.cards) ? m.cards.map(mapCard) : [],
-  });
+  const mapMeld = (m: any) => {
+    const cards = Array.isArray(m.cards) ? m.cards : [];
+    let pts = 0;
+    try { pts = meldPoints(cards, rules) ?? 0; } catch { /* karışık grup */ }
+    return {
+      id:        m.id        ?? '',
+      ownerSeat: m.ownerSeat ?? m.owner_seat ?? 0,
+      type:      m.type      ?? 'run',
+      cards:     cards.map(mapCard),
+      points:    pts,
+    };
+  };
 
   const abandonedArr: number[] = Array.isArray((state as any).abandoned) ? (state as any).abandoned : [];
-  const mapSeat = (p: any) => ({
-    seat:           p.seat          ?? 0,
-    // Terk edilen koltuk BOT kimliği alır: isim "Bot (eskiAd)", isBot=true (UI bot gibi gösterir).
-    name:           abandonedArr.includes(p.seat ?? -1) ? ('Bot (' + (p.name || '?') + ')') : (p.name ?? ''),
-    isBot:          (p.isBot ?? false) || abandonedArr.includes(p.seat ?? -1),
-    abandoned:      abandonedArr.includes(p.seat ?? -1), // oyuncu düştü → bot devraldı
-    handCount:      p.handCount     ?? 0,
-    hasOpened:      p.hasOpened     ?? false,
-    isCift:         p.isCift        ?? false,
-    totalScore:     p.totalScore    ?? 0,
-    barajTokens:    p.barajTokens   ?? 0,
-    // openMeldPoints/openPairCount/openSettled: motorda OpeningValue (settle) yok → şimdilik 0/false
-    openMeldPoints: p.openMeldPoints ?? 0,
-    openPairCount:  p.openPairCount  ?? 0,
-    openSettled:    p.openSettled   ?? false,
-  });
+  const allMelds: any[] = Array.isArray((state as any).melds) ? (state as any).melds : [];
+  const mapSeat = (p: any) => {
+    // Perin solundaki rozet: oyuncunun yere açtığı grupların toplam puanı (çift modunda çift adedi).
+    const seatMelds = allMelds.filter((m) => (m.ownerSeat ?? m.owner_seat) === p.seat);
+    let omp = 0, opc = 0;
+    for (const m of seatMelds) {
+      const n = Array.isArray(m.cards) ? m.cards.length : 0;
+      if (n === 2) opc++;
+      else { try { omp += meldPoints(m.cards, rules) ?? 0; } catch { /* karışık */ } }
+    }
+    return {
+      seat:           p.seat          ?? 0,
+      // Terk edilen koltuk BOT kimliği alır: isim "Bot (eskiAd)", isBot=true (UI bot gibi gösterir).
+      name:           abandonedArr.includes(p.seat ?? -1) ? ('Bot (' + (p.name || '?') + ')') : (p.name ?? ''),
+      isBot:          (p.isBot ?? false) || abandonedArr.includes(p.seat ?? -1),
+      abandoned:      abandonedArr.includes(p.seat ?? -1), // oyuncu düştü → bot devraldı
+      handCount:      p.handCount     ?? 0,
+      hasOpened:      p.hasOpened     ?? false,
+      isCift:         p.isCift        ?? false,
+      totalScore:     p.totalScore    ?? 0,
+      barajTokens:    p.barajTokens   ?? 0,
+      openMeldPoints: omp,
+      openPairCount:  opc,
+      openSettled:    p.openSettled   ?? false,
+    };
+  };
 
   // İŞLEK: açmamışken kendi en iyi açış perinin kartlarını işlek sayma (C# parity)
   let ownMeldIds = new Set<string>();
