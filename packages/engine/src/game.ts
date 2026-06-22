@@ -1416,6 +1416,8 @@ export function viewFor(state: GameState, seat: number): PlayerView {
       isCift: p.isCift,
       totalScore: p.totalScore,
       barajTokens: p.barajTokens,
+      openingValue: p.openingValue ?? 0,
+      openingPairs: p.openingPairs ?? 0,
     })),
   };
 }
