@@ -127,9 +127,14 @@ export class EllibirRoom extends Room {
   }
 
   private pushViews() {
+    // İnsan koltukları henüz dolmadıysa (duo'da 2. oyuncu beklenirken) overlay tetiklenir.
+    const waiting = this.seats.size < this.humanSeats.length;
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
-      if (seat != null) c.send('view', JSON.stringify(clientViewFor(this.game, seat)));
+      if (seat == null) return;
+      const view: any = clientViewFor(this.game, seat);
+      view.waitingForPlayers = waiting;
+      c.send('view', JSON.stringify(view));
     });
   }
 
