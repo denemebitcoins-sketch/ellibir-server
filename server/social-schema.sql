@@ -183,7 +183,129 @@ create policy profiles_admin_update on public.profiles
 --   update public.profiles set banned = true  where id = '<user-uuid>';
 --   update public.profiles set banned = false where id = '<user-uuid>';
 
+-- ─────────────────────────────────────────────────────────────────────
+-- 8) GİZLİLİK — profiles.allow_dm / allow_friend_req bayrakları.
+--    Oyuncu kendi gizlilik tercihini ayarlar. Varsayılan: açık (true).
+--    allow_dm=false      → kimse DM gönderemez.
+--    allow_friend_req=false → kimse arkadaşlık isteği gönderemez.
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.profiles add column if not exists allow_dm         boolean not null default true;
+alter table public.profiles add column if not exists allow_friend_req boolean not null default true;
+
+-- Online listede/profil modalında gizlilik bilgisini de çekebilmek için
+-- presence'a da aynı bayrakları koy (heartbeat'te client kendi profilinden yazar).
+alter table public.presence add column if not exists allow_dm         boolean not null default true;
+alter table public.presence add column if not exists allow_friend_req boolean not null default true;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 9) FRIENDSHIPS — arkadaşlık ilişkileri.
+--    status: 'pending' (istek gönderildi, bekliyor) | 'accepted' (arkadaş).
+--    requester istek gönderir; addressee kabul/ret eder.
+--    UNIQUE(requester,addressee): aynı yönde tek istek.
+-- ─────────────────────────────────────────────────────────────────────
+create table if not exists public.friendships (
+  id          bigint      generated always as identity primary key,
+  requester   uuid        not null references auth.users(id) on delete cascade,
+  addressee   uuid        not null references auth.users(id) on delete cascade,
+  status      text        not null default 'pending' check (status in ('pending','accepted')),
+  created_at  timestamptz not null default now(),
+  unique (requester, addressee)
+);
+
+create index if not exists friendships_requester_idx on public.friendships (requester, status);
+create index if not exists friendships_addressee_idx on public.friendships (addressee, status);
+
+alter table public.friendships enable row level security;
+
+-- Taraf olanlar (requester ya da addressee) ilişkiyi GÖRÜR.
+drop policy if exists friendships_select on public.friendships;
+create policy friendships_select on public.friendships
+  for select to authenticated
+  using (auth.uid() = requester or auth.uid() = addressee);
+
+-- Kişi YALNIZCA kendi adına (requester = ben) istek gönderebilir;
+-- ayrıca hedefin allow_friend_req=true olmalı (kapalıysa istek engellenir).
+drop policy if exists friendships_insert on public.friendships;
+create policy friendships_insert on public.friendships
+  for insert to authenticated
+  with check (
+    auth.uid() = requester
+    and exists (select 1 from public.profiles p where p.id = addressee and p.allow_friend_req = true)
+  );
+
+-- Addressee isteği kabul/ret edebilir (update status). requester de durumunu yönetebilir.
+drop policy if exists friendships_update on public.friendships;
+create policy friendships_update on public.friendships
+  for update to authenticated
+  using (auth.uid() = addressee or auth.uid() = requester)
+  with check (auth.uid() = addressee or auth.uid() = requester);
+
+-- Taraf olan (her iki yön) arkadaşlığı/isteği silebilir (reddet / arkadaşlıktan çıkar).
+drop policy if exists friendships_delete on public.friendships;
+create policy friendships_delete on public.friendships
+  for delete to authenticated
+  using (auth.uid() = requester or auth.uid() = addressee);
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 10) GELİŞMİŞ BAN SİSTEMİ — süreli (expires_at) + türlü (chat/game) +
+--     sebep + opsiyonel not + geçmiş kayıt (artan ceza için).
+--     bans tablosu: her ban bir satır (geçmiş kalıcı; revoked ile kaldırılır).
+--     profiles.{chat,game}_banned_until: ASIL kontrol noktası (now()'dan
+--     büyükse aktif ban). null = ban yok. Çok ileri tarih = kalıcı.
+--     Mevcut profiles.banned (basit bayrak) GERİYE-DÖNÜK kalır; dokunulmaz.
+--     RLS: bans select/insert/update YALNIZCA admin (profiles.role='admin').
+-- ─────────────────────────────────────────────────────────────────────
+create table if not exists public.bans (
+  id           bigint      generated always as identity primary key,
+  target_user  uuid        not null references auth.users(id) on delete cascade,
+  type         text        not null check (type in ('chat','game')),
+  reason       text        not null default '',
+  note         text        not null default '',
+  expires_at   timestamptz,                 -- null = kalıcı
+  revoked      boolean     not null default false,
+  created_by   uuid        references auth.users(id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists bans_target_idx on public.bans (target_user, type, created_at desc);
+
+alter table public.bans enable row level security;
+
+-- bans: YALNIZCA admin okur.
+drop policy if exists bans_select on public.bans;
+create policy bans_select on public.bans
+  for select to authenticated
+  using (exists (select 1 from public.profiles where id = auth.uid() and role = 'admin'));
+
+-- bans: YALNIZCA admin ekler.
+drop policy if exists bans_insert on public.bans;
+create policy bans_insert on public.bans
+  for insert to authenticated
+  with check (exists (select 1 from public.profiles where id = auth.uid() and role = 'admin'));
+
+-- bans: YALNIZCA admin günceller (revoked işaretleme).
+drop policy if exists bans_update on public.bans;
+create policy bans_update on public.bans
+  for update to authenticated
+  using (exists (select 1 from public.profiles where id = auth.uid() and role = 'admin'))
+  with check (exists (select 1 from public.profiles where id = auth.uid() and role = 'admin'));
+
+-- profiles: süreli/türlü ban "aktif until" kolonları.
+alter table public.profiles add column if not exists chat_banned_until timestamptz;
+alter table public.profiles add column if not exists game_banned_until timestamptz;
+
+-- (profiles_admin_update politikası — bölüm 7 — admin'e tüm satırlarda UPDATE
+--  verdiği için chat/game_banned_until güncellemeleri de bu politikayla geçer.)
+
+-- Herkes (giriş yapan) KENDİ chat_banned_until / game_banned_until alanını OKUYABİLSİN
+-- (client kendi durumunu bilmeli). profiles_select politikası zaten herkese açık
+-- değilse ek bir SELECT politikası gerekebilir; çoğu kurulumda profiles select
+-- "kendi satırını oku" zaten vardır. Yoksa Supabase'de ekleyin:
+--   create policy profiles_self_select on public.profiles
+--     for select to authenticated using (auth.uid() = id);
+
 -- =====================================================================
--- BİTTİ. presence + direct_messages + lobby_chat + reports tabloları,
--- profiles.gender/role/banned + presence.gender/role kolonları ve RLS hazır.
+-- BİTTİ. presence + direct_messages + lobby_chat + reports + friendships
+-- + bans tabloları; profiles.gender/role/banned/allow_dm/allow_friend_req/
+-- chat_banned_until/game_banned_until + presence.* kolonları ve RLS hazır.
 -- =====================================================================

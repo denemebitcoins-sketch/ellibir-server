@@ -45,6 +45,53 @@ export async function isBanned(userId: string | null | undefined): Promise<boole
   }
 }
 
+/**
+ * Oyundan-ban (game-ban) aktif mi? profiles.game_banned_until > now() ise true.
+ * Süreli/türlü ban sisteminin OYUN tarafı kontrolü (chat-ban oyuna girişi engellemez).
+ * Geriye-dönük: eski profiles.banned=true de hâlâ engeller.
+ */
+export async function isGameBanned(userId: string | null | undefined): Promise<boolean> {
+  if (!userId || !supabaseConfigured()) return false;
+  try {
+    const r = await fetch(
+      `${URL}/rest/v1/profiles?id=eq.${userId}&select=banned,game_banned_until`,
+      { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
+    );
+    if (!r.ok) return false;
+    const rows: any = await r.json();
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    const row = rows[0];
+    if (row?.banned === true) return true; // geriye-dönük basit bayrak
+    const until = row?.game_banned_until;
+    if (!until) return false;
+    const t = Date.parse(until);
+    return Number.isFinite(t) && t > Date.now();
+  } catch (e: any) {
+    console.error('[supabase] isGameBanned:', e?.message);
+    return false;
+  }
+}
+
+/** Konuşma-ban (chat-ban) aktif mi? profiles.chat_banned_until > now() ise true. */
+export async function isChatBanned(userId: string | null | undefined): Promise<boolean> {
+  if (!userId || !supabaseConfigured()) return false;
+  try {
+    const r = await fetch(
+      `${URL}/rest/v1/profiles?id=eq.${userId}&select=chat_banned_until`,
+      { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
+    );
+    if (!r.ok) return false;
+    const rows: any = await r.json();
+    const until = Array.isArray(rows) && rows.length > 0 ? rows[0]?.chat_banned_until : null;
+    if (!until) return false;
+    const t = Date.parse(until);
+    return Number.isFinite(t) && t > Date.now();
+  } catch (e: any) {
+    console.error('[supabase] isChatBanned:', e?.message);
+    return false;
+  }
+}
+
 /** Bir Postgres RPC'yi service-role ile çağır (add_chips / deduct_chips). */
 export async function rpc(fn: string, args: Record<string, unknown>): Promise<boolean> {
   if (!supabaseConfigured()) { console.warn(`[supabase] RPC ${fn} atlandı (env yok)`); return false; }

@@ -3,7 +3,7 @@ import { createGame, startNextHand } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { verifyToken, settleMatch, isBanned } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned } from '../supabase';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -81,6 +81,7 @@ export class EllibirRoom extends Room {
     });
 
     // Oyun içi sohbet: koltuktaki insan mesaj yollar → masadaki herkese yayınla.
+    // Konuşma-banlı (chat_banned_until > now) oyuncu engellenir (sunucu otoritesi).
     this.onMessage('chat', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
@@ -88,6 +89,15 @@ export class EllibirRoom extends Room {
       text = String(text).slice(0, 200).trim();
       if (!text) return;
       const name = this.seatNames.get(seat) ?? `Oyuncu ${seat + 1}`;
+      const uid = this.seatUsers.get(seat);
+      // Auth'lı oyuncu için chat-ban kontrolü (async; banlıysa yayınlama, gönderene bilgi ver).
+      if (uid) {
+        isChatBanned(uid).then((banned) => {
+          if (banned) { client.send('chatBlocked', { reason: 'Konuşman yasaklı.' }); return; }
+          this.broadcast('chat', { seat, name, text });
+        }).catch(() => this.broadcast('chat', { seat, name, text }));
+        return;
+      }
       this.broadcast('chat', { seat, name, text });
     });
 
@@ -97,8 +107,8 @@ export class EllibirRoom extends Room {
   // Supabase kimliği: token geçerliyse userId döner; denemede token yoksa anon (true) izin.
   async onAuth(_client: Client, options: any): Promise<any> {
     const uid = await verifyToken(options?.token);
-    // Banlı kullanıcı → girişi reddet (client onError ile "askıya alındı" gösterir).
-    if (uid && (await isBanned(uid))) {
+    // Oyundan-banlı kullanıcı → girişi reddet (client onError ile "askıya alındı" gösterir).
+    if (uid && (await isGameBanned(uid))) {
       throw new Error('banned');
     }
     return uid ?? true;
