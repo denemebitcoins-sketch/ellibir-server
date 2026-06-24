@@ -28,6 +28,23 @@ export async function verifyToken(token: string | null | undefined): Promise<str
   }
 }
 
+/** Kullanıcı banlı mı? profiles.banned okur (service-role). Hata/yoksa false (girişi engelleme). */
+export async function isBanned(userId: string | null | undefined): Promise<boolean> {
+  if (!userId || !supabaseConfigured()) return false;
+  try {
+    const r = await fetch(
+      `${URL}/rest/v1/profiles?id=eq.${userId}&select=banned`,
+      { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
+    );
+    if (!r.ok) return false;
+    const rows: any = await r.json();
+    return Array.isArray(rows) && rows.length > 0 && rows[0]?.banned === true;
+  } catch (e: any) {
+    console.error('[supabase] isBanned:', e?.message);
+    return false;
+  }
+}
+
 /** Bir Postgres RPC'yi service-role ile çağır (add_chips / deduct_chips). */
 export async function rpc(fn: string, args: Record<string, unknown>): Promise<boolean> {
   if (!supabaseConfigured()) { console.warn(`[supabase] RPC ${fn} atlandı (env yok)`); return false; }

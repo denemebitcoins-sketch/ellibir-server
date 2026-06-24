@@ -3,7 +3,7 @@ import { createGame, startNextHand } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { verifyToken, settleMatch } from '../supabase';
+import { verifyToken, settleMatch, isBanned } from '../supabase';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -97,6 +97,10 @@ export class EllibirRoom extends Room {
   // Supabase kimliği: token geçerliyse userId döner; denemede token yoksa anon (true) izin.
   async onAuth(_client: Client, options: any): Promise<any> {
     const uid = await verifyToken(options?.token);
+    // Banlı kullanıcı → girişi reddet (client onError ile "askıya alındı" gösterir).
+    if (uid && (await isBanned(uid))) {
+      throw new Error('banned');
+    }
     return uid ?? true;
   }
 
