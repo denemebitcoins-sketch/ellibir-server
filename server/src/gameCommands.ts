@@ -127,13 +127,10 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
     state = applyMove(state, { type: 'open', melds: groups.map((g) => g.map((c: any) => c.id)) });
 
   } else if (cmd.t === 'dizSeri' || cmd.t === 'dizCift') {
+    // SADECE görsel sıralama (dizModes). Çift OLMAK kurallıdır (çiftle açma / pickup /
+    // sorgu) — "çift diz" demek çift YAPMAZ; isCift'e dokunulmaz.
     state.dizModes = state.dizModes || {};
-    const cift = cmd.t === 'dizCift';
-    state.dizModes[seat] = cift ? 'cift' : 'seri';
-    // Çift moduna geçmek = ÇİFT TAAHHÜDÜ → açamazsa sabit 200×2 ceza (isCift).
-    // Açmadıysa seri'ye dönerse taahhüt kalkar; açmışsa (kalıcı çift) dokunma.
-    const pl = state.players?.find((p: any) => p.seat === seat);
-    if (pl && !pl.hasOpened) pl.isCift = cift;
+    state.dizModes[seat] = cmd.t === 'dizSeri' ? 'seri' : 'cift';
     skipBots = true;
 
   } else if (cmd.t === 'leave') {
