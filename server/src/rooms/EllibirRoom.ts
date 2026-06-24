@@ -79,6 +79,17 @@ export class EllibirRoom extends Room {
       }
     });
 
+    // Oyun içi sohbet: koltuktaki insan mesaj yollar → masadaki herkese yayınla.
+    this.onMessage('chat', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
+      text = String(text).slice(0, 200).trim();
+      if (!text) return;
+      const name = this.seatNames.get(seat) ?? `Oyuncu ${seat + 1}`;
+      this.broadcast('chat', { seat, name, text });
+    });
+
     console.log(`[EllibirRoom] oluştu seed=${seed} humans=${this.humanSeats}`);
   }
 
