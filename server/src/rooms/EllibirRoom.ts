@@ -20,6 +20,7 @@ export class EllibirRoom extends Room {
   private handEndTimer: NodeJS.Timeout | null = null;
   private matchEndTimer: NodeJS.Timeout | null = null;
   private startTimer: NodeJS.Timeout | null = null;
+  private startAt = 0;                          // başlangıç geri sayımının başladığı an
   private readonly MATCH_END_MS = 10000;       // maç sonu → yeni maç geri sayımı
   private readonly START_MS = 7000;            // masa dolunca → oyun başlangıç geri sayımı
   private busy = false;                        // runEngine yeniden-giriş kilidi
@@ -114,8 +115,11 @@ export class EllibirRoom extends Room {
   /// Tüm insan koltukları dolunca 7sn geri sayım → oyunu kur. Geri sayımda biri çıkarsa iptal.
   private startGameIfReady() {
     if (this.game || this.startTimer || this.seats.size < this.humanSeats.length) return;
+    this.startAt = Date.now();
     this.pushViews(); // "oyun başlıyor" overlay (dolu ama henüz başlamadı)
+    const tick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000); // canlı geri sayım
     this.startTimer = setTimeout(() => {
+      clearInterval(tick);
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
       this.game = createGame(this.cfg);
@@ -266,6 +270,7 @@ export class EllibirRoom extends Room {
       view.waitingForPlayers = waiting;
       view.starting = starting;
       view.seated = seated;   // bekleme ekranında masadaki oyuncular
+      view.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0; // geri sayım
       c.send('view', JSON.stringify(view));
     });
   }
