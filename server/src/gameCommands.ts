@@ -144,6 +144,9 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
 
   } else if (cmd.t === 'rejoin') {
     if (state.phase === 'matchEnded') throw new CmdError('match_ended');
+    // 3 dk geçtiyse koltuk geri alınamaz (Edge ile parite).
+    const at = state.abandonedAt?.[seat];
+    if (at && Date.now() - at > 180000) throw new CmdError('reconnect_timeout');
     state.abandoned = (state.abandoned || []).filter((s: number) => s !== seat);
     skipBots = true;
 
