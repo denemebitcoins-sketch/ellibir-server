@@ -240,12 +240,21 @@ export class EllibirRoom extends Room {
     // Oyun henüz başlamadıysa overlay + boş masa (emptyView).
     const waiting = !this.game;
     const starting = waiting && this.seats.size >= this.humanSeats.length; // dolu, 7sn geri sayım
+    const filled = new Set(this.seats.values());
+    // Beklerken masada oturanları göster: insan koltukları (dolu=oturdu, boş=bekleniyor) + botlar.
+    const seated = [0, 1, 2, 3].map((s) => ({
+      seat: s,
+      human: this.humanSeats.includes(s),
+      filled: this.humanSeats.includes(s) ? filled.has(s) : true,  // bot koltukları "dolu"
+      name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
+    }));
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) return;
       const view: any = clientViewFor(this.game, seat);
       view.waitingForPlayers = waiting;
       view.starting = starting;
+      view.seated = seated;   // bekleme ekranında masadaki oyuncular
       c.send('view', JSON.stringify(view));
     });
   }

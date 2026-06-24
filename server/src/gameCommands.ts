@@ -128,7 +128,12 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
 
   } else if (cmd.t === 'dizSeri' || cmd.t === 'dizCift') {
     state.dizModes = state.dizModes || {};
-    state.dizModes[seat] = cmd.t === 'dizSeri' ? 'seri' : 'cift';
+    const cift = cmd.t === 'dizCift';
+    state.dizModes[seat] = cift ? 'cift' : 'seri';
+    // Çift moduna geçmek = ÇİFT TAAHHÜDÜ → açamazsa sabit 200×2 ceza (isCift).
+    // Açmadıysa seri'ye dönerse taahhüt kalkar; açmışsa (kalıcı çift) dokunma.
+    const pl = state.players?.find((p: any) => p.seat === seat);
+    if (pl && !pl.hasOpened) pl.isCift = cift;
     skipBots = true;
 
   } else if (cmd.t === 'leave') {
