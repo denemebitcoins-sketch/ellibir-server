@@ -171,3 +171,47 @@ export function solveHand(
     cardCount: result.cards,
   };
 }
+
+/**
+ * SEÇİLEN kartları TAMAMINI kullanacak şekilde geçerli per/küt (≥3 kart) gruplarına böler.
+ * GERİ İZLEMELİ (backtracking): aday perler arasından, HER kartı tam bir kez kapsayan bir
+ * bölümleme aranır; varsa gruplar (puan büyükten küçüğe), yoksa null döner.
+ * (Client GameClient.PartitionMelds/SolvePartition'ın TS/engine karşılığı — açış komutunda
+ * seçili kart id'lerini çoklu meld'e bölmek için. Çift bu yolla AÇILMAZ; çift açış openPairs ile.)
+ */
+export function partitionSelectedMelds(
+  cards: readonly Card[],
+  rules: RuleConfig,
+): Card[][] | null {
+  const n = cards.length;
+  if (n < rules.minSetSize) return null; // en küçük per minSetSize/minRunLength
+  const all = (1 << n) - 1;
+  // Tüm aday perleri (≥3 kart; çift değil) maske olarak üret.
+  const candidates = enumerateCandidateMelds(cards, rules)
+    .sort((a, b) => b.points - a.points);
+
+  const memo = new Map<number, Card[][] | null>();
+  const solve = (used: number): Card[][] | null => {
+    if (used === all) return [];
+    if (memo.has(used)) return memo.get(used)!;
+    // Henüz kapanmamış EN KÜÇÜK indeksli kartı kapsayan bir aday seçmeye zorla
+    // (deterministik + dallanmayı kırpar).
+    let firstFree = 0;
+    while (firstFree < n && (used & (1 << firstFree)) !== 0) firstFree++;
+    const firstBit = 1 << firstFree;
+    for (const cand of candidates) {
+      if ((cand.mask & used) !== 0) continue;
+      if ((cand.mask & firstBit) === 0) continue;
+      const sub = solve(used | cand.mask);
+      if (sub) {
+        const ans = [cand.cards, ...sub];
+        memo.set(used, ans);
+        return ans;
+      }
+    }
+    memo.set(used, null);
+    return null;
+  };
+
+  return solve(0);
+}

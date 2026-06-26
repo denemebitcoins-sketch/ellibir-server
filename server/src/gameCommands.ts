@@ -7,6 +7,7 @@ import {
 import { bestOpening, bestPairOpening } from '../../packages/engine/src/insight';
 import { solveHand } from '../../packages/engine/src/solver';
 import { analyzeCards, meldPoints } from '../../packages/engine/src/melds';
+import { partitionSelectedMelds } from '../../packages/engine/src/solver';
 import { HeuristicBot } from '../../packages/engine/src/bot';
 import { sortHandOrder, reconcileHandOrder } from './clientView';
 
@@ -44,8 +45,22 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
     turnGuard();
     if (!Array.isArray(cmd.cards)) throw new CmdError('invalid_move');
     const player = state.players?.find((p: any) => p.seat === seat);
-    if (player?.hasOpened) state = applyMove(state, { type: 'meld', cards: cmd.cards });
-    else state = applyMove(state, { type: 'open', melds: [cmd.cards] });
+    if (player?.hasOpened) {
+      // Açıktan sonra: seçili kartlar TEK yeni perde indirilir (engine meld doğrular).
+      state = applyMove(state, { type: 'meld', cards: cmd.cards });
+    } else {
+      // AÇIŞ: seçili kart id'leri ÇOKLU geçerli per/küt grubuna BÖLÜNÜR (client PartitionMelds
+      // karşılığı). Tek grup olarak göndermek (eski hata) seri+küt karışık seçimi geçersiz
+      // kılıp engine'i reddettiriyordu (client 101 puan görse de). Her grup ayrı meld açılır.
+      const byId = new Map((player?.hand ?? []).map((c: any) => [c.id, c]));
+      const selCards = (cmd.cards as string[]).map((id) => byId.get(id)).filter(Boolean);
+      if (selCards.length !== cmd.cards.length) throw new CmdError('invalid_move', 'Seçili kart elde değil.');
+      const groups = partitionSelectedMelds(selCards, state.rules);
+      if (!groups) {
+        throw new CmdError('insufficientOpen', 'Seçili kartlar geçerli per/küt gruplarına bölünemedi.');
+      }
+      state = applyMove(state, { type: 'open', melds: groups.map((g) => g.map((c: any) => c.id)) });
+    }
 
   } else if (cmd.t === 'play') {
     turnGuard();
