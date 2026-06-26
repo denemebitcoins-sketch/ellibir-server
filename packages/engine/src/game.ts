@@ -17,7 +17,7 @@ import { buildDeck, createRng, deal, shuffle } from './deck';
 import { analyzeCards, analyzePair, analyzeRun, analyzeSet } from './melds';
 import { applyHandResult, computeHandResult } from './scoring';
 import { analyzeHand, bestOpeningWithCard, bestPairOpening } from './insight';
-import { enumerateCandidateMelds } from './solver';
+import { enumerateCandidateMelds, solveHand } from './solver';
 
 let meldCounter = 0;
 function nextMeldId(): string {
@@ -966,8 +966,24 @@ function applyOpen(state: GameState, meldIds: readonly (readonly CardId[])[]): G
 
   const { groups, usedIds } = collectOpeningGroups(player, meldIds);
   const minPoints = openingThreshold(state);
-  const analyses = canOpen(groups, state.rules, minPoints);
+  // PER PER (PARÇA) AÇIŞ — kullanıcı tasarımı: açış puan eşiği YALNIZ indirilen
+  // perlerin toplamına DEĞİL, oyuncunun ELİNDEKİ açılabilir TOPLAM puana bağlıdır.
+  // Örn elde 30+41+27=98, açar 84 → önce yalnız 30'luk peri açmak (parça) KABUL
+  // (elde toplam 98 ≥ 84). İlk parça tek başına eşiğin altında olsa bile, kalan elde
+  // açılabilir perlerle birlikte eşik karşılanıyorsa açılır.
+  // Yapı doğrulaması (her grup geçerli per) eşik=0 ile yapılır; PUAN eşiği =
+  //   (seçilen perlerin GERÇEK toplamı) + (kalan eldeki açılabilir en iyi toplam).
+  // Seçilen perler her zaman TAM sayılır (solver kalan eli az çözse bile gerilemez).
+  const analyses = canOpen(groups, state.rules, 0);
   if (!analyses) {
+    throw new MoveError('openingPoints', 'Seçili kartlar geçerli per değil.');
+  }
+  const selectedPoints = analyses.reduce((s, a) => s + a.points, 0);
+  const usedSet = new Set(usedIds);
+  const remaining = player.hand.filter((card) => !usedSet.has(card.id));
+  const remainingBest = solveHand(remaining, state.rules, 'points').totalPoints;
+  const handOpenable = selectedPoints + remainingBest;
+  if (handOpenable < minPoints) {
     throw new MoveError('openingPoints', `Açış için en az ${minPoints} puan gerekli.`);
   }
   return commitOpening(state, player, analyses, usedIds, 'melds');
