@@ -101,7 +101,9 @@ export class HeuristicBot implements MoveProvider {
     if (strongHand) score += 1;          // güçlü el → riski kaldırır
     if (view.hand.length <= 3) score -= 2; // el bitiyor → çift olup takılma
 
-    return score >= 1; // eşik: net pozitifte verme (çift ol), aksi halde ver
+    // sorguVer = "VER mi?" döndürür. score ≥ 1 → çift olmaya GÜCÜM var → ÇİFT OL (VERME=false).
+    // score < 1 → çift olmaya değmez → VER (true). (Önceki kod TERS idi: hep yanlış cevap veriyordu.)
+    return score < 1;
   }
 
   /* ---------------------- profil / puan duyarlılığı ---------------------- */
