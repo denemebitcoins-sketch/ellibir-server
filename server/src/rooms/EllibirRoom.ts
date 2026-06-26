@@ -126,9 +126,12 @@ export class EllibirRoom extends Room {
 
   onJoin(client: Client, options: any) {
     const taken = new Set(this.seats.values());
-    const seat = this.humanSeats.find((s) => !taken.has(s));
+    // İZLE ile gelen (spectate:true) → koltuk boş OLSA BİLE oturtma; izleyici kalır.
+    // Oturmak için sonradan 'sit' mesajı gönderilir. (HEMEN OYNA/davet-kabul spectate yollamaz → otomatik oturur.)
+    const spectate = options?.spectate === true || options?.spectate === 'true';
+    const seat = spectate ? null : this.humanSeats.find((s) => !taken.has(s));
     if (seat == null) {
-      // Boş insan koltuğu yok → İZLEYİCİ olarak kabul (koltuksuz, seats Map'e konmaz).
+      // Boş insan koltuğu yok (veya izleyici) → İZLEYİCİ olarak kabul (koltuksuz, seats Map'e konmaz).
       this.spectators.add(client.sessionId);
       client.send('seat', { seat: -1 });
       console.log(`[onJoin] izleyici, izleyici sayısı=${this.spectators.size}`);
