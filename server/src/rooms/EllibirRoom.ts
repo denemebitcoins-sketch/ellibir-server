@@ -210,7 +210,7 @@ export class EllibirRoom extends Room {
     this.pushViews();
     if (consented) { this.cleanupSeat(client.sessionId, seat); return; }
     try {
-      await this.allowReconnection(client, 180);  // 3 dk içinde dönerse (uygulama kapansa bile) koltuğu geri al
+      await this.allowReconnection(client, 300);  // 5 dk içinde dönerse (uygulama kapansa/ağ değişse bile) koltuğu geri al
       this.setAbandoned(seat, false);
       this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
       this.runEngine();
