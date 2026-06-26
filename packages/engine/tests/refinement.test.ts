@@ -242,7 +242,7 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     expect(b1).toMatchObject({ baseKind: 'hand', base: 30, amount: 240 });
   });
 
-  it('C5: deste bitti + taahhütlü — açan/çift elinde kalanı, taahhütsüz 200 öder (çarpansız)', () => {
+  it('C5: deste bitti + taahhütlü — açan elinde kalanı, ÇİFT-AÇAMAYAN 200×2=400, taahhütsüz 200', () => {
     let state = createGame({ seed: 1, dealerSeat: 3 });
     state = rig(state, {
       currentSeat: 0,
@@ -253,7 +253,7 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
       hands: {
         0: [c('S', 13)], // taahhütsüz → 200
         1: [c('H', 10), c('D', 7)], // açan → elde 17
-        2: [c('D', 9, 0)], // çift (açmamış) → elde 9
+        2: [c('D', 9, 0)], // çift İLAN ETMİŞ ama AÇAMAMIŞ → 200×2 = 400
         3: [c('D', 1)], // taahhütsüz → 200
       },
     });
@@ -261,11 +261,41 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     const next = applyMove(state, { type: 'drawStock' });
     expect(next.phase).toBe('handEnded');
     expect(next.lastHandResult?.winnerSeat).toBeNull();
-    expect(next.lastHandResult?.penalties).toEqual([200, 17, 9, 200]);
-    // Çarpan uygulanmaz (bitiren yok).
-    for (const b of next.lastHandResult!.breakdown) {
+    // Çift ilan edip açamayan (seat 2) deste bitince de çift-açamama bedelini öder (200×2=400).
+    expect(next.lastHandResult?.penalties).toEqual([200, 17, 400, 200]);
+    // Yalnız çift-açamayan koltukta çarpan; diğerleri çarpansız.
+    const bd = next.lastHandResult!.breakdown;
+    expect(bd.find((b) => b.seat === 2)?.multipliers).toEqual([{ label: 'çift', factor: 2 }]);
+    for (const b of bd.filter((x) => x.seat !== 2)) {
       expect(b.multipliers).toEqual([]);
     }
+  });
+
+  it('C5b: deste bitti — AÇMIŞ çiftçi de elinde kalanı × 2 (çift) öder', () => {
+    let state = createGame({ seed: 1, dealerSeat: 3 });
+    state = rig(state, {
+      currentSeat: 0,
+      phase: 'draw',
+      stock: [],
+      discard: [c('H', 2)],
+      hands: {
+        0: [c('S', 13)], // taahhütsüz → 200
+        1: [c('H', 10), c('D', 7)], // açmış çiftçi → elde 17 × 2 = 34
+        2: [c('C', 5)], // taahhütsüz → 200
+        3: [c('D', 1)], // taahhütsüz → 200
+      },
+    });
+    // seat 1: çift ilan etmiş VE açmış (openMode='pairs', isCift, hasOpened).
+    state.players = state.players.map((p) =>
+      p.seat === 1 ? { ...p, hasOpened: true, openMode: 'pairs', isCift: true } : p,
+    );
+    const next = applyMove(state, { type: 'drawStock' });
+    expect(next.lastHandResult?.winnerSeat).toBeNull();
+    // seat1 açmış çiftçi: 17 × 2 = 34; taahhütsüzler 200.
+    expect(next.lastHandResult?.penalties).toEqual([200, 34, 200, 200]);
+    expect(next.lastHandResult!.breakdown.find((b) => b.seat === 1)?.multipliers).toEqual([
+      { label: 'çift', factor: 2 },
+    ]);
   });
 
   it('C7: çarpanlar İSTİSNASIZDIR — katlamali=false bile ×2leri etkilemez', () => {

@@ -11,10 +11,11 @@ import { handCardPenalty } from './melds';
  * EŞLİ (teamMode): bitirenin ortağı, durumu ne olursa olsun CEZA YEMEZ —
  * bitiş takım adınadır; diğer ödeyenler kendi tabanlarından hesaplanır.
  *
- * DESTE BİTTİ (winnerSeat=null):
+ * DESTE BİTTİ (winnerSeat=null) — bitiren yok, rakip okey/çift çarpanı YOK:
  *  - kimse taahhütte değilse (açan yok, çift yok) → puansız;
- *  - taahhütlü varsa → açanlar/çiftler elinde kalanı, taahhütsüzler
- *    STOCK_OUT_PENALTY öder (çarpansız — bitiren yok).
+ *  - KESİN ÇİFT (isCift) → tabanı × CARPAN_YIYEN_CIFT; taban açmışsa elde kalan,
+ *    açamamışsa KAFA_CEZASI (örn açık 31×2=62; kapalı 200×2=400);
+ *  - açmış (çift değil) → elde kalan; taahhütsüz → STOCK_OUT_PENALTY.
  */
 export function computeHandResult(
   state: GameState,
@@ -64,11 +65,24 @@ export function computeHandResult(
     const anyCommitted = state.players.some((p) => p.hasOpened || p.isCift);
     if (anyCommitted) {
       for (const player of state.players) {
-        const committed = player.hasOpened || player.isCift;
-        const baseKind: PenaltyBreakdown['baseKind'] = committed ? 'hand' : 'closed';
-        const base = committed ? handPoints(player) : rules.scoring.stockOutPenalty;
-        penalties[player.seat] = base;
-        breakdown.push({ seat: player.seat, baseKind, base, multipliers: [], amount: base });
+        // KESİN ÇİFT (isCift): el nasıl biterse bitsin çift-yiyen çarpanını öder.
+        //  - AÇMIŞ çift  → (elde kalan) × CARPAN_YIYEN_CIFT  (örn 31×2).
+        //  - AÇAMAMIŞ çift → KAFA_CEZASI(200) × CARPAN_YIYEN_CIFT = 400.
+        // (Bitiren yoktur → rakip okey/çift çarpanı YOKTUR; yalnız kendi çift çarpanı.)
+        // Açmış (çift olmayan) → elde kalan; taahhütsüz → STOCK_OUT_PENALTY.
+        const baseKind: PenaltyBreakdown['baseKind'] =
+          player.hasOpened ? 'hand' : 'closed';
+        const base = player.hasOpened
+          ? handPoints(player)
+          : player.isCift
+            ? rules.scoring.basePenalty
+            : rules.scoring.stockOutPenalty;
+        const multipliers: PenaltyBreakdown['multipliers'] = player.isCift
+          ? [{ label: 'çift', factor: rules.scoring.carpanYiyenCift }]
+          : [];
+        const amount = multipliers.reduce((a, m) => a * m.factor, base);
+        penalties[player.seat] = amount;
+        breakdown.push({ seat: player.seat, baseKind, base, multipliers, amount });
       }
     }
   }

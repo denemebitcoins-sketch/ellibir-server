@@ -49,7 +49,9 @@ export interface ScoringConfig {
   carpanBitirenCift: number;
   /** CARPAN_OKEY_BITIS: son atılan kart okeyse çarpan (role bakmaz). */
   carpanOkeyBitis: number;
-  /** CARPAN_YIYEN_CIFT: ceza yiyen çiftçiyse çarpan. */
+  /** CARPAN_YIYEN_CIFT: ceza yiyen KESİN ÇİFT (isCift) için çarpan. El nasıl biterse
+   *  bitsin (normal-bitiş / deste-bitti / başkası bitirdi) uygulanır: taban açmışsa elde
+   *  kalan, açamamışsa KAFA_CEZASI; örn açık 31×2=62, kapalı 200×2=400. */
   carpanYiyenCift: number;
 }
 
