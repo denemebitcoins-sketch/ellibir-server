@@ -1,7 +1,7 @@
 import { Room, Client } from '@colyseus/core';
 import { createGame, startNextHand } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
-import { clientViewFor } from '../clientView';
+import { clientViewFor, clientViewForSpectator } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
 import { verifyToken, settleMatch, isGameBanned, isChatBanned } from '../supabase';
 
@@ -16,6 +16,7 @@ export class EllibirRoom extends Room {
 
   private game: any;
   private seats = new Map<string, number>();   // sessionId → koltuk
+  private spectators = new Set<string>();      // sessionId → izleyici (koltuksuz, seat=-1)
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
   private matchEndTimer: NodeJS.Timeout | null = null;
@@ -38,7 +39,9 @@ export class EllibirRoom extends Room {
 
     // solo: 1 insan (seat 0) + 3 bot. duo (eşli): 2 insan PARTNER (seat 0,2) + 2 bot (seat 1,3).
     this.humanSeats = mode === 'duo' ? [0, 2] : [0];
-    this.maxClients = this.humanSeats.length;
+    // İnsan koltukları + izleyici kapasitesi (toplam 8: ör. 4 koltuk + birkaç izleyici).
+    // humanSeats sayımına DOKUNMAZ — startGameIfReady yalnız gerçek koltukları sayar.
+    this.maxClients = 8;
     const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
 
     // Client'tan gelen kural seti (RuleConfig JSON) — eksik/bozuk alanlar olabilir →
@@ -101,6 +104,13 @@ export class EllibirRoom extends Room {
       this.broadcast('chat', { seat, name, text });
     });
 
+    // İzleyici/koltuksuz oyuncu boş koltuğa oturur. raw: { seat?, playerName? }.
+    this.onMessage('sit', (client, raw) => {
+      let msg: any = raw;
+      if (typeof raw === 'string') { try { msg = JSON.parse(raw); } catch { msg = {}; } }
+      this.trySit(client, msg?.seat, { playerName: msg?.playerName });
+    });
+
     console.log(`[EllibirRoom] oluştu seed=${seed} humans=${this.humanSeats}`);
   }
 
@@ -116,13 +126,49 @@ export class EllibirRoom extends Room {
 
   onJoin(client: Client, options: any) {
     const taken = new Set(this.seats.values());
-    const seat = this.humanSeats.find((s) => !taken.has(s)) ?? this.seats.size;
+    const seat = this.humanSeats.find((s) => !taken.has(s));
+    if (seat == null) {
+      // Boş insan koltuğu yok → İZLEYİCİ olarak kabul (koltuksuz, seats Map'e konmaz).
+      this.spectators.add(client.sessionId);
+      client.send('seat', { seat: -1 });
+      console.log(`[onJoin] izleyici, izleyici sayısı=${this.spectators.size}`);
+      this.pushViews();
+      return;
+    }
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
     if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
+    this.pushViews();
+  }
+
+  /** İzleyiciyi/koltuksuzu boş bir koltuğa oturt ('sit' mesajı). Oyun başlamadan (game==null) izinli. */
+  private trySit(client: Client, rawSeat: any, options: any) {
+    if (this.seats.has(client.sessionId)) return; // zaten oturuyor
+    if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+    const taken = new Set(this.seats.values());
+    const free = this.humanSeats.filter((s) => !taken.has(s));
+    if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
+
+    let seat: number;
+    const wanted = Number(rawSeat);
+    if (Number.isInteger(wanted) && free.includes(wanted)) {
+      seat = wanted;
+    } else if (free.length === 1) {
+      seat = free[0]!;            // tek boş koltuk → otomatik otur
+    } else {
+      client.send('sitError', { reason: 'koltuk seç (raw.seat zorunlu)' }); return; // >1 boş, seçim yok
+    }
+
+    this.spectators.delete(client.sessionId);
+    this.seats.set(client.sessionId, seat);
+    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
+    client.send('seat', { seat });
+    console.log(`[sit] koltuk=${seat}, dolu=`, [...this.seats.values()]);
+    this.startGameIfReady();
     this.pushViews();
   }
 
@@ -149,7 +195,11 @@ export class EllibirRoom extends Room {
 
   async onLeave(client: Client, consented: boolean) {
     const seat = this.seats.get(client.sessionId);
-    if (seat == null) return;
+    if (seat == null) {
+      // İzleyici ayrıldı (koltuğu yok) → izleyici listesinden çıkar.
+      if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
+      return;
+    }
     // Koltuğu HEMEN bot'a devret → oyun DURMAZ (1. oyuncu beklemede kalmaz).
     this.setAbandoned(seat, true);
     this.logEvent(`${this.nameOfSeat(seat)} oyundan düştü — bot devraldı`);
@@ -279,7 +329,16 @@ export class EllibirRoom extends Room {
     }));
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
-      if (seat == null) return;
+      if (seat == null) {
+        // İzleyici: gizli el YOK, yalnız masadaki açık bilgi (sıra/skor/açık perler).
+        const sv: any = clientViewForSpectator(this.game);
+        sv.waitingForPlayers = waiting;
+        sv.starting = starting;
+        sv.seated = seated;
+        sv.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
+        c.send('view', JSON.stringify(sv));
+        return;
+      }
       const view: any = clientViewFor(this.game, seat);
       view.waitingForPlayers = waiting;
       view.starting = starting;

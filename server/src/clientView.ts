@@ -238,6 +238,74 @@ function findCardById(state: any, cardId: string | undefined | null): any {
   return null;
 }
 
+/**
+ * İZLEYİCİ (spectator) görünümü: seat=-1. Hiçbir gizli el sızdırılmaz —
+ * yalnız masadaki AÇIK bilgi (oturanlar/skorlar, sıra, açık perler, ıskarta, deste sayıları).
+ * myHand DAİMA boş; kişisel aksiyon bayrakları kapalı. Mevcut oyuncu view'leri etkilenmez.
+ */
+export function clientViewForSpectator(state: GameState): Record<string, unknown> {
+  const base = emptyView(-1);
+  if (!state || !Array.isArray((state as any).players)) return base;
+
+  const rules: any = (state as any).rules ?? {};
+  // Açık per bilgisi için seat 0 view'ını temel al (gizli el ATILIR, sadece masadaki açık veriler alınır).
+  let v: any = null;
+  try { v = viewFor(state as any, 0); } catch { v = null; }
+
+  const mapCard = (c: any) => c == null ? null : {
+    id: c.id ?? '', label: c.label ?? '',
+    red: c.suit === 'H' || c.suit === 'D',
+    joker: c.joker ?? false, suit: c.suit ?? '', rank: c.rank ?? 0, islek: false,
+  };
+  const mapMeld = (m: any) => {
+    const cards = Array.isArray(m.cards) ? m.cards : [];
+    let pts = 0; try { pts = meldPoints(cards, rules) ?? 0; } catch { /* karışık */ }
+    return { id: m.id ?? '', ownerSeat: m.ownerSeat ?? 0, type: m.type ?? 'run', cards: cards.map(mapCard), points: pts };
+  };
+  const abandonedArr: number[] = Array.isArray((state as any).abandoned) ? (state as any).abandoned : [];
+  const mapSeat = (p: any) => {
+    const omp = p.openingValue ?? 0;
+    const opc = p.openingPairs ?? 0;
+    return {
+      seat: p.seat ?? 0,
+      name: abandonedArr.includes(p.seat ?? -1) ? ('Bot (' + (p.name || '?') + ')') : (p.name ?? ''),
+      isBot: (p.isBot ?? false) || abandonedArr.includes(p.seat ?? -1),
+      abandoned: abandonedArr.includes(p.seat ?? -1),
+      handCount: p.handCount ?? 0,
+      hasOpened: p.hasOpened ?? false,
+      isCift: p.isCift ?? false,
+      totalScore: p.totalScore ?? 0,
+      barajTokens: p.barajTokens ?? 0,
+      openMeldPoints: omp,
+      openPairCount: opc,
+      openSettled: (p.hasOpened ?? false) && (omp > 0 || opc > 0),
+    };
+  };
+
+  return {
+    ...base,
+    spectator: true,
+    phase: state.phase ?? 'draw',
+    currentSeat: state.currentSeat ?? 0,
+    handNumber: state.handNumber ?? 1,
+    totalHands: rules?.totalHands ?? 5,
+    teamMode: rules?.teamMode ?? false,
+    melds: v && Array.isArray(v.melds) ? v.melds.map(mapMeld) : [],
+    seats: Array.isArray((state as any).players) ? (state as any).players.map(mapSeat) : [],
+    hasDiscard: ((v?.discardCount ?? state.discard?.length ?? 0) as number) > 0,
+    discardTop: mapCard(v?.discardTop ?? (state.discard?.[state.discard.length - 1] ?? null)),
+    discardCount: v?.discardCount ?? state.discard?.length ?? 0,
+    stockCount: v?.stockCount ?? state.stock?.length ?? 0,
+    matchWinnerSeat: (state as any).matchWinnerSeat ?? -1,
+    logMessages: Array.isArray((state as any).matchLog) ? (state as any).matchLog.slice() : [],
+    gostergeKart: v?.gostergeKart ? mapCard(v.gostergeKart) : null,
+    gostergeShown: v?.gostergeShown ?? false,
+    sheet: Array.isArray((state as any).sheet)
+      ? (state as any).sheet.map((e: any) => ({ hand: e.hand ?? 0, seat: e.seat ?? 0, kind: e.kind ?? '', amount: e.amount ?? 0 }))
+      : [],
+  };
+}
+
 function emptyView(seat: number): Record<string, unknown> {
   return {
     seat, phase: 'draw', currentSeat: 0, yourTurn: false,
