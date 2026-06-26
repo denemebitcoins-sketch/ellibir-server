@@ -198,22 +198,30 @@ export function stepOnce(state: any, isHumanTurn: (seat: number) => boolean): { 
   const abandoned: number[] = Array.isArray(state.abandoned) ? state.abandoned : [];
 
   // SORGU: karar bir bot'ta/terk'te ise otomatik yanıtla.
+  // Kararı BOT'un kendi mantığı (HeuristicBot.nextMove → sorguVer) verir; burada
+  // hardcoded 'verme' YOK (eski kod hasOpened değilse hep 'verme' diyordu — KÖK BUG).
   if (state.sorgu) {
     const sg = state.sorgu;
-    const sorulanP = state.players?.find((p: any) => p.seat === sg.sorulanSeat);
-    let decider: number; let moveObj: any;
-    if (sg.asama === 'ortakGorus') {
-      decider = sg.partnerSeat;
-      moveObj = { type: 'sorguOrtakGorus', gorus: sorulanP?.hasOpened ? 'ver' : 'verme' };
-    } else if (sg.asama === 'cevap') {
-      decider = sg.sorulanSeat;
-      const ver = sorulanP?.hasOpened || sg.partnerGorus === 'ver';
-      moveObj = { type: 'sorguCevap', cevap: ver ? 'ver' : 'verme' };
-    } else {
-      decider = sg.askerSeat; moveObj = { type: 'sorguSonuc', al: false };
-    }
+    let decider: number;
+    if (sg.asama === 'ortakGorus') decider = sg.partnerSeat;
+    else if (sg.asama === 'cevap') decider = sg.sorulanSeat;
+    else decider = sg.askerSeat;
     if (isHumanTurn(decider) && !abandoned.includes(decider)) return { state, moved: false };
-    return { state: applyMove(state, moveObj), moved: true };
+    // Karar koltuğunun gözünden bot kararını üret (insan değilse).
+    const view = viewFor(state, decider);
+    try {
+      return { state: applyMove(state, _bot.nextMove(view)), moved: true };
+    } catch (e: any) {
+      console.error('[stepOnce] sorgu bot hatası asama=%s seat=%d: %s', sg.asama, decider, e?.message);
+      // Güvenli fallback: oyunu kilitleme — eski deterministik davranış.
+      const sorulanP = state.players?.find((p: any) => p.seat === sg.sorulanSeat);
+      const fb =
+        sg.asama === 'ortakGorus' ? { type: 'sorguOrtakGorus', gorus: sorulanP?.hasOpened ? 'ver' : 'verme' }
+        : sg.asama === 'cevap' ? { type: 'sorguCevap', cevap: (sorulanP?.hasOpened || sg.partnerGorus === 'ver') ? 'ver' : 'verme' }
+        : { type: 'sorguSonuc', al: false };
+      try { return { state: applyMove(state, fb), moved: true }; }
+      catch { return { state, moved: false }; }
+    }
   }
 
   // Normal sıra: bot/terk koltuğu bir hamle yapar.
