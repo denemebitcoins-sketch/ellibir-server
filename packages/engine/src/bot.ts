@@ -91,19 +91,19 @@ export class HeuristicBot implements MoveProvider {
     const openPts = bestOpening(view.hand, view.rules).points;
     const strongHand = openPts >= view.currentOpeningMin * 0.6 || view.hand.length >= 6;
 
-    // Ağırlıklı/eşikli skor: pozitif → ÇİFT olmaya değer (verme), negatif → ver.
-    let score = 0;
-    if (pairs >= 3) score += 3;          // yeterli çift → çift olmak güvenli
-    else if (pairs === 2) score += 1;    // sınırda
-    else score -= 2;                     // çiftsiz → çift olmak yalnız zarar
-    if (stockHealthy) score += 1;        // deste bol → eksik çift bulunur
-    if (behind) score += 1;              // gerideyim → barajı/ezeli göze al
-    if (strongHand) score += 1;          // güçlü el → riski kaldırır
-    if (view.hand.length <= 3) score -= 2; // el bitiyor → çift olup takılma
+    // ÇİFT olmaya GÜCÜM var mı? Yeterli çift (≥3) YOKSA çift olamam → VER.
+    // (Çift olmak el içinde dezavantaj; sadece sağlam çift altyapısı varken göze alınır.)
+    if (pairs < 3) return true;
 
-    // sorguVer = "VER mi?" döndürür. score ≥ 1 → çift olmaya GÜCÜM var → ÇİFT OL (VERME=false).
-    // score < 1 → çift olmaya değmez → VER (true). (Önceki kod TERS idi: hep yanlış cevap veriyordu.)
-    return score < 1;
+    // ≥3 çiftim var: ancak deste/puan/el de destekliyorsa çift olmaya değer (verme); aksi halde yine ver.
+    let score = 0;
+    if (stockHealthy) score += 1;  // deste bol → eksik çift bulunur
+    if (behind) score += 1;        // gerideyim → barajı/ezeli göze al
+    if (strongHand) score += 1;    // güçlü el → riski kaldırır
+    if (view.hand.length <= 3) score -= 1; // el bitiyor → çift olup takılma
+
+    // score güçlüyse (≥2) ÇİFT OL (verme=false); aksi halde VER (true).
+    return score < 2;
   }
 
   /* ---------------------- profil / puan duyarlılığı ---------------------- */
