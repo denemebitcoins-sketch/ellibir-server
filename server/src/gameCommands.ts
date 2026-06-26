@@ -186,8 +186,41 @@ export function stepOnce(state: any, isHumanTurn: (seat: number) => boolean): { 
   // Normal sıra: bot/terk koltuğu bir hamle yapar.
   if (state.phase === 'draw' || state.phase === 'action') {
     if (isHumanTurn(state.currentSeat) && !abandoned.includes(state.currentSeat)) return { state, moved: false };
-    return { state: applyMove(state, _bot.nextMove(viewFor(state, state.currentSeat))), moved: true };
+    const seat = state.currentSeat;
+    const view = viewFor(state, seat);
+    // TAKILMA GÜVENLİĞİ: bot hamlesi/uygulaması exception fırlatırsa oyun DONMASIN —
+    // güvenli bir fallback hamleyle ilerle. Aksi halde runEngine try-catch'e düşüp döngü ölürdü.
+    try {
+      return { state: applyMove(state, _bot.nextMove(view)), moved: true };
+    } catch (e: any) {
+      console.error('[stepOnce] bot hamlesi hatası seat=%d phase=%s: %s', seat, state.phase, e?.message);
+      const fb = safeFallbackMove(state, view);
+      if (fb) {
+        try { return { state: applyMove(state, fb), moved: true }; }
+        catch (e2: any) { console.error('[stepOnce] fallback de başarısız: %s', e2?.message); }
+      }
+      // Hiçbir güvenli hamle uygulanamadı → moved:false (sonsuz döngüye girme).
+      return { state, moved: false };
+    }
   }
 
   return { state, moved: false };
+}
+
+/**
+ * Bot hamlesi patladığında oyunu ilerletecek EN GÜVENLİ hamle.
+ * draw fazında destedem çek; action fazında zorunlu kart hariç legal ilk ıskarta.
+ * (Kuralları değiştirmez; yalnız motorun KESİN kabul edeceği bir hamle seçer.)
+ */
+function safeFallbackMove(state: any, view: any): any | null {
+  if (state.phase === 'draw') return { type: 'drawStock' };
+  if (state.phase === 'action') {
+    const zorunluId = view?.pickup?.zorunlu ? view.pickup.cardId : null;
+    const hand: any[] = Array.isArray(view?.hand) ? view.hand : [];
+    // Joker olmayan, zorunlu olmayan ilk kart; yoksa zorunlu olmayan ilk kart.
+    const cand = hand.find((c) => !c.joker && c.id !== zorunluId)
+      ?? hand.find((c) => c.id !== zorunluId);
+    if (cand) return { type: 'discard', cardId: cand.id };
+  }
+  return null;
 }

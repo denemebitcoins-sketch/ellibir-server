@@ -54,13 +54,54 @@ export class HeuristicBot implements MoveProvider {
         return { type: 'sorguOrtakGorus', gorus: sorulan?.hasOpened ? 'ver' : 'verme' };
       }
       if (sg.asama === 'cevap' && sg.sorulanSeat === view.seat) {
-        const ver = view.hasOpened || sg.partnerGorus === 'ver';
-        return { type: 'sorguCevap', cevap: ver ? 'ver' : 'verme' };
+        return { type: 'sorguCevap', cevap: this.sorguVer(view, sg) ? 'ver' : 'verme' };
       }
       if (sg.asama === 'sonuc' && sg.askerSeat === view.seat) return { type: 'sorguSonuc', al: false };
     }
     if (view.phase === 'draw') return this.chooseDraw(view);
     return this.chooseAction(view);
+  }
+
+  /**
+   * SORGU 'cevap' kararı — MATEMATİKSEL/DETERMİNİSTİK (sezgisel değil).
+   * "Kağıdı verirsem rakip alır; vermezsem ÇİFT olurum." Çift olmak el içinde
+   * dezavantaj (açış/atış kısıtı) olduğundan ancak çift olmaya GÜCÜM yeterse
+   * (karşılık verecek çiftim + deste + puan baskısı) verme; aksi halde ver.
+   *
+   *  - Açmışsam → ver (çift olmanın bedeli yok, kağıt salt rakibe yarar).
+   *  - Ortak 'ver' dediyse → ver (ortak otoritesi).
+   *  - Aksi halde puanla: eldeki çift sayısı + deste sağlığı + puan baskısı +
+   *    el gücü eşikli toplanır; skor < 0 ise çift olmayı göze al → verme.
+   */
+  private sorguVer(view: PlayerView, sg: NonNullable<PlayerView['sorgu']>): boolean {
+    if (view.hasOpened) return true;
+    if (sg.partnerGorus === 'ver') return true;
+
+    // (a) ÇİFT gücü: çift olursam karşılık verecek özdeş çiftim var mı?
+    const insight = analyzeHand(view.hand, view.rules);
+    const pairs = insight.pairCount;
+
+    // (b) DESTE sağlığı: bol kağıt → eksik çiftleri tamamlama şansı yüksek.
+    const stockHealthy = view.stockCount > view.players.length * 4;
+
+    // (c) PUAN baskısı: çok gerideysem (ezel/baraj riski) çift olup direnmeye değer.
+    const behind = this.behind(view);
+
+    // (d) EL gücü: açış potansiyelim varsa riski göze alabilirim (güçlü el).
+    const openPts = bestOpening(view.hand, view.rules).points;
+    const strongHand = openPts >= view.currentOpeningMin * 0.6 || view.hand.length >= 6;
+
+    // Ağırlıklı/eşikli skor: pozitif → ÇİFT olmaya değer (verme), negatif → ver.
+    let score = 0;
+    if (pairs >= 3) score += 3;          // yeterli çift → çift olmak güvenli
+    else if (pairs === 2) score += 1;    // sınırda
+    else score -= 2;                     // çiftsiz → çift olmak yalnız zarar
+    if (stockHealthy) score += 1;        // deste bol → eksik çift bulunur
+    if (behind) score += 1;              // gerideyim → barajı/ezeli göze al
+    if (strongHand) score += 1;          // güçlü el → riski kaldırır
+    if (view.hand.length <= 3) score -= 2; // el bitiyor → çift olup takılma
+
+    return score >= 1; // eşik: net pozitifte verme (çift ol), aksi halde ver
   }
 
   /* ---------------------- profil / puan duyarlılığı ---------------------- */

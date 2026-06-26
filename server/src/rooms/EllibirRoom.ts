@@ -272,6 +272,17 @@ export class EllibirRoom extends Room {
       this.busy = false;
     }
     this.checkHandEnd();
+    // TAKILMA GÜVENLİĞİ: oyun bitmediyse VE sıra hâlâ bot'taysa (insan sırası değil)
+    // döngü beklenmedik şekilde durmuş demektir → non-blocking yeniden tetikle.
+    // busy=false olduğundan tek adım daha çalışır; insan/handEnd'de kendiliğinden durur (sonsuz döngü yok).
+    if (this.game) {
+      const phase = this.game.phase;
+      const playable = phase === 'draw' || phase === 'action';
+      const botTurn = this.game.sorgu
+        ? false // sorgu adımı stepOnce içinde zaten ele alınır; insan ise zaten DUR
+        : playable && !this.isHumanTurn(this.game.currentSeat);
+      if (botTurn) setImmediate(() => this.runEngine());
+    }
   }
 
   private checkHandEnd() {
