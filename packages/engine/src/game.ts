@@ -1048,12 +1048,24 @@ function applyNewMeld(state: GameState, cardIds: readonly CardId[]): GameState {
     cards: analysis.cards,
   };
   const used = new Set(cardIds);
+  // PARÇA AÇIŞ: oyuncu açıkken indirdiği her ek per/küt, masada gösterilen açış
+  // puanına (openingValue) EKLENİR — rozet ilk perin değil TÜM yer perlerinin
+  // toplamını gösterir (40 → 81 → 127 ...). Çift modunda per puanı sayılmaz;
+  // openingPairs ayrıca takip edilir (yeni çift indirilince +1).
+  const isPairMode = player.openMode === 'pairs';
   return {
     ...state,
     melds: [...state.melds, meld],
     matchLog: addLog(state, `${nameOf(state, player.seat)} yeni perde indirdi`),
     players: state.players.map((p) =>
-      p.seat === player.seat ? { ...p, hand: removeFromHand(p.hand, used) } : p,
+      p.seat === player.seat
+        ? {
+            ...p,
+            hand: removeFromHand(p.hand, used),
+            openingValue: isPairMode ? (p.openingValue ?? 0) : (p.openingValue ?? 0) + analysis.points,
+            openingPairs: isPairMode ? (p.openingPairs ?? 0) + 1 : (p.openingPairs ?? 0),
+          }
+        : p,
     ),
   };
 }
