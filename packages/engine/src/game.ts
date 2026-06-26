@@ -670,6 +670,7 @@ function applyDrawStock(state: GameState): GameState {
     stock: stock.slice(0, -1),
     discard,
     phase: 'action',
+    matchLog: addLog(state, `${nameOf(state, player.seat)} desteden kart çekti`),
     players: state.players.map((p) =>
       p.seat === player.seat ? { ...p, hand: [...p.hand, card] } : p,
     ),
@@ -1209,7 +1210,7 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
         ? `${atanAd} işlek attı ${islekPenalty} puan ceza!`
         : card.joker
           ? `${atanAd} OKEY attı!`
-          : null
+          : `${atanAd} kart attı`
       : null;
   const next: GameState = {
     ...state,
