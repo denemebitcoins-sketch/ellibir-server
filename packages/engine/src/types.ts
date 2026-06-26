@@ -182,6 +182,13 @@ export interface GameState {
    * puan/çift/çarpan/ceza dahil). El geçişinde KORUNUR; yalnız yeni maç başında sıfırlanır.
    */
   matchLog?: string[];
+  /**
+   * (SUNUCU-yalnız, motor kuralını ETKİLEMEZ) Koltuk başına oyuncunun kart-id
+   * DİZİLİM sırası. clientView el'i bu sıraya göre döndürür → çekilen kart SONA
+   * gider, seri/çift diz gruplu sıra korunur. El başında temizlenir; her hamleden
+   * sonra reconcile edilir (mevcut sıra + yeni kartlar sona). C# HandOrder portu.
+   */
+  handOrder?: Record<number, string[]>;
 }
 
 /**

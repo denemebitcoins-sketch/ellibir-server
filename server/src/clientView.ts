@@ -4,8 +4,84 @@
  */
 import { viewFor, isIslekCard, canSor, canCancelOpen, legalExtendTargets, canRetrieveJoker } from '../../packages/engine/src/game';
 import { analyzeHand } from '../../packages/engine/src/insight';
-import { meldPoints } from '../../packages/engine/src/melds';
+import { meldPoints, analyzeCards, analyzePair } from '../../packages/engine/src/melds';
 import type { GameState } from '../../packages/engine/src/game';
+
+/* ── Per-koltuk el dizilim sırası (handOrder) — C# HandOrder/ReconcileOrder portu ──
+   Motor kuralını DEĞİŞTİRMEZ; yalnız el'in GÖRSEL sırasını izler. Çekilen kart sona,
+   seri/çift diz gruplu sıra korunur. */
+
+/** Bir koltuğun handOrder'ını mevcut ele göre reconcile et: mevcut sıradaki kart-id'ler
+ *  korunur (elde olmayanlar düşer), elde olup sırada olmayan YENİ kartlar SONA eklenir.
+ *  (C# ReconcileOrder.) Yan etki: state.handOrder[seat]'i günceller ve döndürür. */
+export function reconcileHandOrder(state: any, seat: number): string[] {
+  if (!state) return [];
+  const player = (state.players ?? []).find((p: any) => p.seat === seat);
+  const hand: any[] = Array.isArray(player?.hand) ? player.hand : [];
+  state.handOrder = state.handOrder || {};
+  const prev: string[] = Array.isArray(state.handOrder[seat]) ? state.handOrder[seat] : [];
+  const ids = new Set(hand.map((c: any) => c.id));
+  const kept = prev.filter((id) => ids.has(id));
+  const known = new Set(kept);
+  for (const c of hand) if (!known.has(c.id)) kept.push(c.id);
+  state.handOrder[seat] = kept;
+  return kept;
+}
+
+/** Bir koltuğun handOrder'ını temizle (el sonu / yeni el). */
+export function clearHandOrder(state: any, seat?: number): void {
+  if (!state) return;
+  if (seat == null) { state.handOrder = {}; return; }
+  if (state.handOrder) delete state.handOrder[seat];
+}
+
+/** handOrder sırasına göre o koltuğun el kartlarını (Card nesneleri) döndür. */
+function orderedHandFor(state: any, seat: number): any[] {
+  const player = (state.players ?? []).find((p: any) => p.seat === seat);
+  const hand: any[] = Array.isArray(player?.hand) ? player.hand : [];
+  const order = reconcileHandOrder(state, seat);
+  const byId = new Map(hand.map((c: any) => [c.id, c]));
+  return order.map((id) => byId.get(id)).filter(Boolean);
+}
+
+export interface ArrangedResult {
+  meldPoints: number;
+  pairCount: number;
+  /** orderedHand ile aynı uzunlukta: 0=serbest, 1=seri/per, 2=çift. */
+  blockKinds: number[];
+}
+
+/** C# ArrangedBlocks portu: handOrder sırasındaki ARDIŞIK geçerli seri/per (≥3) ve
+ *  çift (=2) bloklarını bul. Önce en uzun per, sonra çift. */
+export function computeArrangedBlocks(orderedHand: any[], rules: any): ArrangedResult {
+  const res: ArrangedResult = { meldPoints: 0, pairCount: 0, blockKinds: orderedHand.map(() => 0) };
+  let i = 0;
+  while (i < orderedHand.length) {
+    let bestLen = 0;
+    for (let len = 3; i + len <= orderedHand.length; len++) {
+      try { if (analyzeCards(orderedHand.slice(i, i + len), rules) != null) bestLen = len; else break; }
+      catch { break; }
+    }
+    if (bestLen >= 3) {
+      try { res.meldPoints += meldPoints(orderedHand.slice(i, i + bestLen), rules) ?? 0; } catch { /* karışık */ }
+      for (let j = 0; j < bestLen; j++) res.blockKinds[i + j] = 1;
+      i += bestLen;
+      continue;
+    }
+    if (i + 2 <= orderedHand.length) {
+      let isPair = false;
+      try { isPair = analyzePair(orderedHand.slice(i, i + 2), rules) != null; } catch { isPair = false; }
+      if (isPair) {
+        res.pairCount += 1;
+        res.blockKinds[i] = 2; res.blockKinds[i + 1] = 2;
+        i += 2;
+        continue;
+      }
+    }
+    i++;
+  }
+  return res;
+}
 
 export function clientViewFor(state: GameState, seat: number): Record<string, unknown> {
   if (!state || !Array.isArray(state.players)) return emptyView(seat);
@@ -100,17 +176,14 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
   let ins2: any = { meldPoints: 0, pairCount: 0 };
   try { ins2 = analyzeHand(v.hand, rules); } catch { /* default */ }
 
-  // El sıralama (per-koltuk dizMode): seri/çift → motor SortHandOrder ile diz
+  // El sıralama: handOrder'ı izle (çekilen kart SONA). Gruplama YALNIZCA dizSeri/dizCift
+  // komutunda yapılır (gameCommands handOrder'ı gruplu sıraya yazar) — burada RE-SORT YOK.
   const dizMode = (state as any).dizModes?.[seat] ?? 'none';
-  let handArr: any[] = Array.isArray(v.hand) ? v.hand : [];
-  if (dizMode === 'seri' || dizMode === 'cift') {
-    try {
-      const order = sortHandOrder(handArr, rules, dizMode);
-      const byId = new Map(handArr.map((c: any) => [c.id, c]));
-      const reord = order.map((id) => byId.get(id)).filter(Boolean);
-      if (reord.length === handArr.length) handArr = reord as any[];
-    } catch { /* sırasız bırak */ }
-  }
+  const orderedHand = orderedHandFor(state, seat);
+  let handArr: any[] = orderedHand.length > 0 ? orderedHand : (Array.isArray(v.hand) ? v.hand : []);
+
+  // GÖSTERGE/dizim bloklarını handOrder sırasında hesapla (Unity DTO bekler).
+  const arranged = computeArrangedBlocks(handArr, rules);
 
   const pk = v.pickup;
   const sorgu = v.sorgu ?? null;
@@ -163,6 +236,10 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
                            }))
                          : [],
     dizMode:           dizMode,
+    // DİZİM GÖSTERGESİ (Unity DTO): handOrder sırasındaki ardışık geçerli bloklar.
+    myArrangedMeldPoints: arranged.meldPoints,
+    myArrangedPairCount:  arranged.pairCount,
+    handBlockKinds:       arranged.blockKinds,  // myHand ile aynı sıra/uzunluk
   };
 }
 
@@ -319,5 +396,6 @@ function emptyView(seat: number): Record<string, unknown> {
     sorguSorulanSeat: -1, sorguAsama: '', sorguPartnerSeat: -1, sorguPartnerGorus: '', sorguCard: null,
     logMessages: [],
     gostergeKart: null, gostergeShown: false, gostergeCanShow: false, gostergeCanTake: false, sheet: [], dizMode: 'none',
+    myArrangedMeldPoints: 0, myArrangedPairCount: 0, handBlockKinds: [],
   };
 }

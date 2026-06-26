@@ -8,7 +8,7 @@ import { bestOpening, bestPairOpening } from '../../packages/engine/src/insight'
 import { solveHand } from '../../packages/engine/src/solver';
 import { analyzeCards, meldPoints } from '../../packages/engine/src/melds';
 import { HeuristicBot } from '../../packages/engine/src/bot';
-import { sortHandOrder } from './clientView';
+import { sortHandOrder, reconcileHandOrder } from './clientView';
 
 export class CmdError extends Error {
   constructor(public code: string, msg?: string) { super(msg ?? code); this.name = 'CmdError'; }
@@ -129,8 +129,22 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
   } else if (cmd.t === 'dizSeri' || cmd.t === 'dizCift') {
     // SADECE görsel sıralama (dizModes). Çift OLMAK kurallıdır (çiftle açma / pickup /
     // sorgu) — "çift diz" demek çift YAPMAZ; isCift'e dokunulmaz.
+    const mode = cmd.t === 'dizSeri' ? 'seri' : 'cift';
     state.dizModes = state.dizModes || {};
-    state.dizModes[seat] = cmd.t === 'dizSeri' ? 'seri' : 'cift';
+    state.dizModes[seat] = mode;
+    // handOrder'ı GERÇEKTEN gruplu sıraya getir: artık clientView her view'da re-sort
+    // YAPMAZ; el sırası handOrder'ı izler. Bir kez gruplanır, sonra korunur (çekilen sona).
+    try {
+      const player = state.players?.find((p: any) => p.seat === seat);
+      if (player && Array.isArray(player.hand)) {
+        const grouped = sortHandOrder(player.hand, state.rules, mode);
+        const ids = new Set(player.hand.map((c: any) => c.id));
+        if (grouped.length === player.hand.length && grouped.every((id: string) => ids.has(id))) {
+          state.handOrder = state.handOrder || {};
+          state.handOrder[seat] = grouped;
+        }
+      }
+    } catch { /* sırasız bırak */ }
     skipBots = true;
 
   } else if (cmd.t === 'leave') {
@@ -150,6 +164,10 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
   } else {
     return { state, skipBots, noop: true };
   }
+  // Her hamleden sonra acting seat'in handOrder'ını reconcile et: çekilen/alınan YENİ
+  // kart EN SONA eklenir, oynanan kartlar düşer, mevcut dizilim korunur (C# ReconcileOrder).
+  // (dizSeri/dizCift zaten handOrder'ı gruplu yazdı; reconcile sırayı bozmaz, sadece doğrular.)
+  try { reconcileHandOrder(state, seat); } catch { /* yoksay */ }
   return { state, skipBots };
 }
 

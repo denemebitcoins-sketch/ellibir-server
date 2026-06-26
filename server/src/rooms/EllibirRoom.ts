@@ -1,7 +1,7 @@
 import { Room, Client } from '@colyseus/core';
 import { createGame, startNextHand } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
-import { clientViewFor, clientViewForSpectator } from '../clientView';
+import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
 import { verifyToken, settleMatch, isGameBanned, isChatBanned } from '../supabase';
 
@@ -190,6 +190,7 @@ export class EllibirRoom extends Room {
         const p = this.game.players.find((pl: any) => pl.seat === seat);
         if (p && name) p.name = name;
       }
+      this.resetHandOrder();
       console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
       this.pushViews();
       this.runEngine();
@@ -217,6 +218,17 @@ export class EllibirRoom extends Room {
       this.pushViews();
     } catch {
       this.cleanupSeat(client.sessionId, seat);   // 3 dk geçti → bot kalıcı devralır
+    }
+  }
+
+  // El başı: tüm koltukların handOrder'ını temizle, sonra her insan koltuğunu o anki
+  // el id'leriyle init et (reconcile boş sıradan → elin doğal sırası). El sonunda ayrı
+  // temizlemeye gerek yok; sonraki el başında baştan kurulur.
+  private resetHandOrder() {
+    if (!this.game) return;
+    clearHandOrder(this.game);
+    for (const seat of this.humanSeats) {
+      try { reconcileHandOrder(this.game, seat); } catch { /* yoksay */ }
     }
   }
 
@@ -316,6 +328,7 @@ export class EllibirRoom extends Room {
       if (p && name) p.name = name;
     }
     this.settled = false;
+    this.resetHandOrder();
     console.log('[EllibirRoom] yeni maç başladı (aynı masa)');
     this.pushViews();
     this.runEngine();
@@ -325,6 +338,7 @@ export class EllibirRoom extends Room {
     if (this.game.phase !== 'handEnded') return;
     try { this.game = startNextHand(this.game); }
     catch (e: any) { console.error('[continueHand] hata:', e?.message); return; }
+    this.resetHandOrder();
     this.pushViews();
     this.runEngine();
   }
