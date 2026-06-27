@@ -6,7 +6,7 @@ import {
 } from '../../packages/engine/src/game';
 import { bestOpening, bestPairOpening } from '../../packages/engine/src/insight';
 import { solveHand } from '../../packages/engine/src/solver';
-import { analyzeCards, meldPoints } from '../../packages/engine/src/melds';
+import { analyzeCards, meldPoints, analyzePair } from '../../packages/engine/src/melds';
 import { partitionSelectedMelds } from '../../packages/engine/src/solver';
 import { HeuristicBot } from '../../packages/engine/src/bot';
 import { sortHandOrder, reconcileHandOrder } from './clientView';
@@ -55,11 +55,18 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
       const byId = new Map((player?.hand ?? []).map((c: any) => [c.id, c]));
       const selCards = (cmd.cards as string[]).map((id) => byId.get(id)).filter(Boolean);
       if (selCards.length !== cmd.cards.length) throw new CmdError('invalid_move', 'Seçili kart elde değil.');
-      const groups = partitionSelectedMelds(selCards, state.rules);
-      if (!groups) {
-        throw new CmdError('insufficientOpen', 'Seçili kartlar geçerli per/küt gruplarına bölünemedi.');
+      // ÇİFT AÇIŞ (SORUN 2/5): seçili kartların TAMAMI geçerli çiftlere bölünebiliyorsa
+      // openPairs ile aç (C# OpenSelected birebir). Aksi halde per/küt/seri bölümlemesi.
+      const pairGroups = partitionAllPairs(selCards, state.rules);
+      if (pairGroups) {
+        state = applyMove(state, { type: 'openPairs', pairs: pairGroups.map((g) => g.map((c: any) => c.id)) });
+      } else {
+        const groups = partitionSelectedMelds(selCards, state.rules);
+        if (!groups) {
+          throw new CmdError('insufficientOpen', 'Seçili kartlar geçerli per/küt/çift gruplarına bölünemedi.');
+        }
+        state = applyMove(state, { type: 'open', melds: groups.map((g) => g.map((c: any) => c.id)) });
       }
-      state = applyMove(state, { type: 'open', melds: groups.map((g) => g.map((c: any) => c.id)) });
     }
 
   } else if (cmd.t === 'play') {
@@ -184,6 +191,42 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
   // (dizSeri/dizCift zaten handOrder'ı gruplu yazdı; reconcile sırayı bozmaz, sadece doğrular.)
   try { reconcileHandOrder(state, seat); } catch { /* yoksay */ }
   return { state, skipBots };
+}
+
+/**
+ * Kartların TAMAMINI geçerli çiftlere böler (özdeş ikili; kalan tek + okey). Olmazsa null.
+ * C# GameSession.TryAllPairs birebir karşılığı — çift açışı için (openSelected çift dalı).
+ */
+function partitionAllPairs(cards: any[], rules: any): any[][] | null {
+  if (!rules?.pairs?.enabled) return null;
+  if (cards.length === 0 || cards.length % 2 !== 0) return null;
+  const groups: any[][] = [];
+  const byKey = new Map<string, any[]>();
+  const keyOrder: string[] = [];
+  const jokers: any[] = [];
+  for (const c of cards) {
+    if (c.joker) { jokers.push(c); continue; }
+    const key = `${c.suit}:${c.rank}`;
+    if (!byKey.has(key)) { byKey.set(key, []); keyOrder.push(key); }
+    byKey.get(key)!.push(c);
+  }
+  const singles: any[] = [];
+  for (const key of keyOrder) {
+    const list = byKey.get(key)!;
+    let i = 0;
+    for (; i + 1 < list.length; i += 2) groups.push([list[i], list[i + 1]]);
+    if (i < list.length) singles.push(list[i]);
+  }
+  let ji = 0;
+  for (const s of singles) {
+    if ((rules.pairs.maxJokersPerPair ?? 0) > 0 && ji < jokers.length) {
+      const pair = [s, jokers[ji++]];
+      if (!analyzePair(pair, rules)) return null;
+      groups.push(pair);
+    } else return null; // eşi olmayan tek kart → saf çift bölümlemesi başarısız
+  }
+  if (ji < jokers.length) return null; // artan okey
+  return groups.length > 0 ? groups : null;
 }
 
 const _bot = new HeuristicBot('normal');

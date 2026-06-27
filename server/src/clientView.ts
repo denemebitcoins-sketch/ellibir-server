@@ -196,6 +196,7 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
     handNumber:        v.handNumber      ?? 1,
     totalHands:        rules?.totalHands ?? 5,
     openingMin:        v.currentOpeningMin ?? 0,
+    pairsMin:          v.currentPairsMin ?? 0,
     teamMode:          rules?.teamMode ?? false,
     myHand:            handArr.map((c: any) => ({ ...mapCard(c), islek: islekOf(c), targets: targetsOf(c) })),
     handGaps:          [], // C# online misafirde de boş — UI-display (tek cihaz) kavramı
@@ -386,7 +387,7 @@ export function clientViewForSpectator(state: GameState): Record<string, unknown
 function emptyView(seat: number): Record<string, unknown> {
   return {
     seat, phase: 'draw', currentSeat: 0, yourTurn: false,
-    handNumber: 1, totalHands: 5, openingMin: 0, teamMode: false,
+    handNumber: 1, totalHands: 5, openingMin: 0, pairsMin: 0, teamMode: false,
     myHand: [], handGaps: [], melds: [], seats: [],
     hasDiscard: false, discardTop: null, discardCount: 0, stockCount: 0,
     matchWinnerSeat: -1, hasOpened: false, openMode: '',
