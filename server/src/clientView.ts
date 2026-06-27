@@ -53,22 +53,27 @@ export interface ArrangedResult {
 
 /** C# ArrangedBlocks portu: handOrder sırasındaki ARDIŞIK geçerli seri/per (≥3) ve
  *  çift (=2) bloklarını bul. Önce en uzun per, sonra çift. */
-export function computeArrangedBlocks(orderedHand: any[], rules: any): ArrangedResult {
+export function computeArrangedBlocks(orderedHand: any[], rules: any, dizMode: string = 'none'): ArrangedResult {
   const res: ArrangedResult = { meldPoints: 0, pairCount: 0, blockKinds: orderedHand.map(() => 0) };
+  const ciftMode = dizMode === 'cift';
   let i = 0;
   while (i < orderedHand.length) {
+    // ÇİFT DİZDE per/seri (≥3) bloğu ARANMAZ (jokerleri sahte küt'e yutup okey sayımını
+    // bozuyordu); yalnız gerçek çiftler + okey katkısı. C# ArrangedBlocks birebir.
     let bestLen = 0;
-    for (let len = 3; i + len <= orderedHand.length; len++) {
-      try { if (analyzeCards(orderedHand.slice(i, i + len), rules) != null) bestLen = len; else break; }
-      catch { break; }
-    }
+    if (!ciftMode)
+      for (let len = 3; i + len <= orderedHand.length; len++) {
+        try { if (analyzeCards(orderedHand.slice(i, i + len), rules) != null) bestLen = len; else break; }
+        catch { break; }
+      }
     if (bestLen >= 3) {
       try { res.meldPoints += meldPoints(orderedHand.slice(i, i + bestLen), rules) ?? 0; } catch { /* karışık */ }
       for (let j = 0; j < bestLen; j++) res.blockKinds[i + j] = 1;
       i += bestLen;
       continue;
     }
-    if (i + 2 <= orderedHand.length) {
+    if (i + 2 <= orderedHand.length && !orderedHand[i].joker && !orderedHand[i + 1].joker) {
+      // OKEY içeren çift GÖRSEL blok YAPILMAZ (okey boşta dursun); yalnız İKİ GERÇEK kart.
       let isPair = false;
       try { isPair = analyzePair(orderedHand.slice(i, i + 2), rules) != null; } catch { isPair = false; }
       if (isPair) {
@@ -79,6 +84,17 @@ export function computeArrangedBlocks(orderedHand: any[], rules: any): ArrangedR
       }
     }
     i++;
+  }
+  // OKEY ÇİFT SAYIMI (görsel eşleme YOK): çift dizde her okey, eşlenebilecek bir çift-dışı/
+  // per-dışı gerçek kartı temsil eder → pairCount'a eklenir (okey görsel boşta, blockKind=0).
+  // Sayım = gerçek çiftler + min(okey, serbest gerçek kart). MaxJokersPerPair=1, okey-okey YOK.
+  if (dizMode === 'cift' && rules?.pairs?.enabled && (rules.pairs.maxJokersPerPair ?? 0) > 0) {
+    let jokerCount = 0, freeReals = 0;
+    for (let k = 0; k < orderedHand.length; k++) {
+      if (res.blockKinds[k] !== 0) continue;
+      if (orderedHand[k].joker) jokerCount++; else freeReals++;
+    }
+    res.pairCount += Math.min(jokerCount, freeReals);
   }
   return res;
 }
@@ -183,7 +199,7 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
   let handArr: any[] = orderedHand.length > 0 ? orderedHand : (Array.isArray(v.hand) ? v.hand : []);
 
   // GÖSTERGE/dizim bloklarını handOrder sırasında hesapla (Unity DTO bekler).
-  const arranged = computeArrangedBlocks(handArr, rules);
+  const arranged = computeArrangedBlocks(handArr, rules, dizMode);
 
   const pk = v.pickup;
   const sorgu = v.sorgu ?? null;
@@ -261,24 +277,9 @@ export function sortHandOrder(hand: any[], rules: any, mode: 'seri' | 'cift'): s
     blockUnits.push({ ids, red });
   }
 
-  // ÇİFT DİZİM — OKEY EŞLEME (kural-uyumlu, maxJokersPerPair=1; okey-okey YOK): boştaki her
-  // okey'i eşleyebileceği bir TEK kartla YAN YANA diz → joker+tek çifti dizimde görünür ve
-  // computeArrangedBlocks onu çift sayar (oyuncu elle çiftlemek zorunda kalmaz). C# birebir.
-  if (mode === 'cift' && rules?.pairs?.enabled && (rules.pairs.maxJokersPerPair ?? 0) > 0) {
-    const freeJokers = hand.filter((c: any) => c.joker && !used.has(c.id));
-    const freeSingles = hand
-      .filter((c: any) => !c.joker && !used.has(c.id))
-      .sort((a: any, b: any) => b.rank - a.rank); // en yüksek puanlı tek önce
-    let si = 0;
-    for (const jk of freeJokers) {
-      if (si >= freeSingles.length) break;
-      const single = freeSingles[si++];
-      if (analyzePair([single, jk], rules) == null) continue; // güvenlik
-      used.add(single.id); used.add(jk.id);
-      const red = single.suit === 'H' || single.suit === 'D';
-      blockUnits.push({ ids: [single.id, jk.id], red });
-    }
-  }
+  // ÇİFT DİZİM — OKEY GÖRSEL EŞLENMEZ (kullanıcı isteği): okey bir kartla yan yana KONMAZ;
+  // serbest kalır (jokerler aşağıda sona eklenir). Çift SAYIMI okeyleri computeArrangedBlocks
+  // içinde ayrıca ekler — "okey boşta dursun ama çift dizde sayılsın". C# birebir.
 
   const singleUnits: { ids: string[]; red: boolean }[] = [];
   for (const suit of ['S', 'H', 'D', 'C']) {
