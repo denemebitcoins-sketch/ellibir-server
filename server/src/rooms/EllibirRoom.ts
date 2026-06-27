@@ -208,60 +208,72 @@ export class EllibirRoom extends Room {
     }, this.START_MS);
   }
 
-  async onLeave(client: Client, consented: boolean) {
+  // ⚠ COLYSEUS 0.17 KOPMA LIFECYCLE (eski onLeave(consented) DEĞİL):
+  //   • ANORMAL kopma (ağ/uygulama kapanması) → onDrop() — burada allowReconnection ile koltuğu tut.
+  //   • Zamanında dönüş → onReconnect().
+  //   • Reconnect olmazsa VEYA KASITLI çıkış (.leave()) → onLeave(client, code).
+  //   (Eski kod onLeave(consented:boolean) idi → 0.17'de anormal kopma onDrop'a gidiyordu, onDrop
+  //    tanımlı olmadığı için HİÇBİR ŞEY tetiklenmiyordu: bot devralmıyor, room zombie oynuyor,
+  //    reconnect çakışıp 524 veriyordu. GERÇEK KÖK BUYDU.)
+
+  /** ANORMAL kopma (0.17 onDrop): koltuğu HEMEN bota devret + 180s rezerve tut. */
+  async onDrop(client: Client) {
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
-      // İzleyici ayrıldı (koltuğu yok) → izleyici listesinden çıkar.
       if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
       return;
     }
-    // KASITLI ÇIKIŞ (consented=true: oyun-içi ÇIK butonu → client.leave()): GERİ DÖNÜŞ YOK.
-    //   Koltuk KALICI bot olur, reconnect penceresi AÇILMAZ ("çıkarsan kaybedersin"). abandoned
-    //   KALIR (bot sürdürür); sessionId temizlenir → kullanıcı dönse bile bu koltuğa
-    //   allowReconnection ile bağlanamaz (yeni join → izleyici / başka boş koltuk).
-    if (consented) {
-      this.setAbandoned(seat, true);
-      this.logEvent(`${this.nameOfSeat(seat)} oyundan çıktı — yerini bot aldı`);
-      this.cleanupSeat(client.sessionId, seat);
-      this.runEngine();
-      this.pushViews();
-      return;
-    }
-    // DÜŞME (kopma — ağ/uygulama kapanması, consented=false): koltuğu HEMEN bot'a devret
-    //   (oyun DURMAZ) + 3 DAKİKA (180s) REZERVE tut. Bu sürede dönerse koltuğu + kontrolü geri
-    //   alır, bot diskalifiye (setAbandoned false). 180s geçerse bot KALICI devralır.
-    this.setAbandoned(seat, true);
+    this.setAbandoned(seat, true);   // bot devralır (oyun DURMAZ)
     this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
     this.runEngine();
     this.pushViews();
-    // P2 SALON GÖRÜNÜRLÜĞÜ: koltuk REZERVE iken (180s) düşen oyuncunun presence satırını TAZE tut
-    //   (client heartbeat'i durdu → 60s sonra salondan düşerdi → koltuk "OTUR" görünürdü). Server
-    //   service-role ile last_seen/status/table_no PATCH'ler → salon koltuğu DOLU gösterir, kimse
-    //   oturamaz (zaten server koltuğu rezervde tutar). 50s'de bir (60s filtreden önce) yenile.
+    // P2 SALON GÖRÜNÜRLÜĞÜ: koltuk REZERVE iken (180s) düşen oyuncunun presence satırını TAZE tut.
     const uid = this.seatUsers.get(seat);
     const mode = (this.metadata as any)?.mode ?? (this.humanSeats.length === 2 ? 'duo' : 'solo');
     const tableNo = Number((this.metadata as any)?.table) || 1;
     let presenceTimer: NodeJS.Timeout | null = null;
     if (uid) {
-      keepSeatPresence(uid, tableNo, mode);   // hemen bir kez
+      keepSeatPresence(uid, tableNo, mode);
       presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, mode), 50000);
     }
     const stopPresenceKeepalive = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
     try {
-      const back = await this.allowReconnection(client, 180);  // 3 dk içinde dönerse (uygulama kapansa/ağ değişse bile) koltuğu geri al
+      const back = await this.allowReconnection(client, 180);  // 3 dk pencere (uygulama kapansa/ağ değişse bile)
       stopPresenceKeepalive();
-      // KONTROL İADESİ: bot devralmayı bırak (abandoned'tan çıkar) → sıra/karar tekrar insana.
-      this.setAbandoned(seat, false);
-      // ⚠ SEAT YENİDEN BİLDİR: reconnect'te Colyseus 'seat' mesajını OTOMATİK yollamaz; client
-      //   MySeat'i bilmezse (duo'da seat 2 olabilir) izleyici/yanlış koltuk sanır → 'seat' tekrar yolla.
+      this.setAbandoned(seat, false);   // KONTROL İADESİ → sıra/karar tekrar insana
       try { back.send('seat', { seat }); } catch { /* yoksay */ }
       this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
       this.runEngine();
       this.pushViews();
     } catch {
       stopPresenceKeepalive();
-      this.cleanupSeat(client.sessionId, seat);   // 3 dk geçti → bot kalıcı devralır
+      this.cleanupSeat(client.sessionId, seat);   // 3 dk geçti → bot KALICI devralır
     }
+  }
+
+  /** Zamanında reconnect (0.17 onReconnect): kontrolü insana geri ver (onDrop await'e ek garanti). */
+  onReconnect(client: Client) {
+    const seat = this.seats.get(client.sessionId);
+    if (seat == null) return;
+    this.setAbandoned(seat, false);            // bot diskalifiye
+    try { client.send('seat', { seat }); } catch { /* yoksay */ }
+    this.runEngine();
+    this.pushViews();
+  }
+
+  /** KASITLI çıkış (.leave()) ya da reconnect başarısız (0.17 onLeave(code)): koltuk KALICI bot. */
+  onLeave(client: Client, _code?: number) {
+    const seat = this.seats.get(client.sessionId);
+    if (seat == null) {
+      if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
+      return;
+    }
+    // ÇIK butonu (.leave()) → GERİ DÖNÜŞ YOK: koltuk kalıcı bot, sessionId temizlenir.
+    this.setAbandoned(seat, true);
+    this.logEvent(`${this.nameOfSeat(seat)} oyundan çıktı — yerini bot aldı`);
+    this.cleanupSeat(client.sessionId, seat);
+    this.runEngine();
+    this.pushViews();
   }
 
   // El başı: tüm koltukların handOrder'ını temizle, sonra her insan koltuğunu o anki
