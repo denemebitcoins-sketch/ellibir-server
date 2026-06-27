@@ -207,16 +207,29 @@ export class EllibirRoom extends Room {
       if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
       return;
     }
-    // Koltuğu HEMEN bot'a devret → oyun DURMAZ (1. oyuncu beklemede kalmaz).
+    // KASITLI ÇIKIŞ (consented=true: oyun-içi ÇIK butonu → client.leave()): GERİ DÖNÜŞ YOK.
+    //   Koltuk KALICI bot olur, reconnect penceresi AÇILMAZ ("çıkarsan kaybedersin"). abandoned
+    //   KALIR (bot sürdürür); sessionId temizlenir → kullanıcı dönse bile bu koltuğa
+    //   allowReconnection ile bağlanamaz (yeni join → izleyici / başka boş koltuk).
+    if (consented) {
+      this.setAbandoned(seat, true);
+      this.logEvent(`${this.nameOfSeat(seat)} oyundan çıktı — yerini bot aldı`);
+      this.cleanupSeat(client.sessionId, seat);
+      this.runEngine();
+      this.pushViews();
+      return;
+    }
+    // DÜŞME (kopma — ağ/uygulama kapanması, consented=false): koltuğu HEMEN bot'a devret
+    //   (oyun DURMAZ) + 3 DAKİKA (180s) REZERVE tut. Bu sürede dönerse koltuğu + kontrolü geri
+    //   alır, bot diskalifiye (setAbandoned false). 180s geçerse bot KALICI devralır.
     this.setAbandoned(seat, true);
-    this.logEvent(`${this.nameOfSeat(seat)} oyundan düştü — bot devraldı`);
+    this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
     this.runEngine();
     this.pushViews();
-    if (consented) { this.cleanupSeat(client.sessionId, seat); return; }
     try {
-      await this.allowReconnection(client, 300);  // 5 dk içinde dönerse (uygulama kapansa/ağ değişse bile) koltuğu geri al
+      await this.allowReconnection(client, 180);  // 3 dk içinde dönerse (uygulama kapansa/ağ değişse bile) koltuğu geri al
       this.setAbandoned(seat, false);
-      this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
+      this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
       this.runEngine();
       this.pushViews();
     } catch {
