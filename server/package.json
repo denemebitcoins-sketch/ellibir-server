@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "51 (Elli Bir) Colyseus gerçek-zaman oyun sunucusu",
   "main": "src/index.ts",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "start": "ts-node --transpile-only src/index.ts",
     "dev": "ts-node-dev --transpile-only --respawn src/index.ts"
