@@ -3,7 +3,7 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence } from '../supabase';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -24,6 +24,14 @@ export class EllibirRoom extends Room {
   private sorguTimer: NodeJS.Timeout | null = null;   // insan sorgu kararı zaman aşımı (→ VER)
   private sorguDeadlineAt = 0;                         // sorgu sayacının biteceği an (client geri sayımı)
   private readonly SORGU_MS = 15000;                  // RULES.md 1.11: SORGU_SURESI = 15 sn
+  private turnTimer: NodeJS.Timeout | null = null;    // ANA TUR zaman aşımı (insan sırası → otomatik bot hamlesi)
+  private forceBotSeat: number | null = null;         // bu koltuk için TEK adım bot zorla (süre aşımı/takılma)
+  // İnsan tur süresi (turnTimerSeconds) + GRACE: client kendi autopilot'ını süre dolunca oynatır;
+  // server bu kadar EKSTRA bekleyip (client bağlıysa o oynasın) sonra zorla bot oynatır. Böylece
+  // bağlı-ama-AFK insanda client autopilot devreye girer; KOPMUŞ insanda server kurtarır (oyun donmaz).
+  private readonly TURN_GRACE_MS = 6000;
+  private readonly TURN_MIN_MS = 8000;                // rules süresi >0 ama çok küçükse taban
+  private readonly TURN_NOLIMIT_SAFETY_MS = 90000;    // tur süresi KAPALI (0) iken yalnız anti-freeze tabanı
   private startAt = 0;                          // başlangıç geri sayımının başladığı an
   private readonly MATCH_END_MS = 10000;       // maç sonu → yeni maç geri sayımı
   private readonly START_MS = 7000;            // masa dolunca → oyun başlangıç geri sayımı
@@ -226,8 +234,22 @@ export class EllibirRoom extends Room {
     this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
     this.runEngine();
     this.pushViews();
+    // P2 SALON GÖRÜNÜRLÜĞÜ: koltuk REZERVE iken (180s) düşen oyuncunun presence satırını TAZE tut
+    //   (client heartbeat'i durdu → 60s sonra salondan düşerdi → koltuk "OTUR" görünürdü). Server
+    //   service-role ile last_seen/status/table_no PATCH'ler → salon koltuğu DOLU gösterir, kimse
+    //   oturamaz (zaten server koltuğu rezervde tutar). 50s'de bir (60s filtreden önce) yenile.
+    const uid = this.seatUsers.get(seat);
+    const mode = (this.metadata as any)?.mode ?? (this.humanSeats.length === 2 ? 'duo' : 'solo');
+    const tableNo = Number((this.metadata as any)?.table) || 1;
+    let presenceTimer: NodeJS.Timeout | null = null;
+    if (uid) {
+      keepSeatPresence(uid, tableNo, mode);   // hemen bir kez
+      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, mode), 50000);
+    }
+    const stopPresenceKeepalive = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
     try {
       const back = await this.allowReconnection(client, 180);  // 3 dk içinde dönerse (uygulama kapansa/ağ değişse bile) koltuğu geri al
+      stopPresenceKeepalive();
       // KONTROL İADESİ: bot devralmayı bırak (abandoned'tan çıkar) → sıra/karar tekrar insana.
       this.setAbandoned(seat, false);
       // ⚠ SEAT YENİDEN BİLDİR: reconnect'te Colyseus 'seat' mesajını OTOMATİK yollamaz; client
@@ -237,6 +259,7 @@ export class EllibirRoom extends Room {
       this.runEngine();
       this.pushViews();
     } catch {
+      stopPresenceKeepalive();
       this.cleanupSeat(client.sessionId, seat);   // 3 dk geçti → bot kalıcı devralır
     }
   }
@@ -277,6 +300,9 @@ export class EllibirRoom extends Room {
   // O koltukta KARAR verecek bağlı insan var mı? Terk edilmiş koltuk → bot oynar.
   private isHumanTurn(seat: number): boolean {
     if (!this.humanSeats.includes(seat)) return false;
+    // SÜRE AŞIMI ZORLAMASI: bu koltuk için TEK adım bot oynanacaksa "insan değil" say (stepOnce
+    // bot hamlesi üretir). forceBotSeat süre aşımı timer'ında set edilir, adım sonrası temizlenir.
+    if (this.forceBotSeat === seat) return false;
     const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
     return !ab.includes(seat);
   }
@@ -285,6 +311,7 @@ export class EllibirRoom extends Room {
   private async runEngine() {
     if (this.busy) return;
     this.busy = true;
+    this.clearTurnTimer(); // motor çalışırken tur timer'ı fire etmesin (loop sonunda yeniden kurulur)
     try {
       while (true) {
         // ÖNCE bekle: bir önceki hamlenin (insanın ıskartası dahil) uçuş animasyonu bitsin,
@@ -296,18 +323,25 @@ export class EllibirRoom extends Room {
           break;
         }
         this.game = r.state;
+        // SÜRE-AŞIMI ZORLAMASI: forceBotSeat'in turu (draw+action) bitip sıra BAŞKA koltuğa geçince
+        // zorlamayı kaldır → o insan koltuğu sonraki turunda yine kontrolü alır (kalıcı bot DEĞİL).
+        if (this.forceBotSeat != null && this.game.currentSeat !== this.forceBotSeat) this.forceBotSeat = null;
         this.pushViews();
       }
     } catch (e: any) {
       console.error('[runEngine] HATA:', e?.message, e?.stack);
     } finally {
       this.busy = false;
+      this.forceBotSeat = null; // güvenlik: her runEngine sonunda zorlama temizlenir (sonsuz zorla yok)
     }
     this.checkHandEnd();
     // SORGU ZAMAN AŞIMI (RULES.md 1.11): karar bir İNSANDA bekliyorsa 15 sn sonra
     // otomatik VER (applySorguTimeout). AFK ile bedava "verme" istismarı kapanır,
     // "sorgu 0'da takılma" çözülür. Karar bot'taysa stepOnce zaten ilerletti.
     this.armSorguTimeoutIfNeeded();
+    // ANA TUR ZAMAN AŞIMI: sıra bir İNSANDA (sorgu DIŞI) bekliyorsa, turnTimerSeconds+grace sonra
+    // otomatik bot hamlesi oynat → oyun ASLA donmaz (kopmuş/AFK insanda da sıra ilerler).
+    this.armTurnTimeoutIfNeeded();
     // TAKILMA GÜVENLİĞİ: oyun bitmediyse VE sıra hâlâ bot'taysa (insan sırası değil)
     // döngü beklenmedik şekilde durmuş demektir → non-blocking yeniden tetikle.
     // busy=false olduğundan tek adım daha çalışır; insan/handEnd'de kendiliğinden durur (sonsuz döngü yok).
@@ -382,6 +416,50 @@ export class EllibirRoom extends Room {
     }, this.SORGU_MS);
   }
 
+  private clearTurnTimer() {
+    if (this.turnTimer) { clearTimeout(this.turnTimer); this.turnTimer = null; }
+  }
+
+  /**
+   * Server tur zaman aşımı süresi (ms):
+   *  - turnTimerSeconds > 0 → kullanıcı süresi + grace (client autopilot önce oynar), taban TURN_MIN_MS.
+   *  - turnTimerSeconds == 0 (süre KAPALI) → oyunu süresizleştirme ama DONMAYI önle: uzun anti-freeze
+   *    tabanı (90s). Bağlı oyuncu rahat düşünür; kopmuş/donmuş turda 90s sonra bot ilerletir.
+   */
+  private turnMs(): number {
+    const sec = Number(this.game?.rules?.turnTimerSeconds);
+    if (!Number.isFinite(sec) || sec <= 0) return this.TURN_NOLIMIT_SAFETY_MS;
+    return Math.max(this.TURN_MIN_MS, sec * 1000 + this.TURN_GRACE_MS);
+  }
+
+  /**
+   * ANA TUR ZAMAN AŞIMI: sıra BAĞLI bir insanda (sorgu DIŞI, oynanabilir faz) ise süre+grace
+   * sonra TEK bot hamlesi zorla (forceBotSeat) → sıra ilerler, oyun donmaz. Sıra zaten bot/terk
+   * ise (runEngine onları oynatır) timer GEREKSİZ. Sorgu varsa armSorguTimeoutIfNeeded ilgilenir.
+   * Süre dolunca insan KOPMUŞSA bot devralır; AFK ama BAĞLIYSA client autopilot çoğu zaman daha
+   * erken oynamış olur (grace bunun için) — ikisi de güvenli: kötü-niyetli "donma" mümkün değil.
+   */
+  private armTurnTimeoutIfNeeded() {
+    this.clearTurnTimer();
+    if (!this.game || this.game.sorgu) return;                 // sorgu → ayrı timer
+    const phase = this.game.phase;
+    if (phase !== 'draw' && phase !== 'action') return;        // yalnız oynanabilir fazlar
+    const seat = this.game.currentSeat;
+    if (!this.isHumanTurn(seat)) return;                        // bot/terk → runEngine zaten oynatır
+    this.turnTimer = setTimeout(() => {
+      this.turnTimer = null;
+      // Bu arada insan oynadıysa / faz değiştiyse / sorgu açıldıysa boşver.
+      if (!this.game || this.game.sorgu) return;
+      const ph = this.game.phase;
+      if ((ph !== 'draw' && ph !== 'action') || this.game.currentSeat !== seat) return;
+      if (!this.isHumanTurn(seat)) return;                      // bu arada abandoned oldu → runEngine halleder
+      console.log(`[turnTimeout] seat=${seat} süre doldu → bot hamlesi zorlanıyor`);
+      this.forceBotSeat = seat;                                 // TEK tur bot (isHumanTurn false döner)
+      // runEngine bot hamle(ler)ini oynatır ve bittiğinde forceBotSeat'i temizler (finally).
+      this.runEngine();
+    }, this.turnMs());
+  }
+
   /// Aynı masada yeni maç: kartlar toplanır, yazboz/olaylar sıfırlanır, masa ayarı korunur.
   /// Oyuncu eksikse (biri çıktıysa) bekleme moduna geçer (game=null → "rakip bekleniyor").
   private newMatch() {
@@ -447,5 +525,6 @@ export class EllibirRoom extends Room {
     if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
     if (this.startTimer) clearTimeout(this.startTimer);
     this.clearSorguTimer();
+    this.clearTurnTimer();
   }
 }

@@ -92,6 +92,41 @@ export async function isChatBanned(userId: string | null | undefined): Promise<b
   }
 }
 
+/**
+ * DÜŞEN/REZERVE koltuğun salon görünürlüğü (P2): oyuncu kopunca client heartbeat'i durur →
+ * 60s sonra presence satırı salon listesinden düşer → koltuk "boş/OTUR" görünür. Server, koltuk
+ * REZERVE (abandoned, 180s) olduğu sürece bu kullanıcının presence satırını TAZE tutar: yalnız
+ * last_seen + status + table_no PATCH'lenir (isim/avatar/rol/cinsiyet KORUNUR — full upsert değil).
+ * Böylece salon koltuğu DOLU gösterir; kimse oturamaz (server zaten koltuğu rezervde tutar).
+ */
+export async function keepSeatPresence(
+  userId: string | null | undefined,
+  tableNo: number,
+  mode: string,
+): Promise<void> {
+  if (!userId || !supabaseConfigured()) return;
+  try {
+    const body = JSON.stringify({
+      status: 'masada',
+      table_no: tableNo,
+      table_mode: mode === 'duo' ? 'duo' : 'solo',
+      last_seen: new Date().toISOString(),
+    });
+    await fetch(`${URL}/rest/v1/presence?user_id=eq.${userId}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SERVICE,
+        Authorization: `Bearer ${SERVICE}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body,
+    });
+  } catch (e: any) {
+    console.error('[supabase] keepSeatPresence:', e?.message);
+  }
+}
+
 /** Bir Postgres RPC'yi service-role ile çağır (add_chips / deduct_chips). */
 export async function rpc(fn: string, args: Record<string, unknown>): Promise<boolean> {
   if (!supabaseConfigured()) { console.warn(`[supabase] RPC ${fn} atlandı (env yok)`); return false; }
