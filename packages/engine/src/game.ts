@@ -267,6 +267,19 @@ export function isDiscardLocked(state: GameState): boolean {
 }
 
 /**
+ * ATIŞ KİLİDİ (RULES.md işlek/okey atış kuralı): atılan kart İŞLEK (cezalı ya da
+ * çift-muaf) ya da OKEY ise rakip o kartı ALAMAZ ve SORAMAZ (çift olsa dahi).
+ * Kilit son atış olayının `islek` bayrağından okunur (applyDiscard işler).
+ */
+export function isDiscardAtisLocked(state: GameState): boolean {
+  for (let i = state.log.length - 1; i >= 0; i--) {
+    const e = state.log[i]!;
+    if (e.type === 'discard') return e.islek === true;
+  }
+  return false;
+}
+
+/**
  * DENEME ALIMI uygunluğu (RULES.md 1.6): sırası gelen oyuncu, SOL KOMŞUNUN
  * az önce attığı KİLİTSİZ kartı denemeye alabilir — hemen-kullanma şartı
  * YOKTUR; taahhüt gerçek hamleyle olur, GERİ BIRAK her an mümkündür.
@@ -277,6 +290,7 @@ export function canPickupDiscard(state: GameState, seat: number): boolean {
   if (!player || !top) return false;
   if (state.phase !== 'draw' || state.currentSeat !== seat) return false;
   if (lastDiscarderSeat(state) !== prevActiveSeat(state, seat)) return false;
+  if (isDiscardAtisLocked(state)) return false; // işlek/okey atışı rakip alamaz
   return !isDiscardLocked(state);
 }
 
@@ -291,6 +305,7 @@ export function canPickupLocked(state: GameState, seat: number): boolean {
   if (!player || !top || !state.rules.pairs.enabled) return false;
   if (state.phase !== 'draw' || state.currentSeat !== seat) return false;
   if (lastDiscarderSeat(state) !== prevActiveSeat(state, seat)) return false;
+  if (isDiscardAtisLocked(state)) return false; // işlek/okey atışı çift de alamaz
   if (!isDiscardLocked(state)) return false;
   return player.isCift || !player.hasOpened;
 }
@@ -670,7 +685,7 @@ function applyDrawStock(state: GameState): GameState {
     stock: stock.slice(0, -1),
     discard,
     phase: 'action',
-    matchLog: addLog(state, `${nameOf(state, player.seat)} desteden kart çekti`),
+    // OLAY LOGU YALNIZ EKSTREM olaylar içindir; normal çekme LOGLANMAZ.
     players: state.players.map((p) =>
       p.seat === player.seat ? { ...p, hand: [...p.hand, card] } : p,
     ),
@@ -813,7 +828,7 @@ function applySorguCevap(state: GameState, cevap: 'ver' | 'verme'): GameState {
   return {
     ...logged,
     sorgu: { ...sorgu, asama: 'sonuc' },
-    matchLog: addLog(state, `${nameOf(state, sorgu.sorulanSeat)} VERMEDİ (çift oldu)`),
+    matchLog: addLog(state, `${nameOf(state, sorgu.sorulanSeat)} vermedi çift oldu`),
     players: state.players.map((p) =>
       p.seat === sorgu.sorulanSeat ? { ...p, isCift: true } : p,
     ),
@@ -1137,7 +1152,9 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
   if (state.pickup) {
     const pk = state.pickup;
     if (cardId === pk.cardId) {
-      if (pk.zorunlu) {
+      // ZORUNLU alım kartı geri atılamaz — TEK İSTİSNA: o kart eldeki SON kartsa
+      // (atılacak başka kart yok), aksi halde tur kilitlenir. Bu durumda atış = bitiş.
+      if (pk.zorunlu && player.hand.length > 1) {
         throw new MoveError('zorunluAlim', 'Sorguda VER çıktı; kartı almak zorundasın.');
       }
       if (!pk.committed) {
@@ -1154,12 +1171,12 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
       );
     }
     state = commitPickup(state);
-    state = { ...state, matchLog: addLog(state, `${nameOf(state, state.currentSeat)} yerden kart aldı`) };
+    // OLAY LOGU YALNIZ EKSTREM: normal "yerden kart aldı" LOGLANMAZ.
     if (!pk.wasOpened && !player.hasOpened) {
       // Açmadan devam = ÇİFT (geri dönüşsüz; masadaki açar 101'e çıkar).
       state = {
         ...state,
-        matchLog: addLog(state, `${nameOf(state, state.currentSeat)} çift oldu`),
+        matchLog: addLog(state, `${nameOf(state, state.currentSeat)} aldı çift oldu`),
         players: state.players.map((p) =>
           p.seat === state.currentSeat ? { ...p, isCift: true } : p,
         ),
@@ -1170,11 +1187,28 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
   }
 
   const card = cardsFromHand(player, [cardId])[0]!;
+  const newHand0 = player.hand.filter((c) => c.id !== cardId);
+  const isFinishThrow = newHand0.length === 0;
 
-  // İŞLEK cezası: masadaki bir peri işleyebilen kartı atmak ceza yazar
-  // (yazboza ayrı satır olarak düşer).
-  const islekPenalty =
-    state.rules.islek.penaltyEnabled && isIslekCard(card, state.melds, state.rules)
+  // İŞLEK-ÇİFT MUAFİYETİ (RULES.md 1.7 — kullanıcı kanunu): atılan kart İŞLEKSE ve
+  // oyuncunun elinde o karttan 2 ADET (özdeş çift) varsa (yani atıştan SONRA elde hâlâ
+  // aynı kart kalıyorsa), CEZA YEMEZ. ("çift olması/olmaması" ile ALAKASIZ.)
+  const islekCiftMuaf =
+    !card.joker &&
+    newHand0.some((c) => c.rank === card.rank && c.suit === card.suit);
+
+  // CEZALAR (RULES.md 1.7): BİTİŞ atışı tek değerlendirilir — bitişte işlek/okey
+  // ıskarta cezası YAZILMAZ (çift ceza yok). Okey ıskartaya atılırsa 100, işlek 50.
+  const islekHit =
+    !isFinishThrow &&
+    state.rules.islek.penaltyEnabled &&
+    !card.joker &&
+    !islekCiftMuaf &&
+    isIslekCard(card, state.melds, state.rules);
+  const okeyHit = !isFinishThrow && state.rules.islek.penaltyEnabled && card.joker;
+  const islekPenalty = okeyHit
+    ? state.rules.islek.okeyPenaltyPoints
+    : islekHit
       ? state.rules.islek.penaltyPoints
       : 0;
   // İşlek bayrağı SON ATIŞ olayına işlenir (pickupCommit araya girebilir).
@@ -1184,10 +1218,14 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
     }
     return -1;
   })();
-  const log =
-    islekPenalty > 0
-      ? state.log.map((e, i) => (i === lastDiscardIdx ? { ...e, islek: true } : e))
-      : state.log;
+  // ATILAN KART KİLİTLİ Mİ: işlek (cezalı VEYA çift-muaf) ya da okey ıskarta → rakip
+  // ALAMAZ/SORAMAZ (RULES.md işlek/okey atış kuralı). Bitiş atışı kilitlemez.
+  const atisKilit =
+    !isFinishThrow &&
+    (okeyHit || islekHit || (islekCiftMuaf && isIslekCard(card, state.melds, state.rules)));
+  const log = atisKilit
+    ? state.log.map((e, i) => (i === lastDiscardIdx ? { ...e, islek: true } : e))
+    : state.log;
   const sheet =
     islekPenalty > 0
       ? [
@@ -1201,17 +1239,20 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
         ]
       : state.sheet;
 
-  const newHand = player.hand.filter((c) => c.id !== cardId);
-  // Atış logu: işlek (ceza puanı) veya okey atışı (bitiş değilse). Bitiş mesajı endHand'de.
+  const newHand = newHand0;
+  // OLAY LOGU YALNIZ EKSTREM (RULES.md): okey ıskarta cezası, işlek cezası, işlek-çift
+  // muafiyeti. NORMAL çek/at LOGLANMAZ. Bitiş mesajı endHand'de tek değerlendirilir.
   const atanAd = nameOf(state, player.seat);
   const atisLog =
-    newHand.length > 0
-      ? islekPenalty > 0
-        ? `${atanAd} işlek attı ${islekPenalty} puan ceza!`
-        : card.joker
-          ? `${atanAd} OKEY attı!`
-          : `${atanAd} kart attı`
-      : null;
+    newHand.length === 0
+      ? null
+      : okeyHit
+        ? `${atanAd} okeyi ıskartaya attı, ceza yedi`
+        : islekHit
+          ? `${atanAd} işlek attı, ceza yedi`
+          : islekCiftMuaf && isIslekCard(card, state.melds, state.rules)
+            ? `${atanAd} işlek attı ancak çifti onda olduğu için ceza yemedi`
+            : null;
   const next: GameState = {
     ...state,
     log,

@@ -55,15 +55,26 @@ function playMatch(seed: number): GameState {
       ? (sg.asama === 'ortakGorus' ? sg.partnerSeat! : sg.asama === 'cevap' ? sg.sorulanSeat : sg.askerSeat)
       : state.currentSeat;
     const before = state.players.map((p) => p.totalScore);
+    const sheetLenBefore = state.sheet.length;
     const move = bots[seat]!.nextMove(viewFor(state, seat));
     try {
       state = applyMove(state, move);
     } catch {
       // Gerçek oyundaki bot FALLBACK'i (GameSession.StepBots / Edge): geçersiz hamlede güvenli oyna.
-      if (state.phase === 'draw') {
+      if (state.sorgu) {
+        // Bekleyen sorgu hamlesini güvenli kapat (varsayılan VER).
+        if (state.sorgu.asama === 'ortakGorus') {
+          state = applyMove(state, { type: 'sorguOrtakGorus', gorus: 'ver' });
+        } else if (state.sorgu.asama === 'cevap') {
+          state = applyMove(state, { type: 'sorguCevap', cevap: 'ver' });
+        } else {
+          state = applyMove(state, { type: 'sorguSonuc', al: true });
+        }
+      } else if (state.phase === 'draw') {
         state = applyMove(state, { type: 'drawStock' });
       } else {
-        const me = state.players[seat]!;
+        // Sırası gelen oyuncu (currentSeat) güvenli atış yapar; ZORUNLU kart asla atılmaz.
+        const me = state.players[state.currentSeat]!;
         const zorunluId = state.pickup?.zorunlu ? state.pickup.cardId : null;
         const cand = me.hand.filter((c) => c.id !== zorunluId);
         const worst = (cand.length ? cand : me.hand).reduce((a, b) =>
@@ -76,11 +87,12 @@ function playMatch(seed: number): GameState {
     if (state.phase === 'handEnded' || state.phase === 'matchEnded') {
       // Cezalar toplamlara doğru eklendi mi? (Son atış işlekse atan +ceza alır.)
       const result = state.lastHandResult!;
-      const lastEvent = state.log[state.log.length - 1];
-      const islekExtra =
-        lastEvent?.type === 'discard' && lastEvent.islek
-          ? state.rules.islek.penaltyPoints
-          : 0;
+      // İŞLEK/OKEY ıskarta cezası (50 ya da 100; muafiyette 0) yazboza 'islek'
+      // satırı olarak düşer — gerçek tutarı oradan oku (log bayrağı tutar DEĞİL).
+      const islekExtra = state.sheet
+        .slice(sheetLenBefore)
+        .filter((e) => e.kind === 'islek' && e.seat === seat)
+        .reduce((s, e) => s + e.amount, 0);
       for (const p of state.players) {
         const extra = p.seat === seat ? islekExtra : 0;
         expect(p.totalScore).toBe(before[p.seat]! + extra + (result.penalties[p.seat] ?? 0));

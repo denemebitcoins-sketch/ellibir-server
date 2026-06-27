@@ -63,6 +63,8 @@ export interface IslekConfig {
   penaltyEnabled: boolean;
   /** İşlek kart atma cezası (ayarlanacak; +50 yer tutucu). */
   penaltyPoints: number;
+  /** OKEY ıskartaya atma cezası (işlek 50 iken okey 100). */
+  okeyPenaltyPoints: number;
 }
 
 export interface RuleConfig {
@@ -215,6 +217,7 @@ export const DEFAULT_RULES: RuleConfig = {
     indicatorsEnabled: true,
     penaltyEnabled: true,
     penaltyPoints: 50,
+    okeyPenaltyPoints: 100,
   },
 
   scoring: {

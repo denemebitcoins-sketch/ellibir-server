@@ -53,10 +53,11 @@ describe('el kurulumu ve tur akışı', () => {
 
   it('açık yığından alınan kart ele gelir (deneme modu — RULES.md 1.6)', () => {
     let state = createGame({ seed: 5, dealerSeat: 0 });
-    // Alıcı (1. koltuk) açık olsun ve atılan kart perdesini işlesin.
-    const dropped = c('D', 7);
+    // Alıcı (1. koltuk) açık olsun. Atılan kart İŞLEK OLMAMALI (işlek/okey atışı
+    // artık kilitli — rakip alamaz, RULES.md işlek atış kuralı); ♠2 hiçbir peri işlemez.
+    const dropped = c('S', 2);
     state = rig(state, {
-      hands: { 0: [dropped, c('S', 2)], 1: [c('H', 3), c('H', 9)] },
+      hands: { 0: [dropped, c('S', 10)], 1: [c('H', 3), c('H', 9)] },
       opened: [1],
       melds: [meld('m1', 'run', [c('D', 4), c('D', 5), c('D', 6)])],
     });

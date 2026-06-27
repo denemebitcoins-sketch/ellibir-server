@@ -191,10 +191,13 @@ describe('açış ve işleme sınırları', () => {
 
   it('açık hamle kaydı tutulur; DENEME ALIMI taahhüde kadar GİZLİDİR (1.6)', () => {
     let state = createGame({ seed: 5, dealerSeat: 0 });
-    // 1. koltuk açık ve atılan kart perdesini işler.
-    const dropped = c('D', 7);
+    // 1. koltuk açık. Atılan kart İŞLEK OLMAMALI (işlek/okey atışı artık kilitli —
+    // rakip alamaz); ♠2 hiçbir peri işlemez, deneme alımı serbest kalır.
+    const dropped = c('S', 2);
+    const h2 = c('H', 2);
+    const cl2 = c('C', 2);
     state = rig(state, {
-      hands: { 0: [dropped, c('S', 2)], 1: [c('H', 3), c('H', 9)] },
+      hands: { 0: [dropped, c('S', 10)], 1: [h2, cl2, c('H', 9)] },
       opened: [1],
       melds: [meldOf('m1', 'run', [c('D', 4), c('D', 5), c('D', 6)], 1)],
     });
@@ -202,9 +205,12 @@ describe('açış ve işleme sınırları', () => {
     state = applyMove(state, { type: 'pickupDiscard' });
     // Deneme henüz kayda GEÇMEDİ (rakipler görmez).
     expect(state.log.map((e) => e.type)).toEqual(['discard']);
-    // Taahhüt (işleme) anında pickupCommit yayınlanır.
-    state = applyMove(state, { type: 'extend', meldId: 'm1', cardId: dropped.id });
-    expect(state.log.map((e) => e.type)).toEqual(['discard', 'pickupCommit', 'extend']);
+    // Taahhüt (yeni perde indirme) anında pickupCommit yayınlanır.
+    state = applyMove(state, {
+      type: 'meld',
+      cards: [dropped.id, h2.id, cl2.id],
+    });
+    expect(state.log.map((e) => e.type)).toEqual(['discard', 'pickupCommit', 'meld']);
     expect(state.log[1]?.cardId).toBe(dropped.id);
   });
 });
