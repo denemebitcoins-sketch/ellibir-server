@@ -218,6 +218,7 @@ export class EllibirRoom extends Room {
 
   /** ANORMAL kopma (0.17 onDrop): koltuğu HEMEN bota devret + 180s rezerve tut. */
   async onDrop(client: Client) {
+    console.log(`[onDrop] TETİKLENDİ sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
@@ -253,6 +254,7 @@ export class EllibirRoom extends Room {
 
   /** Zamanında reconnect (0.17 onReconnect): kontrolü insana geri ver (onDrop await'e ek garanti). */
   onReconnect(client: Client) {
+    console.log(`[onReconnect] TETİKLENDİ sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) return;
     this.setAbandoned(seat, false);            // bot diskalifiye
@@ -263,6 +265,7 @@ export class EllibirRoom extends Room {
 
   /** KASITLI çıkış (.leave()) ya da reconnect başarısız (0.17 onLeave(code)): koltuk KALICI bot. */
   onLeave(client: Client, _code?: number) {
+    console.log(`[onLeave] TETİKLENDİ sessionId=${client.sessionId} code=${_code} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
