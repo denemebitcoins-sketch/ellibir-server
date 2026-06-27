@@ -143,5 +143,15 @@ export async function settleMatch(opts: {
 
   for (const uid of losers) await rpc('deduct_chips', { p_user_id: uid, p_amount: bet });
   for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: perWinner - bet > 0 ? perWinner - bet : perWinner });
+
+  // İSTATİSTİK: oynanan maç (matches) HER gerçek oyuncuda +1; galibiyet (wins) yalnız
+  // kazananlarda +1. Ayrıca kazanan serisi (cur_streak/best_streak) ve toplam kazanç
+  // (total_won) güncellenir. Bot koltukları seatUsers'ta YOK → yalnız insanlar sayılır.
+  // record_match_stats RPC tek atomik UPDATE yapar (winrate = wins/matches buradan doğru çıkar).
+  for (const uid of winners)
+    await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: perWinner - bet > 0 ? perWinner - bet : 0 });
+  for (const uid of losers)
+    await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
+
   console.log(`[settle] winners=${winners.length} losers=${losers.length} pot=${pot} perWinner=${perWinner}`);
 }

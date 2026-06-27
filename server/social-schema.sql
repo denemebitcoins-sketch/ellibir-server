@@ -97,6 +97,13 @@ alter table public.profiles add column if not exists role   text not null defaul
 alter table public.presence add column if not exists gender text;
 alter table public.presence add column if not exists role   text not null default 'normal';
 
+-- SALON MASA EŞLEME (zorunlu): heartbeat artık masadayken masanın MODUNU da yazar
+--   (solo→1 insan+3 bot, duo→2 insan+2 bot). Salon koltuk/bot dağılımını bundan türetir.
+--   Bu kolon YOKSA heartbeat POST'u tümden reddedilir (PostgREST bilinmeyen kolon) → presence çöker.
+--   NOT: status/table_no/chips/avatar_url kolonları da heartbeat tarafından yazılır; bu projede
+--   elle eklenmişti — eksikse aşağıdaki satırlara benzer şekilde ekleyin.
+alter table public.presence add column if not exists table_mode text;   -- "solo" | "duo" | null
+
 -- ─────────────────────────────────────────────────────────────────────
 -- 5) LOBBY_CHAT — genel lobi sohbeti (oyun dışı, herkese açık okuma).
 --    Son ~50 mesaj gösterilir. Giriş yapan kendi adına yazar.
@@ -303,6 +310,46 @@ alter table public.profiles add column if not exists game_banned_until timestamp
 -- "kendi satırını oku" zaten vardır. Yoksa Supabase'de ekleyin:
 --   create policy profiles_self_select on public.profiles
 --     for select to authenticated using (auth.uid() = id);
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 11) MAÇ İSTATİSTİĞİ — record_match_stats RPC (MADDE 4)
+--     Online Colyseus maç-sonu settle akışı her gerçek oyuncu için bu RPC'yi
+--     çağırır: matches +1 (HER oyuncu), wins +1 (yalnız kazanan), kazanan serisi
+--     (cur_streak/best_streak) ve total_won güncellenir. Bot koltukları sunucuda
+--     seatUsers'ta olmadığından sayılmaz → winrate = wins/matches DOĞRU hesaplanır.
+--     Service-role ile çağrılır (SECURITY DEFINER). Profil yoksa sessiz atlanır.
+--     NOT: cur_streak/total_won kolonları yoksa önce eklenir (idempotent).
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.profiles add column if not exists matches     integer not null default 0;
+alter table public.profiles add column if not exists wins        integer not null default 0;
+alter table public.profiles add column if not exists best_streak integer not null default 0;
+alter table public.profiles add column if not exists cur_streak  integer not null default 0;
+alter table public.profiles add column if not exists total_won   bigint  not null default 0;
+
+create or replace function public.record_match_stats(
+  p_user_id  text,
+  p_won      boolean,
+  p_winnings bigint default 0
+)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  update public.profiles
+  set
+    matches     = coalesce(matches, 0) + 1,
+    wins        = coalesce(wins, 0) + (case when p_won then 1 else 0 end),
+    cur_streak  = case when p_won then coalesce(cur_streak, 0) + 1 else 0 end,
+    best_streak = greatest(
+                    coalesce(best_streak, 0),
+                    case when p_won then coalesce(cur_streak, 0) + 1 else 0 end
+                  ),
+    total_won   = coalesce(total_won, 0) + (case when p_won then greatest(p_winnings, 0) else 0 end)
+  where id = p_user_id;
+  -- profil yoksa NOT FOUND → sessiz geç (anon kullanıcı kaydı eksikse maç akışını bozma).
+end;
+$$;
 
 -- =====================================================================
 -- BİTTİ. presence + direct_messages + lobby_chat + reports + friendships
