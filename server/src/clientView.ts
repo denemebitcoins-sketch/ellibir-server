@@ -261,6 +261,25 @@ export function sortHandOrder(hand: any[], rules: any, mode: 'seri' | 'cift'): s
     blockUnits.push({ ids, red });
   }
 
+  // ÇİFT DİZİM — OKEY EŞLEME (kural-uyumlu, maxJokersPerPair=1; okey-okey YOK): boştaki her
+  // okey'i eşleyebileceği bir TEK kartla YAN YANA diz → joker+tek çifti dizimde görünür ve
+  // computeArrangedBlocks onu çift sayar (oyuncu elle çiftlemek zorunda kalmaz). C# birebir.
+  if (mode === 'cift' && rules?.pairs?.enabled && (rules.pairs.maxJokersPerPair ?? 0) > 0) {
+    const freeJokers = hand.filter((c: any) => c.joker && !used.has(c.id));
+    const freeSingles = hand
+      .filter((c: any) => !c.joker && !used.has(c.id))
+      .sort((a: any, b: any) => b.rank - a.rank); // en yüksek puanlı tek önce
+    let si = 0;
+    for (const jk of freeJokers) {
+      if (si >= freeSingles.length) break;
+      const single = freeSingles[si++];
+      if (analyzePair([single, jk], rules) == null) continue; // güvenlik
+      used.add(single.id); used.add(jk.id);
+      const red = single.suit === 'H' || single.suit === 'D';
+      blockUnits.push({ ids: [single.id, jk.id], red });
+    }
+  }
+
   const singleUnits: { ids: string[]; red: boolean }[] = [];
   for (const suit of ['S', 'H', 'D', 'C']) {
     const grp = hand
