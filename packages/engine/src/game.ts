@@ -1081,10 +1081,13 @@ function applyNewMeld(state: GameState, cardIds: readonly CardId[]): GameState {
     cards: analysis.cards,
   };
   const used = new Set(cardIds);
-  // PARÇA AÇIŞ: oyuncu açıkken indirdiği her ek per/küt, masada gösterilen açış
-  // puanına (openingValue) EKLENİR — rozet ilk perin değil TÜM yer perlerinin
-  // toplamını gösterir (40 → 81 → 127 ...). Çift modunda per puanı sayılmaz;
-  // openingPairs ayrıca takip edilir (yeni çift indirilince +1).
+  // PARÇA AÇIŞ: oyuncu AÇIŞ TURUNDA parça parça indirdiği her ek per/küt, masada
+  // gösterilen açış puanına (openingValue) EKLENİR — rozet ilk perin değil aynı
+  // turda inen TÜM açış perlerinin toplamını gösterir (40 → 81 → 127 ...).
+  // ÖNEMLİ: openingValue YALNIZ açılış turunda birikir. Açılış kesinleştikten
+  // SONRAKİ turlarda inen yeni perler rozete EKLENMEZ (rozet ilk açtığı puandır,
+  // sonradan büyümez). Çift modunda per puanı sayılmaz; openingPairs ayrıca
+  // takip edilir (yeni çift indirilince +1).
   const isPairMode = player.openMode === 'pairs';
   // AÇIŞ LOGU TEK OLSUN: AÇIŞ TURUNDA indirilen ek perler açışın PARÇASIDIR → ayrı
   // loglanmaz (özet log ilk atışta düşer). Açıştan SONRAKİ turlarda indirilen yeni
@@ -1101,7 +1104,7 @@ function applyNewMeld(state: GameState, cardIds: readonly CardId[]): GameState {
         ? {
             ...p,
             hand: removeFromHand(p.hand, used),
-            openingValue: isPairMode ? (p.openingValue ?? 0) : (p.openingValue ?? 0) + analysis.points,
+            openingValue: isPairMode || !isOpeningTurn ? (p.openingValue ?? 0) : (p.openingValue ?? 0) + analysis.points,
             openingPairs: isPairMode ? (p.openingPairs ?? 0) + 1 : (p.openingPairs ?? 0),
           }
         : p,

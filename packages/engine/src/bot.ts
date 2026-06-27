@@ -1,4 +1,4 @@
-import type { Card, CardId, Meld, Move, PlayerView, Rank, Suit } from './types';
+import type { Card, CardId, Meld, Move, NormalCard, PlayerView, Rank, Suit } from './types';
 import type { MoveProvider } from './provider';
 import { canExtend, canRetrieveJoker, canTakeDiscardView } from './game';
 import { analyzePair, handCardPenalty } from './melds';
@@ -132,8 +132,68 @@ export class HeuristicBot implements MoveProvider {
         : base;
       return chase ? Math.max(base, barajMin) : base;
     }
-    // garantici ve dengeli tabanı hedefler (garantici erken açış için ek tampon yok).
-    return base;
+    // garantici ve dengeli: TABAN + ERKEN-EL MUHASEBE TAMPONU.
+    // Sorun: bot sırf eşiği geçti diye ilk elde ŞAK açıyordu (84/82… ne çıkarsa).
+    // Sezgi: deste hâlâ BOLKEN (erken el) ve açış İNCE bir marjla geçiliyorken
+    // (taban + birkaç puan) AMA elde henüz perlenmemiş GELİŞİM malzemesi (artık
+    // çiftler / yarım seriler) varsa, çok düşük marjla açmak yerine bir-iki tur
+    // el gelişimini bekle. Tampon profile göre: garantici en az bekler (erken
+    // açış onun stili), dengeli biraz daha. Aşırı temkinli olmamak için tampon
+    // küçük tutulur, YALNIZ (a) deste bolken (erken), (b) GERÇEK gelişim
+    // malzemesi varken uygulanır; deste erirken tabana iner ("kapı kapanmadan
+    // aç"). Geride değilsem beklemeye istekliyim; gerideysem tampon yarıya iner.
+    const earlyStock = view.stockCount > view.players.length * 6;
+    if (!earlyStock) return base;
+    // GELİŞİM malzemesi: açış perlerine GİRMEYEN kartlarda kaç adet "umut veren"
+    // parça (artık özdeş çift veya aynı renk ardışık komşu) var? Bunlar bir-iki
+    // çekişle yeni perlere/işleklere dönüşebilir → erken açmak bu potansiyeli
+    // israf eder. Yoksa (artıklar çöp) beklemenin anlamı yok → tabandan aç.
+    const upside = this.openUpside(view);
+    if (upside < 2) return base; // en az 2 umutlu parça yoksa bekleme
+    let buffer = this.profile === 'garantici' ? 5 : 10;
+    if (this.behind(view)) buffer = Math.floor(buffer / 2); // gerideysem fırsatçı ol
+    // Hedef tabanın ÜSTÜNDE: bot bu turda açmaz, deste hâlâ bolken bir-iki çekişle
+    // artık parçaları pere çevirip DAHA İYİ açış bekler. Deste eridiğinde (earlyStock
+    // false) tabana döner, böylece "kapı kapanmadan" mutlaka açar (kilitlenmez).
+    return base + buffer;
+  }
+
+  /**
+   * AÇIŞ artısı: en iyi açış perlerine GİRMEYEN ("artık") kartlarda gelişim umudu
+   * veren parça sayısı — artık özdeş çiftler + aynı renk ardışık komşu kümeler.
+   * Yüksek = el daha büyüyecek (erken açma); düşük = artıklar çöp (tabandan aç).
+   */
+  private openUpside(view: PlayerView): number {
+    const insight = analyzeHand(view.hand, view.rules);
+    const melded = new Set(insight.melds.flat().map((c) => c.id));
+    const rest = view.hand.filter((c): c is NormalCard => !melded.has(c.id) && !c.joker);
+    let score = 0;
+    // (a) artık özdeş çiftler (aynı rank+renk) → küt/seri çekirdeği.
+    const byId = new Map<string, number>();
+    for (const c of rest) byId.set(`${c.suit}${c.rank}`, (byId.get(`${c.suit}${c.rank}`) ?? 0) + 1);
+    for (const n of byId.values()) score += Math.floor(n / 2);
+    // (b) artık aynı rank FARKLI renk (küt çekirdeği: 2+ aynı sayı).
+    const byRank = new Map<number, Set<string>>();
+    for (const c of rest) {
+      const s = byRank.get(c.rank) ?? new Set<string>();
+      s.add(c.suit);
+      byRank.set(c.rank, s);
+    }
+    for (const s of byRank.values()) if (s.size >= 2) score += 1;
+    // (c) aynı renk ardışık komşu (seri çekirdeği: 2+ peş peşe).
+    const bySuit = new Map<Suit, number[]>();
+    for (const c of rest) {
+      const arr = bySuit.get(c.suit) ?? [];
+      arr.push(c.rank);
+      bySuit.set(c.suit, arr);
+    }
+    for (const arr of bySuit.values()) {
+      const sorted = [...new Set(arr)].sort((a, b) => a - b);
+      for (let i = 0; i + 1 < sorted.length; i++) {
+        if (sorted[i + 1]! - sorted[i]! <= 2) score += 1; // bitişik/aralı komşu
+      }
+    }
+    return score;
   }
 
   /* ---------------------------- çekiş ---------------------------- */
