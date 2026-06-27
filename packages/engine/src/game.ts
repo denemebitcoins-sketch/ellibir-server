@@ -325,6 +325,8 @@ export function discardTakeOptions(
 /**
  * SOR uygunluğu (RULES.md 1.11): yalnız deneme modundaki alım üzerinde,
  * iki taraf da kesin çift DEĞİLKEN, taahhütten önce ve alım başına bir kez.
+ * AÇIK ELE SORULAMAZ (kullanıcı kuralı): sorulan oyuncu hasOpened ise sorgu
+ * açılamaz — açık oyuncudan kuralları dahilinde sormadan ALINIR.
  */
 export function canSor(state: GameState, seat: number): boolean {
   const p = state.pickup;
@@ -334,7 +336,9 @@ export function canSor(state: GameState, seat: number): boolean {
   if (p.committed || p.zorunlu || p.sorguUsed) return false;
   if (player.isCift) return false; // alan kesin çiftse sorgu yok
   const sorulan = state.players[prevActiveSeat(state, seat)];
-  return sorulan ? !sorulan.isCift : false; // atan kesin çiftse kart zaten kilitliydi
+  if (!sorulan) return false;
+  if (sorulan.hasOpened) return false; // ELİ AÇIK olana sorgu açılamaz
+  return !sorulan.isCift; // atan kesin çiftse kart zaten kilitliydi
 }
 
 /** AÇIŞI GERİ AL hakkı: bu turda açtı, henüz kart atmadı (snapshot duruyor). */
@@ -876,6 +880,22 @@ function applySorguSonuc(state: GameState, al: boolean): GameState {
   };
 }
 
+/**
+ * SORGU ZAMAN AŞIMI (RULES.md 1.11 — `SORGU_VARSAYILAN = "VER"`): süre dolunca
+ * kararsız taraf otomatik VER sayılır (AFK ile bedava "verme" istismarı kapanır).
+ * - ortakGorus → ortak 'ver' der (cevap aşamasına geçer)
+ * - cevap → sorulan VERİR (kart askerde kalır, zorunlu alım)
+ * - sonuc → asker GERİ BIRAKIR (al:false) — AFK askeri çifte zorlamak haksız olur.
+ * Aktif sorgu yoksa state aynen döner (idempotent; güvenli).
+ */
+export function applySorguTimeout(state: GameState): GameState {
+  const sorgu = state.sorgu;
+  if (!sorgu) return state;
+  if (sorgu.asama === 'ortakGorus') return applySorguOrtakGorus(state, 'ver');
+  if (sorgu.asama === 'cevap') return applySorguCevap(state, 'ver');
+  return applySorguSonuc(state, false);
+}
+
 /** Açış gruplarının ortak doğrulaması: kartlar elde, tekil ve atacak kart kalıyor. */
 function collectOpeningGroups(
   player: PlayerState,
@@ -936,16 +956,13 @@ function commitOpening(
       ? Math.max(state.enYuksekCiftAcisi ?? 0, analyses.length)
       : state.enYuksekCiftAcisi;
 
-  const acanAd = nameOf(state, player.seat);
-  const acisMsg = openMode === 'pairs'
-    ? `${acanAd} ${analyses.length} çift açtı`
-    : `${acanAd} ${openPoints} puanlık seri açtı`;
-
+  // AÇIŞ LOGU TEK OLSUN (kullanıcı kuralı): açış parça parça yapılabilir (open +
+  // ek meld'ler). Ne açış anında ne de ara perlerde loglanır; açış KESİNLEŞİNCE
+  // (ilk kart atışı, applyDiscard) toplam puanla TEK özet log düşer.
   return {
     ...state,
     // Açış ÖNCESİ state'i sakla → aynı turda (kart atılmadan) cancelOpen ile geri dönülür.
     openSnapshot: { ...state, openSnapshot: null },
-    matchLog: addLog(state, acisMsg),
     enYuksekSeriAcisi,
     enYuksekCiftAcisi,
     melds: [...state.melds, ...newMelds],
@@ -1069,10 +1086,16 @@ function applyNewMeld(state: GameState, cardIds: readonly CardId[]): GameState {
   // toplamını gösterir (40 → 81 → 127 ...). Çift modunda per puanı sayılmaz;
   // openingPairs ayrıca takip edilir (yeni çift indirilince +1).
   const isPairMode = player.openMode === 'pairs';
+  // AÇIŞ LOGU TEK OLSUN: AÇIŞ TURUNDA indirilen ek perler açışın PARÇASIDIR → ayrı
+  // loglanmaz (özet log ilk atışta düşer). Açıştan SONRAKİ turlarda indirilen yeni
+  // perde gerçek bir olaydır → "yeni perde indirdi" loglanır.
+  const isOpeningTurn = player.openedOnTurn === state.turnCount;
   return {
     ...state,
     melds: [...state.melds, meld],
-    matchLog: addLog(state, `${nameOf(state, player.seat)} yeni perde indirdi`),
+    matchLog: isOpeningTurn
+      ? (state.matchLog ?? [])
+      : addLog(state, `${nameOf(state, player.seat)} yeni perde indirdi`),
     players: state.players.map((p) =>
       p.seat === player.seat
         ? {
@@ -1184,6 +1207,18 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
     }
     state = { ...state, pickup: null };
     player = currentPlayer(state);
+  }
+
+  // AÇIŞ LOGU TEK OLSUN (kullanıcı kuralı): bu turda AÇTIYSA, açış KART ATIŞIYLA
+  // kesinleşir — burada TOPLAM açış puanı/çift adediyle TEK özet log düşer
+  // (ara perler loglanmadı). Çift modda adet, seri modda toplam puan.
+  if (player.openedOnTurn === state.turnCount && player.hasOpened) {
+    const acanAd = nameOf(state, player.seat);
+    const acisMsg =
+      player.openMode === 'pairs'
+        ? `${acanAd} ${player.openingPairs ?? 0} çift açtı`
+        : `${acanAd} ${player.openingValue ?? 0} puanlık seri açtı`;
+    state = { ...state, matchLog: addLog(state, acisMsg) };
   }
 
   const card = cardsFromHand(player, [cardId])[0]!;

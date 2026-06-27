@@ -268,7 +268,8 @@ export class HeuristicBot implements MoveProvider {
     if (!pk.sorguUsed && !pk.zorunlu && !view.isCift && view.hand.length > 2) {
       const n = view.players.length;
       const atan = view.players.find((p) => p.seat === (view.seat - 1 + n) % n);
-      if (atan && !atan.isCift) return { type: 'sor' };
+      // AÇIK ELE / ÇİFTE SORULAMAZ (kullanıcı kuralı + 1.11) — canSor ile aynı koşul.
+      if (atan && !atan.isCift && !atan.hasOpened) return { type: 'sor' };
     }
     const card = view.hand.find((c) => c.id === pk.cardId);
     if (!card) return null;

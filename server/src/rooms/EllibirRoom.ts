@@ -1,5 +1,5 @@
 import { Room, Client } from '@colyseus/core';
-import { createGame, startNextHand } from '../../../packages/engine/src/game';
+import { createGame, startNextHand, applySorguTimeout } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
@@ -21,6 +21,9 @@ export class EllibirRoom extends Room {
   private handEndTimer: NodeJS.Timeout | null = null;
   private matchEndTimer: NodeJS.Timeout | null = null;
   private startTimer: NodeJS.Timeout | null = null;
+  private sorguTimer: NodeJS.Timeout | null = null;   // insan sorgu kararı zaman aşımı (→ VER)
+  private sorguDeadlineAt = 0;                         // sorgu sayacının biteceği an (client geri sayımı)
+  private readonly SORGU_MS = 15000;                  // RULES.md 1.11: SORGU_SURESI = 15 sn
   private startAt = 0;                          // başlangıç geri sayımının başladığı an
   private readonly MATCH_END_MS = 10000;       // maç sonu → yeni maç geri sayımı
   private readonly START_MS = 7000;            // masa dolunca → oyun başlangıç geri sayımı
@@ -284,6 +287,10 @@ export class EllibirRoom extends Room {
       this.busy = false;
     }
     this.checkHandEnd();
+    // SORGU ZAMAN AŞIMI (RULES.md 1.11): karar bir İNSANDA bekliyorsa 15 sn sonra
+    // otomatik VER (applySorguTimeout). AFK ile bedava "verme" istismarı kapanır,
+    // "sorgu 0'da takılma" çözülür. Karar bot'taysa stepOnce zaten ilerletti.
+    this.armSorguTimeoutIfNeeded();
     // TAKILMA GÜVENLİĞİ: oyun bitmediyse VE sıra hâlâ bot'taysa (insan sırası değil)
     // döngü beklenmedik şekilde durmuş demektir → non-blocking yeniden tetikle.
     // busy=false olduğundan tek adım daha çalışır; insan/handEnd'de kendiliğinden durur (sonsuz döngü yok).
@@ -316,6 +323,46 @@ export class EllibirRoom extends Room {
       if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
       this.matchEndTimer = setTimeout(() => this.newMatch(), this.MATCH_END_MS);
     }
+  }
+
+  /** Aktif sorgu varsa kararın hangi koltukta olduğunu döndür (stepOnce ile aynı mantık). */
+  private sorguDeciderSeat(): number | null {
+    const sg = this.game?.sorgu;
+    if (!sg) return null;
+    if (sg.asama === 'ortakGorus') return sg.partnerSeat;
+    if (sg.asama === 'cevap') return sg.sorulanSeat;
+    return sg.askerSeat;
+  }
+
+  private clearSorguTimer() {
+    if (this.sorguTimer) { clearTimeout(this.sorguTimer); this.sorguTimer = null; }
+    this.sorguDeadlineAt = 0;
+  }
+
+  /**
+   * SORGU ZAMAN AŞIMI: karar bir İNSAN koltuğunda bekliyorsa 15 sn sayaç kur;
+   * dolunca applySorguTimeout (→ VER) uygula, yansıt, motoru ilerlet. Karar
+   * bot'ta/terk'te ise stepOnce zaten otomatik yanıtladı → sayaç gereksiz.
+   */
+  private armSorguTimeoutIfNeeded() {
+    this.clearSorguTimer();
+    const decider = this.sorguDeciderSeat();
+    if (decider == null || !this.game?.sorgu) return;
+    const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
+    if (!this.isHumanTurn(decider) || ab.includes(decider)) return; // bot/terk → stepOnce hallediyor
+    this.sorguDeadlineAt = Date.now() + this.SORGU_MS;
+    this.sorguTimer = setTimeout(() => {
+      this.sorguTimer = null;
+      if (!this.game?.sorgu) return;            // bu arada cevaplandıysa boşver
+      try {
+        this.game = applySorguTimeout(this.game); // RULES.md 1.11: varsayılan VER
+        this.pushViews();
+      } catch (e: any) {
+        console.error('[sorguTimeout] hata:', e?.message);
+        return;
+      }
+      this.runEngine();                          // VER sonrası akış (zorunlu alım vb.) ilerlesin
+    }, this.SORGU_MS);
   }
 
   /// Aynı masada yeni maç: kartlar toplanır, yazboz/olaylar sıfırlanır, masa ayarı korunur.
@@ -364,6 +411,7 @@ export class EllibirRoom extends Room {
         sv.starting = starting;
         sv.seated = seated;
         sv.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
+        sv.sorguMs = this.sorguDeadlineAt ? Math.max(0, this.sorguDeadlineAt - Date.now()) : 0;
         c.send('view', JSON.stringify(sv));
         return;
       }
@@ -372,6 +420,7 @@ export class EllibirRoom extends Room {
       view.starting = starting;
       view.seated = seated;   // bekleme ekranında masadaki oyuncular
       view.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0; // geri sayım
+      view.sorguMs = this.sorguDeadlineAt ? Math.max(0, this.sorguDeadlineAt - Date.now()) : 0; // sorgu geri sayımı
       c.send('view', JSON.stringify(view));
     });
   }
@@ -380,5 +429,6 @@ export class EllibirRoom extends Room {
     if (this.handEndTimer) clearTimeout(this.handEndTimer);
     if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
     if (this.startTimer) clearTimeout(this.startTimer);
+    this.clearSorguTimer();
   }
 }
