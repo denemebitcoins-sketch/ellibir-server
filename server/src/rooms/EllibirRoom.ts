@@ -227,8 +227,12 @@ export class EllibirRoom extends Room {
     this.runEngine();
     this.pushViews();
     try {
-      await this.allowReconnection(client, 180);  // 3 dk içinde dönerse (uygulama kapansa/ağ değişse bile) koltuğu geri al
+      const back = await this.allowReconnection(client, 180);  // 3 dk içinde dönerse (uygulama kapansa/ağ değişse bile) koltuğu geri al
+      // KONTROL İADESİ: bot devralmayı bırak (abandoned'tan çıkar) → sıra/karar tekrar insana.
       this.setAbandoned(seat, false);
+      // ⚠ SEAT YENİDEN BİLDİR: reconnect'te Colyseus 'seat' mesajını OTOMATİK yollamaz; client
+      //   MySeat'i bilmezse (duo'da seat 2 olabilir) izleyici/yanlış koltuk sanır → 'seat' tekrar yolla.
+      try { back.send('seat', { seat }); } catch { /* yoksay */ }
       this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
       this.runEngine();
       this.pushViews();
