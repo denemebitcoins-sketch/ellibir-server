@@ -1029,12 +1029,19 @@ function applyOpenPairs(state: GameState, pairIds: readonly (readonly CardId[])[
 
   const { groups, usedIds } = collectOpeningGroups(player, pairIds);
   const minPairs = pairsOpeningMin(state);
-  const analyses = canOpenPairs(groups, state.rules, minPairs);
+  // PARÇA AÇIŞ (seri applyOpen ile birebir): yapı eşiksiz doğrulanır (minPairs=0 → her grup geçerli
+  //   çift mi); eşik SEÇİLİ-toplam yerine ELDE-toplam: seçili çift + eldeki KALAN ulaşılabilir çift
+  //   (okey dahil) >= minPairs. 2+2+2 (3) seçip elde 5 potansiyel varsa açar; kalan sonra ayrı açılır.
+  const analyses = canOpenPairs(groups, state.rules, 0);
   if (!analyses) {
-    throw new MoveError(
-      'pairsToOpen',
-      `Çiftle açmak için en az ${minPairs} geçerli çift gerekli.`,
-    );
+    throw new MoveError('pairsToOpen', 'Seçili kartlar geçerli çift değil.');
+  }
+  const selectedPairs = analyses.length;
+  const usedSet = new Set(usedIds);
+  const remaining = player.hand.filter((c: any) => !usedSet.has(c.id));
+  const remainingReachable = bestPairOpening(remaining, state.rules).count;
+  if (selectedPairs + remainingReachable < minPairs) {
+    throw new MoveError('pairsToOpen', `Çiftle açmak için en az ${minPairs} çift gerekli.`);
   }
   return commitOpening(state, player, analyses, usedIds, 'pairs');
 }
