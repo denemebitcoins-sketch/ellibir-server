@@ -195,6 +195,7 @@ const _bot = new HeuristicBot('normal');
  * (botların çekip atması istemcide animasyonlu görünür).
  */
 export function stepOnce(state: any, isHumanTurn: (seat: number) => boolean): { state: any; moved: boolean } {
+  if (!state) return { state, moved: false };   // savunma: game null → adım yok (crash önle)
   const abandoned: number[] = Array.isArray(state.abandoned) ? state.abandoned : [];
 
   // SORGU: karar bir bot'ta/terk'te ise otomatik yanıtla.

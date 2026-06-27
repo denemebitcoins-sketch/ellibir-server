@@ -326,9 +326,11 @@ export class EllibirRoom extends Room {
     this.clearTurnTimer(); // motor çalışırken tur timer'ı fire etmesin (loop sonunda yeniden kurulur)
     try {
       while (true) {
+        if (!this.game) break;   // matchEnded/reset sonrası game NULL → motor durur (null crash önle)
         // ÖNCE bekle: bir önceki hamlenin (insanın ıskartası dahil) uçuş animasyonu bitsin,
         // sonra bot oynasın. Aksi halde sen atarken sıradaki bot kartın havadayken çekiyor.
         await new Promise((res) => setTimeout(res, this.STEP_MS));
+        if (!this.game) break;   // bekleme sırasında game null olduysa (yarış) yine dur
         const r = stepOnce(this.game, (s) => this.isHumanTurn(s));
         if (!r.moved) {
           console.log(`[runEngine] DUR phase=${this.game.phase} currentSeat=${this.game.currentSeat} sorgu=${!!this.game.sorgu} humans=${this.humanSeats}`);
@@ -368,6 +370,7 @@ export class EllibirRoom extends Room {
   }
 
   private checkHandEnd() {
+    if (!this.game) return;   // game null (reset/matchEnded sonrası) → okuma yok (crash önle)
     if (this.game.phase === 'handEnded') {
       console.log('[el bitti] 3sn sonra yeni el');
       if (this.handEndTimer) clearTimeout(this.handEndTimer);
