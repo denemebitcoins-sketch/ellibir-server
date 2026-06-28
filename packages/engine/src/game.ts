@@ -706,6 +706,14 @@ function applyPickupDiscard(state: GameState): GameState {
   const player = currentPlayer(state);
   if (state.discard.length === 0) throw new MoveError('emptyDiscard', 'Açık yığın boş.');
   if (!canPickupDiscard(state, player.seat)) {
+    // İŞLEK/OKEY atışı: rakip ceza yiyerek attı → o kart kilitli, kimse yerden alamaz.
+    //   Sol-komşu kuralından ÖNCE kontrol; "soldan alınır" mesajı yanıltıcıydı.
+    if (isDiscardAtisLocked(state)) {
+      throw new MoveError(
+        'atisLocked',
+        'Rakip işlek/okey attı (ceza yedi) — bu kartı yerden alamazsın.',
+      );
+    }
     if (isDiscardLocked(state)) {
       throw new MoveError(
         'lockedDiscard',
