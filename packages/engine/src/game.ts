@@ -335,6 +335,7 @@ export function canSor(state: GameState, seat: number): boolean {
   if (state.phase !== 'action') return false;
   if (p.committed || p.zorunlu || p.sorguUsed) return false;
   if (player.isCift) return false; // alan kesin çiftse sorgu yok
+  if (player.hand.length <= 2) return false; // el ≤2 → sorgu yok (son atış; bot ile tutarlı)
   const sorulan = state.players[prevActiveSeat(state, seat)];
   if (!sorulan) return false;
   if (sorulan.hasOpened) return false; // ELİ AÇIK olana sorgu açılamaz
@@ -1004,6 +1005,9 @@ function applyOpen(state: GameState, meldIds: readonly (readonly CardId[])[]): G
   if (player.isCift) {
     throw new MoveError('ciftLock', 'Çift oldun; artık yalnız çiftle açabilirsin.');
   }
+  // YANDAN ALINAN KARTLA AÇIŞ → önce SORGU zorunlu (sorgu mümkünse). Sorgusuz "şak" açış YASAK.
+  if (canSor(state, player.seat))
+    throw new MoveError('sorguGerek', 'Yandan aldığın kartla açmadan önce SOR — rakibe sorgu yapmalısın.');
 
   const { groups, usedIds } = collectOpeningGroups(player, meldIds);
   const minPoints = openingThreshold(state);
@@ -1034,6 +1038,9 @@ function applyOpenPairs(state: GameState, pairIds: readonly (readonly CardId[])[
   requirePhase(state, 'action', 'Açmak için önce kart çekmelisin.');
   const player = currentPlayer(state);
   if (player.hasOpened) throw new MoveError('alreadyOpen', 'Zaten açtın.');
+  // YANDAN ALINAN KARTLA ÇİFT AÇIŞ → önce SORGU zorunlu (sorgu mümkünse). Sorgusuz açış YASAK.
+  if (canSor(state, player.seat))
+    throw new MoveError('sorguGerek', 'Yandan aldığın kartla açmadan önce SOR — rakibe sorgu yapmalısın.');
 
   const { groups, usedIds } = collectOpeningGroups(player, pairIds);
   const minPairs = pairsOpeningMin(state);
