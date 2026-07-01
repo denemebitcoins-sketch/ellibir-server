@@ -20,6 +20,7 @@ export class EllibirRoom extends Room {
   private game: any;
   private seats = new Map<string, number>();   // sessionId → koltuk
   private spectators = new Set<string>();      // sessionId → izleyici (koltuksuz, seat=-1)
+  private spectatorNames = new Map<string, string>(); // sessionId → izleyici görünen ad (yazboz paneli için)
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
   private matchEndTimer: NodeJS.Timeout | null = null;
@@ -184,6 +185,7 @@ export class EllibirRoom extends Room {
     if (seat == null) {
       // Boş insan koltuğu yok (veya izleyici) → İZLEYİCİ olarak kabul (koltuksuz, seats Map'e konmaz).
       this.spectators.add(client.sessionId);
+      this.spectatorNames.set(client.sessionId, options?.playerName ? String(options.playerName) : 'İzleyici');
       client.send('seat', { seat: -1 });
       console.log(`[onJoin] izleyici, izleyici sayısı=${this.spectators.size}`);
       this.pushViews();
@@ -555,11 +557,16 @@ export class EllibirRoom extends Room {
       filled: this.humanSeats.includes(s) ? filled.has(s) : true,  // bot koltukları "dolu"
       name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
     }));
+    // AKTİF izleyiciler: koltuksuz (seat yok) bağlı client'lar → adları (çıkan izleyici otomatik düşer).
+    const specList = this.clients
+      .filter((c) => this.seats.get(c.sessionId) == null)
+      .map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) {
         // İzleyici: gizli el YOK, yalnız masadaki açık bilgi (sıra/skor/açık perler).
         const sv: any = clientViewForSpectator(this.game);
+        sv.spectators = specList;
         sv.waitingForPlayers = waiting;
         sv.starting = starting;
         sv.seated = seated;
@@ -569,6 +576,7 @@ export class EllibirRoom extends Room {
         return;
       }
       const view: any = clientViewFor(this.game, seat);
+      view.spectators = specList;
       view.waitingForPlayers = waiting;
       view.starting = starting;
       view.seated = seated;   // bekleme ekranında masadaki oyuncular
