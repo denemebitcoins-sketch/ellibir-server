@@ -192,11 +192,21 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
   let ins2: any = { meldPoints: 0, pairCount: 0 };
   try { ins2 = analyzeHand(v.hand, rules); } catch { /* default */ }
 
-  // El sıralama: handOrder'ı izle (çekilen kart SONA). Gruplama YALNIZCA dizSeri/dizCift
-  // komutunda yapılır (gameCommands handOrder'ı gruplu sıraya yazar) — burada RE-SORT YOK.
+  // El sıralama: DİZ MODU AKTİFSE (seri/cift) her view'da YENİDEN DİZ (STICKY) — çekilen/alınan
+  //   kart otomatik olarak perine akar (ör. kupa 10, 9♥-J♥ arasına girip seri kurar; dört 10'u
+  //   greedy-set yapıp 9,J'yi boşta bırakma bug'ı biter). Mod 'none' ise handOrder'ı izle (kart sona).
   const dizMode = (state as any).dizModes?.[seat] ?? 'none';
-  const orderedHand = orderedHandFor(state, seat);
-  let handArr: any[] = orderedHand.length > 0 ? orderedHand : (Array.isArray(v.hand) ? v.hand : []);
+  let handArr: any[];
+  if (dizMode === 'seri' || dizMode === 'cift') {
+    const orderIds = sortHandOrder(v.hand, rules, dizMode);
+    const byId = new Map<string, any>((Array.isArray(v.hand) ? v.hand : []).map((c: any) => [c.id, c]));
+    handArr = orderIds.map((id) => byId.get(id)).filter(Boolean);
+    (state as any).handOrder = (state as any).handOrder || {};
+    (state as any).handOrder[seat] = orderIds; // reconcile/DumpArranged ile tutarlı kalsın
+  } else {
+    const orderedHand = orderedHandFor(state, seat);
+    handArr = orderedHand.length > 0 ? orderedHand : (Array.isArray(v.hand) ? v.hand : []);
+  }
 
   // GÖSTERGE/dizim bloklarını handOrder sırasında hesapla (Unity DTO bekler).
   const arranged = computeArrangedBlocks(handArr, rules, dizMode);
