@@ -9,6 +9,7 @@ import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence,
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
 // Hediye türü → elmas fiyatı (client GiftCatalog ile aynı; server-side düşülür → hile önlenir).
 const GIFT_DIAMONDS: Record<number, number> = { 1: 5, 2: 8, 3: 6, 4: 25, 5: 15, 6: 18, 7: 12, 8: 10, 9: 14, 10: 16, 11: 35, 12: 60 };
+const GIFT_NAMES: Record<number, string> = { 1: 'Çay', 2: 'Türk Kahvesi', 3: 'Limonata', 4: 'Semaver', 5: 'Pasta', 6: 'Baklava', 7: 'Lokum', 8: 'Dondurma', 9: 'Çikolata', 10: 'Meyve Tabağı', 11: 'Çiçek Buketi', 12: 'Altın Hediye Kesesi' };
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -23,6 +24,8 @@ export class EllibirRoom extends Room {
   private seats = new Map<string, number>();   // sessionId → koltuk
   private spectators = new Set<string>();      // sessionId → izleyici (koltuksuz, seat=-1)
   private spectatorNames = new Map<string, string>(); // sessionId → izleyici görünen ad (yazboz paneli için)
+  private spectatorMeta = new Map<string, { gender: string; role: string }>(); // izleyici cinsiyet/rol (isim rengi/rozet için)
+  private seatMeta = new Map<number, { gender: string; role: string }>();        // koltuk → cinsiyet/rol (yazboz sol panel zengin gösterim)
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
   private matchEndTimer: NodeJS.Timeout | null = null;
@@ -145,6 +148,8 @@ export class EllibirRoom extends Room {
       this.broadcast('giftSent', {
         from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
       });
+      // Olaylara da işle (o an fark etmeyen sonradan görsün; client farklı renk verir → "ısmarladı").
+      this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
     });
 
     // ORTAK quick-chat (yalnız eşli): {text}. Sadece ORTAĞA (+ gönderene echo) — masaya DEĞİL.
@@ -195,7 +200,10 @@ export class EllibirRoom extends Room {
     if (seat == null) {
       // Boş insan koltuğu yok (veya izleyici) → İZLEYİCİ olarak kabul (koltuksuz, seats Map'e konmaz).
       this.spectators.add(client.sessionId);
-      this.spectatorNames.set(client.sessionId, options?.playerName ? String(options.playerName) : 'İzleyici');
+      const specName = options?.playerName ? String(options.playerName) : 'İzleyici';
+      this.spectatorNames.set(client.sessionId, specName);
+      this.spectatorMeta.set(client.sessionId, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
+      this.logEvent(`${specName} izleyici olarak masaya katıldı`); // client farklı renk verir
       client.send('seat', { seat: -1 });
       console.log(`[onJoin] izleyici, izleyici sayısı=${this.spectators.size}`);
       this.pushViews();
@@ -204,6 +212,7 @@ export class EllibirRoom extends Room {
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
     if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
+    this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
@@ -232,6 +241,7 @@ export class EllibirRoom extends Room {
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
     if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
+    this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
     client.send('seat', { seat });
     console.log(`[sit] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();
@@ -357,6 +367,8 @@ export class EllibirRoom extends Room {
     this.seats.delete(sessionId);
     this.seatUsers.delete(seat);
     this.seatNames.delete(seat);
+    this.seatMeta.delete(seat);
+    this.spectatorMeta.delete(sessionId);
   }
 
   // Bir koltuğu terk(abandoned) olarak işaretle/kaldır (state'e yansır → bot devralır/bırakır).
@@ -572,15 +584,21 @@ export class EllibirRoom extends Room {
       name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
     }));
     // AKTİF izleyiciler: koltuksuz (seat yok) bağlı client'lar → adları (çıkan izleyici otomatik düşer).
-    const specList = this.clients
-      .filter((c) => this.seats.get(c.sessionId) == null)
-      .map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
+    const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
+    const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
+    const specRoles = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.role ?? 'normal');
+    const specGenders = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.gender ?? '');
+    // Koltuk listesine cinsiyet/rol enjekte et (yazboz sol panel isim rengi + rozet).
+    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; } } };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) {
         // İzleyici: gizli el YOK, yalnız masadaki açık bilgi (sıra/skor/açık perler).
         const sv: any = clientViewForSpectator(this.game);
+        decorate(sv.seats);
         sv.spectators = specList;
+        sv.spectatorRoles = specRoles;
+        sv.spectatorGenders = specGenders;
         sv.waitingForPlayers = waiting;
         sv.starting = starting;
         sv.seated = seated;
@@ -590,7 +608,10 @@ export class EllibirRoom extends Room {
         return;
       }
       const view: any = clientViewFor(this.game, seat);
+      decorate(view.seats);
       view.spectators = specList;
+      view.spectatorRoles = specRoles;
+      view.spectatorGenders = specGenders;
       view.waitingForPlayers = waiting;
       view.starting = starting;
       view.seated = seated;   // bekleme ekranında masadaki oyuncular
