@@ -71,7 +71,7 @@ export class EllibirRoom extends Room {
     try { parsed = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
     catch { parsed = null; }
     const rules: any = { ...DEFAULT_RULES, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
-    if (mode === 'duo') rules.teamMode = true;
+    if (mode === 'duo' || mode === 'duo3') rules.teamMode = true; // duo3 de takım (0&2 / 1&3) — takım-mesaj testi
 
     this.bet = Number(options?.bet) || 0;
     // Oyunu HEMEN kurma — tüm insan koltukları dolunca başlat (yoksa bekleyen oyuncu
