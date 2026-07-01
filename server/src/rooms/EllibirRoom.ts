@@ -437,6 +437,7 @@ export class EllibirRoom extends Room {
         winnerSeat: Number(this.game.matchWinnerSeat),
         bet: this.bet,
         teamMode: !!r.teamMode,
+        scores: new Map(this.game.players.map((p: any) => [p.seat, p.totalScore])), // kademeli sıralama için
       }).catch((e) => console.error('[settle] hata:', e?.message));
       // Masa KAPANMAZ: 10sn (yazboz+kazanan gösterilir) sonra AYNI ayarla yeni maç.
       if (this.matchEndTimer) clearTimeout(this.matchEndTimer);

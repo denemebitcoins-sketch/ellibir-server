@@ -209,9 +209,27 @@ export async function settleMatch(opts: {
   winnerSeat: number;
   bet: number;
   teamMode: boolean;
+  scores?: Map<number, number>; // koltuk → maç toplam skoru (51: DÜŞÜK kazanır) — kademeli tekli için
 }): Promise<void> {
-  const { seatUsers, winnerSeat, bet, teamMode } = opts;
+  const { seatUsers, winnerSeat, bet, teamMode, scores } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
+
+  // KADEMELİ TEKLİ (kararlaştırılan model): 4 gerçek oyuncu + skorlar → sıralamaya göre dağıt.
+  //   Havuz 4E. 1.→3.20E, 2.→0.70E, 3-4→0, ev→0.10E. Net: 1.+2.20E, 2.−0.30E, 3-4 −E.
+  //   (Sıralama: en DÜŞÜK skor 1., en yüksek 4.)
+  if (!teamMode && seatUsers.size === 4 && scores) {
+    const ranked = [...seatUsers.entries()].sort((a, b) => (scores.get(a[0]) ?? 0) - (scores.get(b[0]) ?? 0));
+    const E = bet;
+    const [first, second, third, fourth] = ranked.map((r) => r[1]);
+    await rpc('add_chips',    { p_user_id: first,  p_amount: Math.round(2.2 * E) });
+    await rpc('deduct_chips', { p_user_id: second, p_amount: Math.round(0.3 * E) });
+    await rpc('deduct_chips', { p_user_id: third,  p_amount: E });
+    await rpc('deduct_chips', { p_user_id: fourth, p_amount: E });
+    await rpc('record_match_stats', { p_user_id: first,  p_won: true,  p_winnings: Math.round(2.2 * E) });
+    for (const uid of [second, third, fourth]) await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
+    console.log(`[settle] tekli KADEMELİ 4-kisi E=${E} sira=${ranked.map((r) => r[0])}`);
+    return;
+  }
 
   const teamOf = (s: number) => s % 2;
   const isWinner = (s: number) => (teamMode ? teamOf(s) === teamOf(winnerSeat) : s === winnerSeat);
