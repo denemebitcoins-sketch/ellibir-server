@@ -52,10 +52,11 @@ export class EllibirRoom extends Room {
   onCreate(options: any) {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
-    const mode = options?.mode === 'duo' ? 'duo' : 'solo';
+    const mode = options?.mode === 'duo' ? 'duo' : options?.mode === 'duo3' ? 'duo3' : 'solo';
 
-    // solo: 1 insan (seat 0) + 3 bot. duo (eşli): 2 insan PARTNER (seat 0,2) + 2 bot (seat 1,3).
-    this.humanSeats = mode === 'duo' ? [0, 2] : [0];
+    // solo: 1 insan (seat 0) + 3 bot. duo (eşli): 2 insan (seat 0,2) + 2 bot (1,3).
+    //   duo3 (TEST): 3 insan (seat 0,1,2) + 1 bot (seat 3) — takımlar 0&2 / 1&3; takım-mesaj testi için.
+    this.humanSeats = mode === 'duo' ? [0, 2] : mode === 'duo3' ? [0, 1, 2] : [0];
     // İnsan koltukları + izleyici kapasitesi (toplam 8: ör. 4 koltuk + birkaç izleyici).
     // humanSeats sayımına DOKUNMAZ — startGameIfReady yalnız gerçek koltukları sayar.
     this.maxClients = 8;
@@ -154,8 +155,9 @@ export class EllibirRoom extends Room {
       text = String(text).slice(0, 120).trim();
       if (!text) return;
       const hs = this.humanSeats;
-      const partner = (hs.length === 2 && hs.includes(seat)) ? (hs[0] === seat ? hs[1] : hs[0]) : null;
-      if (partner == null) return; // yalnız eşli + ortak koltuğu var
+      // Ortak = takım arkadaşı (seat+2)%4 → duo (0↔2, 1↔3) ve duo3 için de doğru. Yalnız EŞLİ (≥2 insan).
+      const partner = (hs.length >= 2 && hs.includes(seat)) ? (seat + 2) % 4 : null;
+      if (partner == null) return; // yalnız eşli + ortak koltuğu var (bot ortak → mesaj gösterilmez)
       for (const [sid, s] of this.seats) {
         if (s === partner || s === seat) {
           const c = this.clients.find((cl) => cl.sessionId === sid);
