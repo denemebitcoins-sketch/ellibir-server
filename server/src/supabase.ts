@@ -181,6 +181,23 @@ export async function insertGift(
   }
 }
 
+/** Hediye için elmas düş (SECURITY DEFINER RPC deduct_diamonds). Yetersizse false → hediye iptal. */
+export async function deductDiamonds(userId: string, amount: number): Promise<boolean> {
+  if (!supabaseConfigured() || !userId || amount <= 0) return false;
+  try {
+    const r = await fetch(`${URL}/rest/v1/rpc/deduct_diamonds`, {
+      method: 'POST',
+      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_user_id: userId, p_amount: amount }),
+    });
+    if (!r.ok) { console.error('[supabase] deductDiamonds RPC', r.status, await r.text()); return false; }
+    return (await r.text()).trim() === 'true';
+  } catch (e: any) {
+    console.error('[supabase] deductDiamonds:', e?.message);
+    return false;
+  }
+}
+
 /**
  * Maç sonu çip dağıtımı. seatUsers: koltuk→userId (yalnız gerçek oyuncular; bot koltuğu yok).
  * winnerSeat: motorun belirlediği kazanan koltuk. bet: masa bahsi.
