@@ -291,14 +291,17 @@ export class EllibirRoom extends Room {
     }
     const stopPresenceKeepalive = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
     try {
+      console.log(`[onDrop] allowReconnection(180) BEKLENİYOR seat=${seat}`);
       const back = await this.allowReconnection(client, 180);  // 3 dk pencere (uygulama kapansa/ağ değişse bile)
+      console.log(`[onDrop-SUCCESS] seat=${seat} oyuncu GERİ DÖNDÜ (allowReconnection çözüldü)`);
       stopPresenceKeepalive();
       this.setAbandoned(seat, false);   // KONTROL İADESİ → sıra/karar tekrar insana
       try { back.send('seat', { seat }); } catch { /* yoksay */ }
       this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
       this.runEngine();
       this.pushViews();
-    } catch {
+    } catch (e: any) {
+      console.log(`[onDrop-EXPIRED] seat=${seat} reconnect penceresi DOLDU/iptal: ${e?.message ?? e}`);
       stopPresenceKeepalive();
       this.cleanupSeat(client.sessionId, seat);   // 3 dk geçti → bot KALICI devralır
     }
