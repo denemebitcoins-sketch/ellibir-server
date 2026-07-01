@@ -150,6 +150,37 @@ export async function rpc(fn: string, args: Record<string, unknown>): Promise<bo
   }
 }
 
+/** Oyun-içi hediye kaydı (service-role INSERT) — alıcının yanında SÜRELİ görünür (her masaya taşınır). */
+export async function insertGift(
+  fromUser: string,
+  toUser: string,
+  giftType: number,
+  scope: string,
+  expiresAtISO: string,
+): Promise<void> {
+  if (!supabaseConfigured()) return;
+  try {
+    await fetch(`${URL}/rest/v1/gifts`, {
+      method: 'POST',
+      headers: {
+        apikey: SERVICE,
+        Authorization: `Bearer ${SERVICE}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        from_user: fromUser,
+        to_user: toUser,
+        gift_type: giftType,
+        scope,
+        expires_at: expiresAtISO,
+      }),
+    });
+  } catch (e: any) {
+    console.error('[supabase] insertGift:', e?.message);
+  }
+}
+
 /**
  * Maç sonu çip dağıtımı. seatUsers: koltuk→userId (yalnız gerçek oyuncular; bot koltuğu yok).
  * winnerSeat: motorun belirlediği kazanan koltuk. bet: masa bahsi.

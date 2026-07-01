@@ -3,7 +3,10 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift } from '../supabase';
+
+// Hediye türü → alıcının yanında kaç saat durur (client GiftCatalog ile aynı).
+const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -113,6 +116,43 @@ export class EllibirRoom extends Room {
         return;
       }
       this.broadcast('chat', { seat, name, text });
+    });
+
+    // Oyun-içi HEDİYE: {to_seat, gift_id}. Elmas düşümü client'ta (şimdilik); server KAYDEDER + yayınlar.
+    this.onMessage('gift', (client, raw) => {
+      const fromSeat = this.seats.get(client.sessionId);
+      if (fromSeat == null) return;
+      const toSeat = Number(raw?.to_seat);
+      const giftType = Number(raw?.gift_id);
+      if (!Number.isInteger(toSeat) || toSeat < 0 || toSeat > 3) return;
+      if (!Number.isInteger(giftType) || giftType < 1 || giftType > 12) return;
+      const fromName = this.seatNames.get(fromSeat) ?? `Oyuncu ${fromSeat + 1}`;
+      const hours = GIFT_HOURS[giftType] ?? 2;
+      const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
+      const fromUid = this.seatUsers.get(fromSeat);
+      const toUid = this.seatUsers.get(toSeat);
+      if (fromUid && toUid) insertGift(fromUid, toUid, giftType, 'table', expiresAt).catch(() => {});
+      this.broadcast('giftSent', {
+        from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
+      });
+    });
+
+    // ORTAK quick-chat (yalnız eşli): {text}. Sadece ORTAĞA (+ gönderene echo) — masaya DEĞİL.
+    this.onMessage('quickChat', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
+      text = String(text).slice(0, 120).trim();
+      if (!text) return;
+      const hs = this.humanSeats;
+      const partner = (hs.length === 2 && hs.includes(seat)) ? (hs[0] === seat ? hs[1] : hs[0]) : null;
+      if (partner == null) return; // yalnız eşli + ortak koltuğu var
+      for (const [sid, s] of this.seats) {
+        if (s === partner || s === seat) {
+          const c = this.clients.find((cl) => cl.sessionId === sid);
+          if (c) c.send('quickChat', { seat, text });
+        }
+      }
     });
 
     // İzleyici/koltuksuz oyuncu boş koltuğa oturur. raw: { seat?, playerName? }.
