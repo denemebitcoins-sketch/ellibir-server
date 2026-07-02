@@ -387,6 +387,7 @@ export class OkeyRoom extends Room {
         for (const s of v.players) {
           const m = this.seatMeta.get(s.seat);
           if (m) { s.role = m.role; s.gender = m.gender; }
+          s.uid = this.seatUsers.get(s.seat) ?? ''; // profil tıklaması (public kimlik)
           s.abandoned = this.abandoned.has(s.seat);
           if (s.abandoned) s.isBot = true;
         }

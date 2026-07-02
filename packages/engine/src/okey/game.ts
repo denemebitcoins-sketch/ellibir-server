@@ -41,6 +41,8 @@ export interface OkeyGameState {
   elWinner: number | null;   // -1 = berabere (deste bitti)
   finishKind: OkeyFinishKind | null;
   scores: number[];          // koltuk başına CEZA birikimi (0'dan başlar, düşük iyi; kazanan eksiye düşer)
+  elDeltas: number[][];      // YAZBOZ: el başına puan değişimi (gösterge dahil)
+  elStartScores: number[];   // el başı skor (delta tabanı)
   matchLog: string[];
 }
 
@@ -78,6 +80,8 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     elEnded: false, matchEnded: false, elWinner: null, finishKind: null,
     scores: [rules.scoring.startScore, rules.scoring.startScore, rules.scoring.startScore, rules.scoring.startScore], // DÜŞME: 0'a inen kazanır
     matchLog: [],
+    elDeltas: [],
+    elStartScores: [0, 0, 0, 0],
   };
   startNextEl(state);
   return state;
@@ -105,6 +109,7 @@ export function startNextEl(state: OkeyGameState): void {
   state.elEnded = false;
   state.elWinner = null;
   state.finishKind = null;
+  state.elStartScores = [...state.scores]; // yazboz delta tabanı
   state.matchLog.push(`El ${state.elNumber} başladı — gösterge: ${state.gosterge.color}${state.gosterge.rank}, dağıtan: ${state.players[state.dealerSeat]!.name}`);
 }
 
@@ -197,6 +202,11 @@ function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number)
   }
 }
 
+/** El kapanırken YAZBOZ satırı: bu eldeki toplam puan değişimi (gösterge dahil). */
+function pushElDelta(state: OkeyGameState): void {
+  state.elDeltas.push(state.scores.map((v, i) => v - (state.elStartScores[i] ?? 0)));
+}
+
 function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): void {
   const sc = state.rules.scoring;
   const points = sc.base
@@ -208,6 +218,7 @@ function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): voi
   state.finishKind = kind;
   const kindTxt = kind === 'pairsOkey' ? 'ÇİFT + OKEY atarak' : kind === 'pairs' ? 'ÇİFTTEN' : kind === 'okey' ? 'OKEY atarak' : 'düz';
   state.matchLog.push(`${state.players[seat]!.name} eli ${kindTxt} bitirdi (rakipler +${points} ceza, kendisi -${points})`);
+  pushElDelta(state);
   maybeEndMatch(state);
 }
 
@@ -216,6 +227,7 @@ function endElDraw(state: OkeyGameState): void {
   state.elWinner = -1;
   state.finishKind = null;
   state.matchLog.push('Ortadaki taşlar bitti — el berabere (puan yok)');
+  pushElDelta(state);
   maybeEndMatch(state);
 }
 

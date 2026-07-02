@@ -46,6 +46,9 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     winnerHand: state.elEnded && state.elWinner != null && state.elWinner >= 0
       ? state.players.find((p) => p.seat === state.elWinner)!.hand.map(mapTile) : [],
     logMessages: state.matchLog.slice(-60),
+    // YAZBOZ: el başına puan değişimi (düz dizi: el*4) — 51 yazboz tablosunun okey karşılığı.
+    sheetFlat: ([] as number[]).concat(...state.elDeltas),
+    sheetCount: state.elDeltas.length,
   };
 }
 
@@ -57,5 +60,6 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
     myHand: [], disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
+    sheetFlat: [], sheetCount: 0,
   };
 }
