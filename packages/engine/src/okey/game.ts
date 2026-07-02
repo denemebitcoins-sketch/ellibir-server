@@ -40,7 +40,7 @@ export interface OkeyGameState {
   matchEnded: boolean;
   elWinner: number | null;   // -1 = berabere (deste bitti)
   finishKind: OkeyFinishKind | null;
-  scores: number[];          // koltuk başına puan (startScore'dan düşer; eşli'de takım içi eşit)
+  scores: number[];          // koltuk başına CEZA birikimi (0'dan başlar, düşük iyi; kazanan eksiye düşer)
   matchLog: string[];
 }
 
@@ -59,7 +59,7 @@ export interface OkeyCreateOptions {
 
 export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
   const rules: OkeyRuleConfig = { ...DEFAULT_OKEY_RULES, ...(opts.rules ?? {}),
-    points: { ...DEFAULT_OKEY_RULES.points, ...(opts.rules?.points ?? {}) } };
+    scoring: { ...DEFAULT_OKEY_RULES.scoring, ...(opts.rules?.scoring ?? {}) } };
   const dealerSeat = opts.dealerSeat ?? 0;
   const names = opts.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
   const bots = new Set(opts.botSeats ?? []);
@@ -76,7 +76,7 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     gosterge: null as unknown as NormalOkeyTile, okeyColor: 'R', okeyRank: 1,
     turn: dealerSeat, phase: 'discard',
     elEnded: false, matchEnded: false, elWinner: null, finishKind: null,
-    scores: [rules.startScore, rules.startScore, rules.startScore, rules.startScore],
+    scores: [rules.scoring.startScore, rules.scoring.startScore, rules.scoring.startScore, rules.scoring.startScore], // DÜŞME: 0'a inen kazanır
     matchLog: [],
   };
   startNextEl(state);
@@ -181,29 +181,33 @@ function showGosterge(state: OkeyGameState, p: OkeyPlayer): OkeyMoveResult {
   const has = p.hand.some((t) => !t.fake && t.color === state.gosterge.color && t.rank === state.gosterge.rank);
   if (!has) return { ok: false, error: 'gösterge teki elinde yok' };
   p.showedGosterge = true;
-  applyPenalty(state, p.seat, state.rules.points.gosterge);
-  state.matchLog.push(`${p.name} göstergeyi gösterdi (rakipler -${state.rules.points.gosterge})`);
+  // KAHVE USULÜ: gösteren KENDİ cezasından düşer (rakiplere ceza yazılmaz).
+  state.scores[p.seat] = state.scores[p.seat]! - state.rules.scoring.gosterge;
+  state.matchLog.push(`${p.name} göstergeyi gösterdi (kendi cezasından -${state.rules.scoring.gosterge})`);
   return { ok: true };
 }
 
-/** Cezayı 'kazanan' DIŞINDAKİLERE uygula. Eşli'de ortak da muaf; rakip takımın İKİ üyesi de yer. */
-function applyPenalty(state: OkeyGameState, winnerSeat: number, points: number): void {
+/** KAHVE USULÜ el sonu cezası: rakipler +points CEZA yer; kazanan kendi cezasından -points düşer.
+ *  Eşli'de ortak muaf (ceza yemez); rakip takımın İKİ üyesi de yer. */
+function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number): void {
   for (let s = 0; s < 4; s++) {
-    if (s === winnerSeat) continue;
+    if (s === winnerSeat) { state.scores[s] = state.scores[s]! - points; continue; }
     if (state.rules.teamMode && s % 2 === winnerSeat % 2) continue; // ortak muaf
-    state.scores[s] = state.scores[s]! - points;
+    state.scores[s] = state.scores[s]! + points;
   }
 }
 
 function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): void {
-  const pts = state.rules.points;
-  const points = kind === 'pairsOkey' ? pts.pairOkeyWin : kind === 'pairs' ? pts.pairWin : kind === 'okey' ? pts.okeyWin : pts.win;
-  applyPenalty(state, seat, points);
+  const sc = state.rules.scoring;
+  const points = sc.base
+    * (kind === 'pairs' || kind === 'pairsOkey' ? sc.pairsX : 1)
+    * (kind === 'okey' || kind === 'pairsOkey' ? sc.okeyX : 1);
+  applyElPoints(state, seat, points);
   state.elEnded = true;
   state.elWinner = seat;
   state.finishKind = kind;
-  const kindTxt = kind === 'pairsOkey' ? 'ÇİFT + OKEY atarak' : kind === 'pairs' ? 'ÇİFTTEN' : kind === 'okey' ? 'OKEY atarak' : 'normal';
-  state.matchLog.push(`${state.players[seat]!.name} eli ${kindTxt} bitirdi (rakipler -${points})`);
+  const kindTxt = kind === 'pairsOkey' ? 'ÇİFT + OKEY atarak' : kind === 'pairs' ? 'ÇİFTTEN' : kind === 'okey' ? 'OKEY atarak' : 'düz';
+  state.matchLog.push(`${state.players[seat]!.name} eli ${kindTxt} bitirdi (rakipler +${points} ceza, kendisi -${points})`);
   maybeEndMatch(state);
 }
 
@@ -216,13 +220,14 @@ function endElDraw(state: OkeyGameState): void {
 }
 
 function maybeEndMatch(state: OkeyGameState): void {
-  if (state.elNumber >= state.rules.totalEls) {
-    state.matchEnded = true;
-    const best = Math.max(...state.scores);
-    const winners = [0, 1, 2, 3].filter((s) => state.scores[s] === best);
-    const names = winners.map((s) => state.players[s]!.name).join(' & ');
-    state.matchLog.push(`MAÇ BİTTİ — kazanan: ${names} (${best} puan)`);
-  }
+  // DÜŞME modeli: 0'a (veya altına) İNEN maçı kazanır ve maç HEMEN biter.
+  const reachedZero = state.scores.some((s) => s <= 0);
+  if (!reachedZero && state.elNumber < state.rules.totalEls) return;
+  state.matchEnded = true;
+  const best = Math.min(...state.scores); // 0'a inen; yoksa el tavanında EN DÜŞÜK kalan
+  const winners = [0, 1, 2, 3].filter((s) => state.scores[s] === best);
+  const names = winners.map((s) => state.players[s]!.name).join(' & ');
+  state.matchLog.push(`MAÇ BİTTİ — kazanan: ${names} (${best} puan${reachedZero ? ' — sıfıra indi' : ''})`);
 }
 
 /** Süre dolunca odanın çağıracağı otomatik hamle: çek → son çekileni/rastgele olmayanı at. */
