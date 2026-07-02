@@ -33,7 +33,11 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     okeyRank: state.okeyRank,
     stockCount: state.stock.length,
     myHand: seat >= 0 && me ? me.hand.map(mapTile) : [],
-    discards: state.discards.map((d) => d.map(mapTile)),
+    // Unity JsonUtility iç içe dizi desteklemez → koltuk başına DÜZ alanlar.
+    disc0: state.discards[0]!.map(mapTile),
+    disc1: state.discards[1]!.map(mapTile),
+    disc2: state.discards[2]!.map(mapTile),
+    disc3: state.discards[3]!.map(mapTile),
     players: state.players.map((p) => ({
       seat: p.seat, name: p.name, isBot: p.isBot,
       tileCount: p.hand.length, showedGosterge: p.showedGosterge,
@@ -52,6 +56,6 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     turn: -1, phase: 'draw', elEnded: false, matchEnded: false, elWinner: -2, finishKind: '',
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
-    myHand: [], discards: [[], [], [], []], players: [], winnerHand: [], logMessages: [],
+    myHand: [], disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
   };
 }
