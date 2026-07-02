@@ -1,0 +1,417 @@
+import { Room, Client } from '@colyseus/core';
+import {
+  createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, playOkeyBotTurn,
+  DEFAULT_OKEY_RULES,
+} from '../../../packages/engine/src/okey';
+import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
+import { okeyViewFor } from '../okeyView';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds } from '../supabase';
+
+// 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
+const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
+const GIFT_DIAMONDS: Record<number, number> = { 1: 5, 2: 8, 3: 6, 4: 25, 5: 15, 6: 18, 7: 12, 8: 10, 9: 14, 10: 16, 11: 35, 12: 60 };
+const GIFT_NAMES: Record<number, string> = { 1: 'Çay', 2: 'Türk Kahvesi', 3: 'Limonata', 4: 'Semaver', 5: 'Pasta', 6: 'Baklava', 7: 'Lokum', 8: 'Dondurma', 9: 'Çikolata', 10: 'Meyve Tabağı', 11: 'Çiçek Buketi', 12: 'Altın Hediye Kesesi' };
+
+/**
+ * OKEY masası — EllibirRoom ile AYNI sosyal/reconnect altyapısı (chat/hediye/quickChat/olaylar,
+ * onDrop→allowReconnection(180)→onReconnect, izleyici, sit), motor olarak okey engine.
+ * mode: 'solo' (1 insan + 3 bot) | 'duo' (eşli: 0&2 insan) | 'quad' (4 insan).
+ */
+export class OkeyRoom extends Room {
+  maxClients = 8;
+
+  private game: OkeyGameState | null = null;
+  private seats = new Map<string, number>();
+  private spectators = new Set<string>();
+  private spectatorNames = new Map<string, string>();
+  private spectatorMeta = new Map<string, { gender: string; role: string }>();
+  private seatMeta = new Map<number, { gender: string; role: string }>();
+  private humanSeats: number[] = [];
+  private seatUsers = new Map<number, string>();
+  private seatNames = new Map<number, string>();
+  private abandoned = new Set<number>();       // kopan insan koltukları (bot devralır)
+  private startTimer: NodeJS.Timeout | null = null;
+  private botTimer: NodeJS.Timeout | null = null;
+  private humanTimer: NodeJS.Timeout | null = null;
+  private elTimer: NodeJS.Timeout | null = null;
+  private startAt = 0;
+  private turnDeadlineAt = 0;
+  private readonly START_MS = 7000;
+  private readonly STEP_MS = 1100;             // bot tur temposu (client uçuş animasyonuna yer)
+  private readonly EL_END_MS = 7000;           // el sonu gösterimi → yeni el
+  private readonly TURN_GRACE_MS = 6000;
+  private bet = 0;
+  private settled = false;
+  private cfg: any = null;
+  private preLog: string[] = [];               // oyun kurulmadan önceki olaylar (izleyici katıldı vb.)
+
+  onCreate(options: any) {
+    const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
+    const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
+    const mode = options?.mode === 'duo' ? 'duo' : options?.mode === 'quad' ? 'quad' : 'solo';
+    this.humanSeats = mode === 'duo' ? [0, 2] : mode === 'quad' ? [0, 1, 2, 3] : [0];
+    const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
+
+    let parsed: any = null;
+    try { parsed = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
+    catch { parsed = null; }
+    const rules: OkeyRuleConfig = {
+      ...DEFAULT_OKEY_RULES,
+      ...(parsed && typeof parsed === 'object' ? parsed : {}),
+      scoring: { ...DEFAULT_OKEY_RULES.scoring, ...(parsed?.scoring ?? {}) },
+    };
+    if (mode === 'duo') rules.teamMode = true;
+
+    this.bet = Number(options?.bet) || 0;
+    this.cfg = { seed, names, botSeats, rules };
+    this.setMetadata({ game: 'okey', mode, table: Number(options?.table) || 1, humans: this.humanSeats.length });
+
+    // Oyun komutları: {t:'draw',from} | {t:'discard',tileId} | {t:'finish',tileId} | {t:'gosterge'}
+    this.onMessage('cmd', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null || !this.game) return;
+      let cmd: any;
+      try { cmd = typeof raw === 'string' ? JSON.parse(raw) : raw; }
+      catch { client.send('moveError', { code: 'bad_json' }); return; }
+      const r = applyOkeyMove(this.game, seat, cmd);
+      if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
+      this.afterChange();
+    });
+
+    // ── SOSYAL KATMAN: 51 ile birebir ──
+    this.onMessage('chat', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
+      text = String(text).slice(0, 200).trim();
+      if (!text) return;
+      const name = this.seatNames.get(seat) ?? `Oyuncu ${seat + 1}`;
+      const uid = this.seatUsers.get(seat);
+      if (uid) {
+        isChatBanned(uid).then((banned) => {
+          if (banned) { client.send('chatBlocked', { reason: 'Konuşman yasaklı.' }); return; }
+          this.broadcast('chat', { seat, name, text });
+        }).catch(() => this.broadcast('chat', { seat, name, text }));
+        return;
+      }
+      this.broadcast('chat', { seat, name, text });
+    });
+
+    this.onMessage('gift', async (client, raw) => {
+      const fromSeat = this.seats.get(client.sessionId);
+      if (fromSeat == null) return;
+      const toSeat = Number(raw?.to_seat);
+      const giftType = Number(raw?.gift_id);
+      if (!Number.isInteger(toSeat) || toSeat < 0 || toSeat > 3) return;
+      if (!Number.isInteger(giftType) || giftType < 1 || giftType > 12) return;
+      const fromUid = this.seatUsers.get(fromSeat);
+      const toUid = this.seatUsers.get(toSeat);
+      if (fromUid) {
+        const cost = GIFT_DIAMONDS[giftType] ?? 999;
+        const ok = await deductDiamonds(fromUid, cost);
+        if (!ok) { client.send('giftFailed', { reason: 'Yetersiz elmas' }); return; }
+      }
+      const fromName = this.seatNames.get(fromSeat) ?? `Oyuncu ${fromSeat + 1}`;
+      const hours = GIFT_HOURS[giftType] ?? 2;
+      const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
+      if (fromUid && toUid) insertGift(fromUid, toUid, giftType, 'table', expiresAt).catch(() => {});
+      this.broadcast('giftSent', {
+        from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
+      });
+      this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
+      this.pushViews();
+    });
+
+    // ORTAK quick-chat (yalnız eşli): sadece ortağa + gönderene.
+    this.onMessage('quickChat', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
+      text = String(text).slice(0, 120).trim();
+      if (!text) return;
+      const hs = this.humanSeats;
+      const partner = (hs.length >= 2 && hs.includes(seat)) ? (seat + 2) % 4 : null;
+      if (partner == null) return;
+      for (const [sid, s] of this.seats) {
+        if (s === partner || s === seat) {
+          const c = this.clients.find((cl) => cl.sessionId === sid);
+          if (c) c.send('quickChat', { seat, text });
+        }
+      }
+    });
+
+    this.onMessage('sit', (client, raw) => {
+      let msg: any = raw;
+      if (typeof raw === 'string') { try { msg = JSON.parse(raw); } catch { msg = {}; } }
+      this.trySit(client, msg?.seat, msg ?? {});
+    });
+
+    console.log(`[OkeyRoom] oluştu seed=${seed} mode=${mode} humans=${this.humanSeats}`);
+  }
+
+  async onAuth(_client: Client, options: any): Promise<any> {
+    const uid = await verifyToken(options?.token);
+    if (uid && (await isGameBanned(uid))) throw new Error('banned');
+    return uid ?? true;
+  }
+
+  onJoin(client: Client, options: any) {
+    const taken = new Set(this.seats.values());
+    const spectate = options?.spectate === true || options?.spectate === 'true';
+    const seat = spectate ? null : this.humanSeats.find((s) => !taken.has(s));
+    if (seat == null) {
+      this.spectators.add(client.sessionId);
+      const specName = options?.playerName ? String(options.playerName) : 'İzleyici';
+      this.spectatorNames.set(client.sessionId, specName);
+      this.spectatorMeta.set(client.sessionId, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
+      this.logEvent(`${specName} izleyici olarak masaya katıldı`);
+      client.send('seat', { seat: -1 });
+      this.pushViews();
+      return;
+    }
+    this.seats.set(client.sessionId, seat);
+    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
+    this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
+    client.send('seat', { seat });
+    console.log(`[OkeyRoom.onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
+    this.startGameIfReady();
+    this.pushViews();
+  }
+
+  private trySit(client: Client, rawSeat: any, options: any) {
+    if (this.seats.has(client.sessionId)) return;
+    if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+    const taken = new Set(this.seats.values());
+    const free = this.humanSeats.filter((s) => !taken.has(s));
+    if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
+    let seat: number;
+    const wanted = Number(rawSeat);
+    if (Number.isInteger(wanted) && free.includes(wanted)) seat = wanted;
+    else if (free.length === 1) seat = free[0]!;
+    else { client.send('sitError', { reason: 'koltuk seç' }); return; }
+
+    this.spectators.delete(client.sessionId);
+    this.seats.set(client.sessionId, seat);
+    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
+    this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
+    client.send('seat', { seat });
+    this.startGameIfReady();
+    this.pushViews();
+  }
+
+  private startGameIfReady() {
+    if (this.game || this.startTimer || this.seats.size < this.humanSeats.length) return;
+    this.startAt = Date.now();
+    this.pushViews();
+    const tick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000);
+    this.startTimer = setTimeout(() => {
+      clearInterval(tick);
+      this.startTimer = null;
+      if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; }
+      this.game = createOkeyGame(this.cfg);
+      for (const [seat, name] of this.seatNames) {
+        const p = this.game.players[seat];
+        if (p && name) p.name = name;
+      }
+      if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
+      console.log('[OkeyRoom] oyun başladı');
+      this.afterChange();
+    }, this.START_MS);
+  }
+
+  /* ── RECONNECT LIFECYCLE — 51 ile birebir (0.17: onDrop/onReconnect/onLeave) ── */
+
+  async onDrop(client: Client) {
+    console.log(`[OkeyRoom.onDrop] sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
+    const seat = this.seats.get(client.sessionId);
+    if (seat == null) {
+      if (this.spectators.delete(client.sessionId)) this.pushViews();
+      return;
+    }
+    this.abandoned.add(seat);
+    this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
+    this.afterChange();
+    const uid = this.seatUsers.get(seat);
+    const mode = (this.metadata as any)?.mode ?? 'solo';
+    const tableNo = Number((this.metadata as any)?.table) || 1;
+    let presenceTimer: NodeJS.Timeout | null = null;
+    if (uid) {
+      keepSeatPresence(uid, tableNo, mode);
+      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, mode), 50000);
+    }
+    const stop = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
+    try {
+      const back = await this.allowReconnection(client, 180);
+      console.log(`[OkeyRoom.onDrop-SUCCESS] seat=${seat} geri döndü`);
+      stop();
+      this.abandoned.delete(seat);
+      try { back.send('seat', { seat }); } catch { /* yoksay */ }
+      this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
+      this.afterChange();
+    } catch (e: any) {
+      console.log(`[OkeyRoom.onDrop-EXPIRED] seat=${seat}: ${e?.message ?? e}`);
+      stop();
+      this.cleanupSeat(client.sessionId, seat); // kalıcı bot (abandoned SET'te kalır)
+      this.pushViews();
+    }
+  }
+
+  onReconnect(client: Client) {
+    const seat = this.seats.get(client.sessionId);
+    console.log(`[OkeyRoom.onReconnect] seat=${seat}`);
+    if (seat == null) return;
+    this.abandoned.delete(seat);
+    try { client.send('seat', { seat }); } catch { /* yoksay */ }
+    this.afterChange();
+  }
+
+  onLeave(client: Client, _code?: number) {
+    console.log(`[OkeyRoom.onLeave] sessionId=${client.sessionId} code=${_code}`);
+    const seat = this.seats.get(client.sessionId);
+    if (seat == null) {
+      if (this.spectators.delete(client.sessionId)) this.pushViews();
+      return;
+    }
+    this.abandoned.add(seat); // kalıcı
+    this.logEvent(`${this.nameOfSeat(seat)} oyundan çıktı — yerini bot aldı`);
+    this.cleanupSeat(client.sessionId, seat);
+    this.afterChange();
+  }
+
+  private cleanupSeat(sessionId: string, seat: number) {
+    this.seats.delete(sessionId);
+    this.seatUsers.delete(seat);
+    this.seatNames.delete(seat);
+    this.seatMeta.delete(seat);
+    this.spectatorMeta.delete(sessionId);
+  }
+
+  private nameOfSeat(seat: number): string {
+    return this.game?.players?.[seat]?.name ?? this.seatNames.get(seat) ?? 'Oyuncu';
+  }
+
+  private logEvent(msg: string) {
+    if (this.game) this.game.matchLog.push(msg);
+    else this.preLog.push(msg);
+  }
+
+  /* ── OYUN AKIŞI: her değişimden sonra tek yerden zamanla ── */
+
+  private afterChange() {
+    this.pushViews();
+    if (!this.game) return;
+    if (this.game.matchEnded) { this.settleOnce(); this.clearTurnTimers(); return; }
+    if (this.game.elEnded) {
+      this.clearTurnTimers();
+      if (!this.elTimer) {
+        this.elTimer = setTimeout(() => {
+          this.elTimer = null;
+          if (!this.game || this.game.matchEnded) return;
+          startNextEl(this.game);
+          this.afterChange();
+        }, this.EL_END_MS);
+      }
+      return;
+    }
+    this.scheduleTurn();
+  }
+
+  private clearTurnTimers() {
+    if (this.botTimer) { clearTimeout(this.botTimer); this.botTimer = null; }
+    if (this.humanTimer) { clearTimeout(this.humanTimer); this.humanTimer = null; }
+  }
+
+  private scheduleTurn() {
+    if (!this.game || this.game.elEnded || this.game.matchEnded) return;
+    this.clearTurnTimers();
+    const turn = this.game.turn;
+    const p = this.game.players[turn]!;
+    const botLike = p.isBot || this.abandoned.has(turn);
+    if (botLike) {
+      this.turnDeadlineAt = 0;
+      this.botTimer = setTimeout(() => {
+        this.botTimer = null;
+        if (!this.game || this.game.elEnded || this.game.turn !== turn) { this.afterChange(); return; }
+        playOkeyBotTurn(this.game, turn);
+        this.afterChange();
+      }, this.STEP_MS);
+    } else {
+      const ms = Math.max(8000, this.game.rules.turnTimerSeconds * 1000) + this.TURN_GRACE_MS;
+      this.turnDeadlineAt = Date.now() + ms;
+      this.humanTimer = setTimeout(() => {
+        this.humanTimer = null;
+        if (!this.game || this.game.elEnded || this.game.turn !== turn) { this.afterChange(); return; }
+        autoOkeyMove(this.game, turn);
+        this.logEvent(`${this.nameOfSeat(turn)} süresi doldu — otomatik oynandı`);
+        this.afterChange();
+      }, ms);
+    }
+  }
+
+  private settleOnce() {
+    if (this.settled || !this.game) return;
+    this.settled = true;
+    const scores = new Map<number, number>();
+    for (let s = 0; s < 4; s++) scores.set(s, this.game.scores[s]!);
+    let winnerSeat = 0;
+    for (let s = 1; s < 4; s++) if (this.game.scores[s]! < this.game.scores[winnerSeat]!) winnerSeat = s;
+    settleMatch({
+      seatUsers: this.seatUsers,
+      winnerSeat,
+      bet: this.bet,
+      teamMode: this.game.rules.teamMode,
+      scores,
+    }).catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
+  }
+
+  /* ── GÖRÜNÜM ── */
+
+  private pushViews() {
+    const waiting = !this.game;
+    const starting = waiting && this.seats.size >= this.humanSeats.length;
+    const filled = new Set(this.seats.values());
+    const seated = [0, 1, 2, 3].map((s) => ({
+      seat: s,
+      human: this.humanSeats.includes(s),
+      filled: this.humanSeats.includes(s) ? filled.has(s) : true,
+      name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
+    }));
+    const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
+    const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
+    const specRoles = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.role ?? 'normal');
+    const specGenders = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.gender ?? '');
+    const decorate = (v: any) => {
+      if (Array.isArray(v.players))
+        for (const s of v.players) {
+          const m = this.seatMeta.get(s.seat);
+          if (m) { s.role = m.role; s.gender = m.gender; }
+          s.abandoned = this.abandoned.has(s.seat);
+          if (s.abandoned) s.isBot = true;
+        }
+      v.spectators = specList;
+      v.spectatorRoles = specRoles;
+      v.spectatorGenders = specGenders;
+      v.waitingForPlayers = waiting;
+      v.starting = starting;
+      v.seated = seated;
+      v.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
+      v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
+      v.preLog = waiting ? this.preLog.slice(-30) : [];
+    };
+    this.clients.forEach((c) => {
+      const seat = this.seats.get(c.sessionId);
+      const v: any = okeyViewFor(this.game, seat == null ? -1 : seat);
+      decorate(v);
+      c.send('view', JSON.stringify(v));
+    });
+  }
+
+  onDispose() {
+    if (this.startTimer) clearTimeout(this.startTimer);
+    if (this.elTimer) clearTimeout(this.elTimer);
+    this.clearTurnTimers();
+    console.log('[OkeyRoom] dispose');
+  }
+}

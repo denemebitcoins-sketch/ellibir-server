@@ -7,6 +7,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer } from 'http';
 import { EllibirRoom } from './rooms/EllibirRoom';
+import { OkeyRoom } from './rooms/OkeyRoom';
 
 const port = Number(process.env.PORT) || 2567;
 
@@ -28,6 +29,8 @@ const gameServer = new Server({
 // "ellibir" odası — masa. Matchmaking: joinOrCreate("ellibir", { mode, table }).
 // filterBy(mode,table): aynı mod + aynı masa no → AYNI odada buluşur ("Masa 3'te buluşalım").
 gameServer.define('ellibir', EllibirRoom).filterBy(['mode', 'table']);
+// "okey" odası — aynı matchmaking modeli: joinOrCreate("okey", { mode, table }).
+gameServer.define('okey', OkeyRoom).filterBy(['mode', 'table']);
 
 try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
 
