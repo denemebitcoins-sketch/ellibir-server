@@ -51,6 +51,22 @@ export class OkeyRoom extends Room {
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar (izleyici katıldı vb.)
 
   onCreate(options: any) {
+    // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
+    // CANLI client'a eşlenip clients listesinden düşürüyor, oda boşalınca DISPOSE oluyordu
+    // (hook'ta yutmak yetmiyor — silme hook'tan ÖNCE). KESİN AYRAÇ: mevcut transport (client.ref)
+    // hâlâ AÇIKSA (readyState===1) kapanış eski sokete aittir → çekirdek akışı tamamen atlanır.
+    {
+      const origOnLeave = (this as any)._onLeave.bind(this);
+      (this as any)._onLeave = async (client: any, code?: number) => {
+        try {
+          if (code !== 4000 && client?.ref && client.ref.readyState === 1) {
+            console.log(`[OkeyRoom._onLeave] CORE-STALE close (canlı ref açık, code=${code}) -> yok sayıldı sid=${client.sessionId}`);
+            return;
+          }
+        } catch { /* emniyet */ }
+        return origOnLeave(client, code);
+      };
+    }
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
     const mode = options?.mode === 'duo' ? 'duo' : options?.mode === 'quad' ? 'quad' : 'solo';
@@ -85,8 +101,12 @@ export class OkeyRoom extends Room {
         const allDecided = [...this.seats.values()].every((s2) => (this.game as any).bankoChoice[s2] !== -1);
         if (allDecided) {
           clearTimeout(this.bankoTimer);
-          this.bankoDeadlineAt = Date.now() + 800;
-          this.bankoTimer = setTimeout(() => this.finishBankoPhase(), 800);
+          // Erken kapanış 3sn: karar listede OKUNSUN (0.8sn 'süre birden düştü' hissi veriyordu);
+          // kalan süre zaten 3sn'den azsa dokunma.
+          const kalanMs = Math.max(0, this.bankoDeadlineAt - Date.now());
+          const closeMs = Math.min(kalanMs, 3000);
+          this.bankoDeadlineAt = Date.now() + closeMs;
+          this.bankoTimer = setTimeout(() => this.finishBankoPhase(), closeMs);
         }
       }
       if ((this.game as any).bankoPhase) { this.pushViews(); return; }

@@ -48,6 +48,22 @@ export class TavlaRoom extends Room {
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar
 
   onCreate(options: any) {
+    // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
+    // CANLI client'a eşlenip clients listesinden düşürüyor, oda boşalınca DISPOSE oluyordu
+    // (hook'ta yutmak yetmiyor — silme hook'tan ÖNCE). KESİN AYRAÇ: mevcut transport (client.ref)
+    // hâlâ AÇIKSA (readyState===1) kapanış eski sokete aittir → çekirdek akışı tamamen atlanır.
+    {
+      const origOnLeave = (this as any)._onLeave.bind(this);
+      (this as any)._onLeave = async (client: any, code?: number) => {
+        try {
+          if (code !== 4000 && client?.ref && client.ref.readyState === 1) {
+            console.log(`[TavlaRoom._onLeave] CORE-STALE close (canlı ref açık, code=${code}) -> yok sayıldı sid=${client.sessionId}`);
+            return;
+          }
+        } catch { /* emniyet */ }
+        return origOnLeave(client, code);
+      };
+    }
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2'];
     const mode = options?.mode === 'duo' ? 'duo' : 'solo';
