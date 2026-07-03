@@ -1,3 +1,4 @@
+import { pipCount } from '../../packages/engine/src/tavla';
 import type { TavlaGameState } from '../../packages/engine/src/tavla';
 
 /**
@@ -26,6 +27,11 @@ export function tavlaViewFor(state: TavlaGameState | null, seat: number): Record
     matchEnded: state.matchEnded,
     gameWinner: state.gameWinner,
     mars: state.mars,
+    // KATLAMA KÜPÜ + pip sayaçları
+    cubeValue: state.cubeValue,
+    cubeOwner: state.cubeOwner,
+    pendingDouble: state.pendingDouble,
+    pip0: pipCount(state, 0), pip1: pipCount(state, 1),
     matchScore: state.matchScore,            // [s0, s1]
     players: state.players.map((p) => ({ seat: p.seat, name: p.name, isBot: p.isBot })),
     logMessages: state.matchLog.slice(-60),
@@ -43,6 +49,7 @@ export function emptyTavlaView(seat: number): Record<string, unknown> {
     points: new Array(24).fill(0), bar0: 0, bar1: 0, off0: 0, off1: 0,
     dice: [0, 0], movesLeft: [], openRoll: [0, 0],
     gameEnded: false, matchEnded: false, gameWinner: -1, mars: false,
+    cubeValue: 1, cubeOwner: -1, pendingDouble: -1, pip0: 0, pip1: 0,
     matchScore: [0, 0], players: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,
   };

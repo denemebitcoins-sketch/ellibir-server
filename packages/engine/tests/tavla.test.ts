@@ -167,3 +167,69 @@ describe('bot ve simülasyon', () => {
     }
   });
 });
+
+describe('katlama küpü + teslim', () => {
+  it('küp yalnız sıra sende + zar atmadan teklif edilir; rakip kabulünde ×2 ve sahiplik geçer', () => {
+    const st = fresh(9);
+    const t = st.turn, o = 1 - t;
+    expect(applyTavlaMove(st, o, { t: 'double' }).ok).toBe(false); // sıra onda değil
+    expect(applyTavlaMove(st, t, { t: 'double' }).ok).toBe(true);
+    expect(st.pendingDouble).toBe(t);
+    expect(applyTavlaMove(st, t, { t: 'roll' }).ok).toBe(false);   // cevap bekleniyor
+    expect(applyTavlaMove(st, t, { t: 'takeDouble' }).ok).toBe(false); // cevabı rakip verir
+    expect(applyTavlaMove(st, o, { t: 'takeDouble' }).ok).toBe(true);
+    expect(st.cubeValue).toBe(2);
+    expect(st.cubeOwner).toBe(o);
+    expect(st.pendingDouble).toBe(-1);
+    // Küp artık rakipte → teklif eden yeniden katlayamaz
+    expect(applyTavlaMove(st, t, { t: 'double' }).ok).toBe(false);
+  });
+
+  it('katlamada çekilme: teklif eden ESKİ küp değerince kazanır', () => {
+    const st = fresh(10);
+    const t = st.turn, o = 1 - t;
+    applyTavlaMove(st, t, { t: 'double' });
+    expect(applyTavlaMove(st, o, { t: 'dropDouble' }).ok).toBe(true);
+    expect(st.gameEnded).toBe(true);
+    expect(st.gameWinner).toBe(t);
+    expect(st.matchScore[t]).toBe(1); // eski küp = 1
+    expect(st.mars).toBe(false);
+  });
+
+  it('kabul edilen küple normal bitiş ×küp; MARS ile ×2×küp', () => {
+    const st = fresh(11);
+    const t = st.turn, o = 1 - t;
+    applyTavlaMove(st, t, { t: 'double' });
+    applyTavlaMove(st, o, { t: 'takeDouble' });
+    st.turn = 0; st.phase = 'move'; st.movesLeft = [1];
+    clearBoard(st);
+    st.points[0] = 1; st.off[0] = 14; st.off[1] = 0; st.points[18] = -15;
+    applyTavlaMove(st, 0, { t: 'move', from: 0, die: 1 });
+    expect(st.mars).toBe(true);
+    expect(st.matchScore[0]).toBe(4); // mars 2 × küp 2
+  });
+
+  it('teslim ol: rakip küp değerince kazanır, mars sayılmaz', () => {
+    const st = fresh(12);
+    const t = st.turn;
+    expect(applyTavlaMove(st, t, { t: 'resign' }).ok).toBe(true);
+    expect(st.gameEnded).toBe(true);
+    expect(st.gameWinner).toBe(1 - t);
+    expect(st.matchScore[1 - t]).toBe(1);
+    expect(st.mars).toBe(false);
+  });
+
+  it('yeni oyunda küp sıfırlanır; autoTavlaMove bekleyen teklifi oto-kabul eder', () => {
+    const st = createTavlaGame({ seed: 13, rules: { targetScore: 5 } });
+    const t = st.turn, o = 1 - t;
+    applyTavlaMove(st, t, { t: 'double' });
+    autoTavlaMove(st, o); // süre doldu senaryosu
+    expect(st.cubeValue).toBe(2);
+    applyTavlaMove(st, o, { t: 'resign' });
+    expect(st.gameEnded).toBe(true);
+    startNextGame(st);
+    expect(st.cubeValue).toBe(1);
+    expect(st.cubeOwner).toBe(-1);
+    expect(st.pendingDouble).toBe(-1);
+  });
+});

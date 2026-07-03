@@ -1,7 +1,7 @@
 import { Room, Client } from '@colyseus/core';
 import {
   createTavlaGame, startNextGame, applyTavlaMove, autoTavlaMove, bestTavlaStep,
-  DEFAULT_TAVLA_RULES,
+  shouldOfferDouble, shouldTakeDouble, DEFAULT_TAVLA_RULES,
 } from '../../../packages/engine/src/tavla';
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
@@ -307,17 +307,47 @@ export class TavlaRoom extends Room {
   private scheduleTurn() {
     if (!this.game || this.game.gameEnded || this.game.matchEnded) return;
     this.clearTurnTimers();
+
+    // ── KATLAMA CEVABI BEKLENİYOR: cevap verecek olan rakip (teklif eden DEĞİL) ──
+    if (this.game.pendingDouble >= 0) {
+      const responder = 1 - this.game.pendingDouble;
+      const rp = this.game.players[responder]!;
+      const rBot = rp.isBot || this.abandoned.has(responder);
+      if (rBot) {
+        this.turnDeadlineAt = 0;
+        this.botTimer = setTimeout(() => {
+          this.botTimer = null;
+          if (!this.game || this.game.pendingDouble < 0) { this.afterChange(); return; }
+          const take = shouldTakeDouble(this.game, responder);
+          applyTavlaMove(this.game, responder, { t: take ? 'takeDouble' : 'dropDouble' });
+          this.afterChange();
+        }, 1400);
+      } else {
+        const ms = 20000 + this.TURN_GRACE_MS; // insan cevap penceresi
+        this.turnDeadlineAt = Date.now() + ms;
+        this.humanTimer = setTimeout(() => {
+          this.humanTimer = null;
+          if (!this.game || this.game.pendingDouble < 0) { this.afterChange(); return; }
+          autoTavlaMove(this.game, responder); // süre doldu → oto-KABUL
+          this.logEvent(`${this.nameOfSeat(responder)} süresi doldu — katlama kabul sayıldı`);
+          this.afterChange();
+        }, ms);
+      }
+      return;
+    }
+
     const turn = this.game.turn;
     const p = this.game.players[turn]!;
     const botLike = p.isBot || this.abandoned.has(turn);
     if (botLike) {
       this.turnDeadlineAt = 0;
-      // Bot ADIM ADIM: önce zar (görünür), sonra tek tek hamleler.
+      // Bot ADIM ADIM: önce (yerinde görürse) KATLAMA, sonra zar (görünür), sonra tek tek hamleler.
       this.botTimer = setTimeout(() => {
         this.botTimer = null;
         if (!this.game || this.game.gameEnded || this.game.turn !== turn) { this.afterChange(); return; }
         if (this.game.phase === 'roll') {
-          applyTavlaMove(this.game, turn, { t: 'roll' });
+          if (shouldOfferDouble(this.game, turn)) applyTavlaMove(this.game, turn, { t: 'double' });
+          else applyTavlaMove(this.game, turn, { t: 'roll' });
         } else {
           const s = bestTavlaStep(this.game, turn);
           if (s) applyTavlaMove(this.game, turn, { t: 'move', from: s.from, die: s.die });

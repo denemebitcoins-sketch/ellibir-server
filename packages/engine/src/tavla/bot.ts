@@ -1,6 +1,21 @@
 import {
-  TavlaGameState, TavlaStep, applyTavlaMove, legalSteps, stepFor,
+  TavlaGameState, TavlaStep, applyTavlaMove, legalSteps, stepFor, pipCount,
 } from './game';
+
+/** Bot KATLAMA teklif etsin mi? Belirgin pip üstünlüğü + küp erişilebilir + tavan altı. */
+export function shouldOfferDouble(st: TavlaGameState, seat: number): boolean {
+  if (st.phase !== 'roll' || st.pendingDouble >= 0) return false;
+  if (st.cubeOwner !== -1 && st.cubeOwner !== seat) return false;
+  if (st.cubeValue >= 8) return false; // bot küpü aşırı şişirmesin
+  const my = pipCount(st, seat), opp = pipCount(st, 1 - seat);
+  return my < opp * 0.8 && opp - my >= 20;
+}
+
+/** Bot katlamayı KABUL etsin mi? Umutsuz değilse al (standart ~%25 kural yaklaşığı). */
+export function shouldTakeDouble(st: TavlaGameState, seat: number): boolean {
+  const my = pipCount(st, seat), opp = pipCount(st, 1 - seat);
+  return my <= opp * 1.3 + 6;
+}
 
 /** Rakip bu haneye tek zarla vurabilir mi (kaba blot riski)? */
 function blotRisk(st: TavlaGameState, pl: number, i: number): boolean {
