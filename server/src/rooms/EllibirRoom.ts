@@ -52,7 +52,8 @@ export class EllibirRoom extends Room {
   private bet = 0;                             // masa bahsi (maç sonu settle için)
   private settled = false;                     // çift settle koruması
 
-  private lastReconnectAt = new Map<string, number>(); // STALE-DROP kalkanı (wifi→mobil geçişi)
+  private lastReconnectAt = new Map<string, number>();
+  private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkanı (wifi→mobil geçişi)
 
   onCreate(options: any) {
     // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
@@ -66,12 +67,34 @@ export class EllibirRoom extends Room {
           const rs = client?.ref?.readyState;
           // OPEN(1) VEYA CONNECTING(0): reconnect el sıkışması sürerken gelen kapanış da eski sokete ait
           // (07:51:53 vakası: yeni ref daha açılmadan stale close geldi, oda dispose oldu).
-          if (code !== 4000 && (rs === 0 || rs === 1)) {
+          if (code !== 4000 && code !== 4444 && (rs === 0 || rs === 1)) { // 4444 = TAKEOVER (bilinçli zombi kapatma)
             console.log(`[EllibirRoom._onLeave] CORE-STALE close (canlı ref açık, code=${code}) -> yok sayıldı sid=${client.sessionId}`);
             return;
           }
         } catch { /* emniyet */ }
         return origOnLeave(client, code);
+      };
+    }
+    // SESSION TAKEOVER (AAA reconnect): ayni oturum icin YENI baglanti gelirse (wifi<->mobil
+    // flapping'inde eski baglanti zombi kalip ping'lere cevap verebiliyor) zombi ANINDA
+    // kapatilir (4444) -> onDrop -> allowReconnection -> yeni gelen <1sn'de koltuga oturur.
+    // (Cekirdek aksi halde zombinin olmesini 15sn bekliyor ya da MAY_TRY_RECONNECT donduruyor.)
+    {
+      const origOnJoin = (this as any)._onJoin.bind(this);
+      (this as any)._onJoin = async (client: any, ...rest: any[]) => {
+        try {
+          const connOpts = rest[rest.length - 1];
+          const token = connOpts?.reconnectionToken;
+          if (token) {
+            const zombie: any = (this.clients as any).getById?.(client.sessionId);
+            if (zombie && zombie !== client && zombie.reconnectionToken === token) {
+              console.log(`[EllibirRoom.takeover] ayni oturum icin YENI baglanti -> zombi kapatiliyor sid=${client.sessionId}`);
+              this.takeoverPending.add(client.sessionId);
+              try { zombie.leave(4444); } catch { /* yoksay */ }
+            }
+          }
+        } catch { /* emniyet */ }
+        return origOnJoin(client, ...rest);
       };
     }
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
@@ -301,10 +324,11 @@ export class EllibirRoom extends Room {
 
   /** ANORMAL kopma (0.17 onDrop): koltuğu HEMEN bota devret + 180s rezerve tut. */
   async onDrop(client: Client) {
+    const isTakeover = this.takeoverPending.delete(client.sessionId); // takeover dususu KALKAN-1'i atlar
     // KALKAN: wifi→mobil geçişinde SDK yeni bağlantıyla ÇOKTAN döndükten sonra eski
     // socket'in gecikmiş kapanışı ikinci bir onDrop tetikliyor; allowReconnection anında
     // patlayıp KOLTUĞU SİLİYORDU (log: onReconnect ↔ onDrop aynı saniye → EXPIRED → 4002).
-    if (Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 3000) {
+    if (!isTakeover && Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 3000) {
       console.log(`[EllibirRoom.onDrop] STALE drop (yeni bağlantı canlı) → yok sayıldı sid=${client.sessionId}`);
       return;
     }
