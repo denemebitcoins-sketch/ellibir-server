@@ -43,9 +43,12 @@ export interface OkeyGameState {
   scores: number[];          // koltuk başına CEZA birikimi (0'dan başlar, düşük iyi; kazanan eksiye düşer)
   elDeltas: number[][];      // YAZBOZ: el başına puan değişimi (gösterge dahil)
   elStartScores: number[];   // el başı skor (delta tabanı)
-  // BANKO varyantı: maçta 1 kez "banko" hakkı; o el TÜM el çarpanını ×2'ler.
-  bankoUsed: boolean[];      // koltuk maç boyunca bankosunu kullandı mı
-  bankoThisEl: boolean[];    // bu el banko diyenler (el çarpanına 2^adet)
+  // BANKO varyantı: maçta 1 kez "banko" hakkı; EL DAĞITILMADAN taahhüt edilir
+  // (el içinde denen banko SONRAKİ el için kilitlenir), o el çarpanı ×2'ler.
+  bankoUsed: boolean[];      // hak harcandı mı (maçta 1; geri alınamaz)
+  bankoPending: boolean[];   // SONRAKİ el için taahhüt (el başında bankoThisEl'e döner)
+  bankoThisEl: boolean[];    // bu el banko OLAN koltuklar (çarpan 2^adet)
+  bankoRows: number[][];     // YAZBOZ: el başına koltuk sonucu — 0 yok, 1 TAMAMLADI, 2 PATLADI
   matchLog: string[];
 }
 
@@ -86,7 +89,9 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     elDeltas: [],
     elStartScores: [0, 0, 0, 0],
     bankoUsed: [false, false, false, false],
+    bankoPending: [false, false, false, false],
     bankoThisEl: [false, false, false, false],
+    bankoRows: [],
   };
   startNextEl(state);
   return state;
@@ -115,7 +120,9 @@ export function startNextEl(state: OkeyGameState): void {
   state.elWinner = null;
   state.finishKind = null;
   state.elStartScores = [...state.scores]; // yazboz delta tabanı
-  state.bankoThisEl = [false, false, false, false];
+  // Taahhütler bu elde devreye girer (el DAĞITILMADAN söylenmişti).
+  state.bankoThisEl = [...(state.bankoPending ?? [false, false, false, false])];
+  state.bankoPending = [false, false, false, false];
   if (state.rules.variant === 'banko') {
     const remaining = state.rules.totalEls - state.elNumber + 1;
     const nonUsers = [0, 1, 2, 3].filter((si) => !state.bankoUsed[si]);
@@ -126,6 +133,9 @@ export function startNextEl(state: OkeyGameState): void {
         state.matchLog.push(`${state.players[si]!.name} için OTOMATİK BANKO yazıldı (son eller)`);
       }
     }
+    for (let si = 0; si < 4; si++)
+      if (state.bankoThisEl[si] && !state.matchLog[state.matchLog.length - 1]?.includes('OTOMATİK'))
+        { /* taahhüt logu declare aninda atildi */ }
   }
   state.matchLog.push(`El ${state.elNumber} başladı — gösterge: ${state.gosterge.color}${state.gosterge.rank}, dağıtan: ${state.players[state.dealerSeat]!.name}`);
 }
@@ -143,11 +153,13 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
   if (state.matchEnded) return { ok: false, error: 'maç bitti' };
   if (state.elEnded) return { ok: false, error: 'el bitti' };
   if (move.t === 'banko') {
+    // EL GÖRÜLDÜKTEN SONRA bu ele banko DENEMEZ — taahhüt SONRAKİ el içindir.
     if (state.rules.variant !== 'banko') return { ok: false, error: 'bu masa banko değil' };
     if (state.bankoUsed[seat]) return { ok: false, error: 'bankonu zaten kullandın' };
-    state.bankoUsed[seat] = true;
-    state.bankoThisEl[seat] = true;
-    state.matchLog.push(`${state.players[seat]!.name} BANKO dedi! (bu el çarpan ×2)`);
+    if (state.elNumber >= state.rules.totalEls) return { ok: false, error: 'son el — sonraki el yok' };
+    state.bankoUsed[seat] = true;      // hak o an harcanır, geri alınamaz
+    state.bankoPending[seat] = true;   // SONRAKİ el dağıtılmadan devreye girer
+    state.matchLog.push(`${state.players[seat]!.name} SONRAKİ EL için BANKO dedi! (çarpan ×2)`);
     return { ok: true };
   }
   const p = state.players[seat];
@@ -231,6 +243,8 @@ function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number)
 /** El kapanırken YAZBOZ satırı: bu eldeki toplam puan değişimi (gösterge dahil). */
 function pushElDelta(state: OkeyGameState): void {
   state.elDeltas.push(state.scores.map((v, i) => v - (state.elStartScores[i] ?? 0)));
+  // bankoRows her el için hizalı kalsın (banko yolu kendi satırını zaten attıysa atlama).
+  if (state.bankoRows.length < state.elDeltas.length) state.bankoRows.push([0, 0, 0, 0]);
 }
 
 /** BANKO: gösterge rengi çarpanı — siyah 5, kırmızı 4, sarı 3, mavi 2 (kullanıcı kuralı). */
@@ -297,6 +311,20 @@ function endElWinBanko(state: OkeyGameState, seat: number, kind: OkeyFinishKind)
     state.matchLog.push(`${state.players[s2]!.name} elde ${lo.sum} bıraktı${lo.cift ? ' (çift ×2)' : ''} → +${pts}`);
   }
   state.matchLog.push(`Çarpan ×${mult} (gösterge${state.bankoThisEl.some(Boolean) ? ' + banko' : ''}) — ${state.players[seat]!.name} −${winPts}`);
+  pushBankoRow(state, seat);
+}
+
+/** YAZBOZ banko satırı: banko diyenler için 1=TAMAMLADI (kendisi/takımı kazandı) 2=PATLADI. */
+function pushBankoRow(state: OkeyGameState, winnerSeat: number): void {
+  const row = [0, 0, 0, 0];
+  for (let s2 = 0; s2 < 4; s2++) {
+    if (!state.bankoThisEl[s2]) continue;
+    const won = winnerSeat >= 0
+      && (s2 === winnerSeat || (state.rules.teamMode && s2 % 2 === winnerSeat % 2));
+    row[s2] = won ? 1 : 2;
+    state.matchLog.push(`${state.players[s2]!.name} bankosunu ${won ? 'TAMAMLADI ✓' : 'PATLATTI ✗'}`);
+  }
+  state.bankoRows.push(row);
 }
 
 function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): void {
@@ -335,6 +363,7 @@ function endElDraw(state: OkeyGameState): void {
       state.scores[s2] = state.scores[s2]! + pts;
     }
     state.matchLog.push(`Taşlar bitti — herkes elinde kalanı ödedi (çarpan ×${mult})`);
+    pushBankoRow(state, -1);
     pushElDelta(state);
     maybeEndMatchBanko(state);
     return;
