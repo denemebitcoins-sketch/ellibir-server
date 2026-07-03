@@ -299,6 +299,14 @@ export class OkeyRoom extends Room {
   }
 
   onLeave(client: Client, _code?: number) {
+    // KALKAN-3: reconnect'ten hemen sonra ESKI socket kapanisi onLeave (4002 vb.) olarak da
+    // dusebiliyor — kalkan-1 onDrop'u kesince ayni hayalet buradan sizip koltugu siliyordu.
+    // KASITLI cikis (4000 consented) etkilenmez.
+    if (_code !== 4000 && Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 5000) {
+      console.log(`[OkeyRoom.onLeave] STALE leave (reconnect taze, code=${_code}) -> yok sayildi sid=${client.sessionId}`);
+      return;
+    }
+
     console.log(`[OkeyRoom.onLeave] sessionId=${client.sessionId} code=${_code}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {

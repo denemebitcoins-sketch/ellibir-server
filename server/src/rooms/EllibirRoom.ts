@@ -346,6 +346,14 @@ export class EllibirRoom extends Room {
 
   /** KASITLI çıkış (.leave()) ya da reconnect başarısız (0.17 onLeave(code)): koltuk KALICI bot. */
   onLeave(client: Client, _code?: number) {
+    // KALKAN-3: reconnect'ten hemen sonra ESKI socket kapanisi onLeave (4002 vb.) olarak da
+    // dusebiliyor — kalkan-1 onDrop'u kesince ayni hayalet buradan sizip koltugu siliyordu.
+    // KASITLI cikis (4000 consented) etkilenmez.
+    if (_code !== 4000 && Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 5000) {
+      console.log(`[EllibirRoom.onLeave] STALE leave (reconnect taze, code=${_code}) -> yok sayildi sid=${client.sessionId}`);
+      return;
+    }
+
     console.log(`[onLeave] TETİKLENDİ sessionId=${client.sessionId} code=${_code} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
