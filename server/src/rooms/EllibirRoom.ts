@@ -350,6 +350,10 @@ export class EllibirRoom extends Room {
   private resetHandOrder() {
     if (!this.game) return;
     clearHandOrder(this.game);
+    // KÜLT KURAL: her el KARIŞIK başlar, çekilen kart hep EN SAĞA gelir, kendiliğinden per OLMAZ.
+    // dizMode önceki elden taşınıyordu (immutable state spread'leri koruyor) → yeni el otomatik dizili
+    // geliyordu. El başında sıfırla; oyuncu el içinde SERİ/ÇİFT DİZ'e basarsa sticky dizilim yine çalışır.
+    (this.game as any).dizModes = {};
     for (const seat of this.humanSeats) {
       try { reconcileHandOrder(this.game, seat); } catch { /* yoksay */ }
     }
