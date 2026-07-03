@@ -275,12 +275,15 @@ function showGosterge(state: OkeyGameState, p: OkeyPlayer): OkeyMoveResult {
   return { ok: true };
 }
 
-/** KAHVE USULÜ el sonu cezası: rakipler +points CEZA yer; kazanan kendi cezasından -points düşer.
- *  Eşli'de ortak muaf (ceza yemez); rakip takımın İKİ üyesi de yer. */
+/** KAHVE USULÜ el sonu cezası: rakipler +points CEZA yer; kazanan -points düşer.
+ *  EŞLİ KURAL (kullanıcı): biri bitince ORTAĞI DA BİTMİŞ SAYILIR — o da AYNI düşüşü (-points) alır. */
 function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number): void {
   for (let s = 0; s < 4; s++) {
     if (s === winnerSeat) { state.scores[s] = state.scores[s]! - points; continue; }
-    if (state.rules.teamMode && s % 2 === winnerSeat % 2) continue; // ortak muaf
+    if (state.rules.teamMode && s % 2 === winnerSeat % 2) {
+      state.scores[s] = state.scores[s]! - points; // ortak da düşer (bitmiş sayılır)
+      continue;
+    }
     state.scores[s] = state.scores[s]! + points;
   }
 }
@@ -349,7 +352,12 @@ function endElWinBanko(state: OkeyGameState, seat: number, kind: OkeyFinishKind)
   state.scores[seat] = state.scores[seat]! - winPts;
   for (let s2 = 0; s2 < 4; s2++) {
     if (s2 === seat) continue;
-    if (state.rules.teamMode && s2 % 2 === seat % 2) continue; // ortak muaf
+    if (state.rules.teamMode && s2 % 2 === seat % 2) {
+      // EŞLİ: ortak da bitmiş sayılır — kazananla AYNI düşüşü alır (leftover cezası yok).
+      state.scores[s2] = state.scores[s2]! - winPts;
+      state.matchLog.push(`${state.players[s2]!.name} (ortak) da bitti sayıldı → −${winPts}`);
+      continue;
+    }
     const lo = leftoverFor(state, s2);
     const pts = lo.sum * mult * (lo.cift ? 2 : 1);
     state.scores[s2] = state.scores[s2]! + pts;

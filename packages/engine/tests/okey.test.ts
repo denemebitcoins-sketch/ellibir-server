@@ -235,7 +235,7 @@ describe('oyun akışı', () => {
     expect(r2.ok).toBe(true);
     expect(g2.finishKind).toBe('okey');
     expect(g2.scores[0]).toBe(300); // 500 - 200 (okey atarak 2x düşer)
-    expect(g2.scores[2]).toBe(500); // ortak muaf (ceza yemez, düşmez de)
+    expect(g2.scores[2]).toBe(300); // ORTAK DA DÜŞER: kazananla aynı (500 - 200) — bitmiş sayılır
     expect(g2.scores[1]).toBe(700); // +200 ceza
     expect(g2.scores[3]).toBe(700);
   });
