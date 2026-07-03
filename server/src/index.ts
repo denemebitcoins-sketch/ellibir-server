@@ -8,6 +8,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { EllibirRoom } from './rooms/EllibirRoom';
 import { OkeyRoom } from './rooms/OkeyRoom';
+import { TavlaRoom } from './rooms/TavlaRoom';
 
 const port = Number(process.env.PORT) || 2567;
 
@@ -31,6 +32,8 @@ const gameServer = new Server({
 gameServer.define('ellibir', EllibirRoom).filterBy(['mode', 'table']);
 // "okey" odası — aynı matchmaking modeli: joinOrCreate("okey", { mode, table }).
 gameServer.define('okey', OkeyRoom).filterBy(['mode', 'table']);
+// "tavla" odası — 2 kişilik: joinOrCreate("tavla", { mode, table }).
+gameServer.define('tavla', TavlaRoom).filterBy(['mode', 'table']);
 
 try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
 
