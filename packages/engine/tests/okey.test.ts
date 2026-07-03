@@ -360,11 +360,16 @@ describe('BANKO v3: açık SEÇİM FAZI (el dağıtılmadan, herkes görür)', (
     expect(st2.bankoPending[0]).toBe(false);
   });
 
-  it('son eller mecburiyeti: kalan el <= hak dolmamış sayısı → fazda OTOMATİK BANKO görünür', () => {
-    const st = bankoGame(15);
-    (st as any).elNumber = 1; // dağıtılacak el 2; kalan (5-1)=4 = 4 kişi → hepsi otomatik
+  it('mecburiyet YALNIZ SON elde, hakkı duran HERKESE (bot dahil); ara ellerde ASLA', () => {
+    const st = bankoGame(15); // botSeats [1,2,3]
+    (st as any).elNumber = 1; // ara el → force YOK (eskiden burada patlıyordu: eş hakkı yanıyordu)
     beginBankoPhase(st);
+    expect(st.bankoChoice[0]).toBe(-1);
+    expect(st.bankoUsed.some(Boolean)).toBe(false);
+    resolveBankoPhase(st);
+    (st as any).elNumber = st.rules.totalEls - 1; // dağıtılacak = SON el
+    beginBankoPhase(st);
+    expect(st.bankoUsed.every(Boolean)).toBe(true); // bot dahil herkes
     expect(st.bankoChoice.every((c) => c === 1)).toBe(true);
-    expect(st.bankoUsed.every(Boolean)).toBe(true);
   });
 });

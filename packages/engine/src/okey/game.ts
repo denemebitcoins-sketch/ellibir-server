@@ -115,12 +115,15 @@ export function beginBankoPhase(state: OkeyGameState): void {
     state.bankoChoice[s2] = state.bankoUsed[s2] ? 0 : -1; // hakkı yok → PAS kilitli
   // Son eller mecburiyeti: kalan el (dağıtılacak dahil) hak dolmamış sayısına eşit/azsa hepsi BANKO.
   const remaining = state.rules.totalEls - state.elNumber; // dağıtılacak el = elNumber+1
-  const nonUsers = [0, 1, 2, 3].filter((si) => !state.bankoUsed[si]);
-  if (nonUsers.length > 0 && remaining <= nonUsers.length) {
-    for (const si of nonUsers) {
+  // MECBURİYET (revize, kullanıcı kuralı): yalnız SON dağıtılacak elde, hakkı duran HERKESE
+  // (bot dahil) otomatik yazılır. Eski grup-sayımı (kalan<=dememiş sayısı) botlar yüzünden
+  // 2. elde tetiklenip İNSANLARIN (eşin!) hakkını sessizce yakıyordu — "eş banko diyemiyor" bug'ı.
+  if (remaining <= 1) {
+    for (let si = 0; si < 4; si++) {
+      if (state.bankoUsed[si]) continue;
       state.bankoUsed[si] = true;
       state.bankoChoice[si] = 1;
-      state.matchLog.push(`${state.players[si]!.name} için OTOMATİK BANKO (son eller mecburiyeti)`);
+      state.matchLog.push(`${state.players[si]!.name} için OTOMATİK BANKO (son el mecburiyeti)`);
     }
   }
   // Botlar anında PAS (kararsız kalmasınlar).
