@@ -2,6 +2,7 @@ import type { NormalOkeyTile, OkeyColor, OkeyFinishKind, OkeyRank, OkeyTile } fr
 import type { OkeyRuleConfig } from './rules';
 import { DEFAULT_OKEY_RULES } from './rules';
 import { dealOkey, isOkeyTile, identityOf } from './deck';
+import { createRng } from '../deck';
 import { canFinishMelds, canFinishPairs, bestGrouping } from './melds';
 
 /**
@@ -126,9 +127,22 @@ export function beginBankoPhase(state: OkeyGameState): void {
       state.matchLog.push(`${state.players[si]!.name} için OTOMATİK BANKO (son el mecburiyeti)`);
     }
   }
-  // Botlar anında PAS (kararsız kalmasınlar).
-  for (let s2 = 0; s2 < 4; s2++)
-    if (state.players[s2]!.isBot && state.bankoChoice[s2] === -1) state.bankoChoice[s2] = 0;
+  // Botlar KARARSIZ başlar — oda onları rastgele gecikmeyle botBankoDecide ile karar verdirir
+  // (listeye canlı düşer; %35 banko / %65 pas — kullanıcı ayarı).
+}
+
+/** Bot banko kararı (deterministik: seed+el+koltuk): hakkı varsa %35 BANKO, %65 PAS. */
+export function botBankoDecide(state: OkeyGameState, seat: number): void {
+  if (!state.bankoPhase || state.bankoChoice[seat] !== -1) return;
+  if (state.bankoUsed[seat]) { state.bankoChoice[seat] = 0; return; }
+  const rng = createRng(state.seed + state.elNumber * 7919 + seat * 104729 + 4242);
+  if (rng() < 0.35) {
+    state.bankoUsed[seat] = true;
+    state.bankoChoice[seat] = 1;
+    state.matchLog.push(`${state.players[seat]!.name} BANKO dedi! 🔥`);
+  } else {
+    state.bankoChoice[seat] = 0;
+  }
 }
 
 export function chooseBanko(state: OkeyGameState, seat: number): OkeyMoveResult {

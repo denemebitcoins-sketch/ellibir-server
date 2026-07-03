@@ -8,7 +8,7 @@ export {
 } from './melds';
 export {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, elMultOf,
-  beginBankoPhase, chooseBanko, choosePas, resolveBankoPhase,
+  beginBankoPhase, chooseBanko, choosePas, resolveBankoPhase, botBankoDecide,
 } from './game';
 export type { OkeyGameState, OkeyPlayer, OkeyMove, OkeyMoveResult, OkeyCreateOptions } from './game';
 export { playOkeyBotTurn } from './bot';

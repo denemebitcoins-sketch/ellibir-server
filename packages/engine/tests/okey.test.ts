@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOkeyDeck, dealOkey, nextRank, identityOf, isOkeyTile,
   canFinishMelds, canFinishPairs, isValidRun, isValidSet, isValidPair,
-  createOkeyGame, applyOkeyMove, elMultOf, beginBankoPhase, resolveBankoPhase, startNextEl, autoOkeyMove, playOkeyBotTurn,
+  createOkeyGame, applyOkeyMove, elMultOf, beginBankoPhase, resolveBankoPhase, botBankoDecide, startNextEl, autoOkeyMove, playOkeyBotTurn,
 } from '../src/okey';
 import type { NormalOkeyTile, OkeyColor, OkeyRank, OkeyTile } from '../src/okey';
 
@@ -318,7 +318,10 @@ describe('BANKO v3: açık SEÇİM FAZI (el dağıtılmadan, herkes görür)', (
     expect(st.elNumber).toBe(0); // henüz dağıtılmadı
     beginBankoPhase(st);
     expect(st.bankoPhase).toBe(true);
-    expect(st.bankoChoice[1]).toBe(0); // bot PAS
+    expect(st.bankoChoice[1]).toBe(-1); // bot da KARARSIZ başlar (oda gecikmeli karar verdirir)
+    botBankoDecide(st, 1);
+    expect([0, 1]).toContain(st.bankoChoice[1]); // %35 banko / %65 pas (deterministik seed)
+    if (st.bankoChoice[1] === 1) expect(st.bankoUsed[1]).toBe(true);
     expect(st.bankoChoice[0]).toBe(-1); // ben kararsız
     expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(true);
     expect(st.bankoChoice[0]).toBe(1);

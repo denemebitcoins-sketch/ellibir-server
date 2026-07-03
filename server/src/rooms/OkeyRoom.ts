@@ -1,7 +1,7 @@
 import { Room, Client } from '@colyseus/core';
 import {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, playOkeyBotTurn,
-  beginBankoPhase, resolveBankoPhase, DEFAULT_OKEY_RULES,
+  beginBankoPhase, resolveBankoPhase, botBankoDecide, DEFAULT_OKEY_RULES,
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
@@ -445,11 +445,25 @@ export class OkeyRoom extends Room {
   }
 
   /** BANKO SEÇİM FAZI: 5sn liste — kararlar canlı push'lanır; süre bitince kararsız PAS. */
+  private bankoBotTimers: NodeJS.Timeout[] = [];
+
   private enterBankoPhase() {
     if (!this.game) return;
     beginBankoPhase(this.game);
     this.bankoDeadlineAt = Date.now() + this.BANKO_PHASE_MS;
     this.pushViews();
+    // BOT KARARLARI: 0.8-2.5sn rastgele gecikmeyle listeye CANLI düşer (%35 banko / %65 pas motor'da).
+    for (let si = 0; si < 4; si++) {
+      const pl = this.game.players[si]!;
+      if (!pl.isBot && !this.abandoned.has(si)) continue;
+      if (this.game.bankoChoice[si] !== -1) continue;
+      const delay = 800 + Math.floor(Math.random() * 1700);
+      this.bankoBotTimers.push(setTimeout(() => {
+        if (!this.game || !this.game.bankoPhase) return;
+        botBankoDecide(this.game, si);
+        this.pushViews();
+      }, delay));
+    }
     if (this.bankoTick) clearInterval(this.bankoTick);
     this.bankoTick = setInterval(() => this.pushViews(), 1000); // geri sayım canlı
     if (this.bankoTimer) clearTimeout(this.bankoTimer);
@@ -459,8 +473,13 @@ export class OkeyRoom extends Room {
   private finishBankoPhase() {
     if (this.bankoTimer) { clearTimeout(this.bankoTimer); this.bankoTimer = null; }
     if (this.bankoTick) { clearInterval(this.bankoTick); this.bankoTick = null; }
+    for (const t of this.bankoBotTimers) clearTimeout(t);
+    this.bankoBotTimers = [];
     this.bankoDeadlineAt = 0;
     if (!this.game) return;
+    // Emniyet: erken kapanış bot gecikmesini kestiyse kalan botlar ŞİMDİ karar versin.
+    for (let si = 0; si < 4; si++)
+      if (this.game.players[si]!.isBot && this.game.bankoChoice[si] === -1) botBankoDecide(this.game, si);
     resolveBankoPhase(this.game);
     startNextEl(this.game);
     this.afterChange();
