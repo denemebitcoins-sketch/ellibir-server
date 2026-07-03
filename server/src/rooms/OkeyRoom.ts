@@ -59,7 +59,10 @@ export class OkeyRoom extends Room {
       const origOnLeave = (this as any)._onLeave.bind(this);
       (this as any)._onLeave = async (client: any, code?: number) => {
         try {
-          if (code !== 4000 && client?.ref && client.ref.readyState === 1) {
+          const rs = client?.ref?.readyState;
+          // OPEN(1) VEYA CONNECTING(0): reconnect el sıkışması sürerken gelen kapanış da eski sokete ait
+          // (07:51:53 vakası: yeni ref daha açılmadan stale close geldi, oda dispose oldu).
+          if (code !== 4000 && (rs === 0 || rs === 1)) {
             console.log(`[OkeyRoom._onLeave] CORE-STALE close (canlı ref açık, code=${code}) -> yok sayıldı sid=${client.sessionId}`);
             return;
           }
