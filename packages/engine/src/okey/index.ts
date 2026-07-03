@@ -7,7 +7,7 @@ export {
   isValidRun, isValidSet, isValidPair,
 } from './melds';
 export {
-  createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove,
+  createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, elMultOf,
 } from './game';
 export type { OkeyGameState, OkeyPlayer, OkeyMove, OkeyMoveResult, OkeyCreateOptions } from './game';
 export { playOkeyBotTurn } from './bot';

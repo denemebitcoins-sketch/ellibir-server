@@ -174,3 +174,111 @@ export function isValidPair(tiles: readonly OkeyTile[], okeyColor: OkeyColor, ok
   if (a.wild || b.wild) return true; // joker her taşla (ve diğer jokerle) çift olur
   return a.color === b.color && a.rank === b.rank;
 }
+
+/* ── KAPSAMA-MAKSİMUM GRUPLAMA (C# OkeyMelds.BestGrouping birebir portu) ──────
+   SIRALA/skorlama için: eldeki taşlardan en çok taşı kapsayan geçerli seri/küt
+   kümesini bulur (skip-anchor + memo; okey boşluğa ORTAYA girer, pos ekseni 1..14). */
+
+export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank): OkeyTile[][] {
+  const counts = new Map<string, number>();
+  const pools = new Map<string, OkeyTile[]>();
+  const wildPool: OkeyTile[] = [];
+  const key = (c: OkeyColor, r: number) => c + ':' + r;
+  for (const t of hand) {
+    const id = identityOf(t, okeyColor, okeyRank);
+    if (id.wild) { wildPool.push(t); continue; }
+    const k = key(id.color, id.rank);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+    if (!pools.has(k)) pools.set(k, []);
+    pools.get(k)!.push(t);
+  }
+  const get = (k: string) => counts.get(k) ?? 0;
+  const take = (k: string) => counts.set(k, get(k) - 1);
+  const give = (k: string) => counts.set(k, get(k) + 1);
+
+  const memo = new Map<string, { cov: number; groups: string[][] }>();
+  const stateKey = (w: number): string => {
+    let sb = '';
+    for (const c of OKEY_COLORS)
+      for (let r = 1; r <= 13; r++) {
+        const n = get(key(c, r));
+        if (n > 0) sb += c + r + ':' + n + ',';
+      }
+    return sb + '|' + w;
+  };
+
+  const solve = (w: number): { cov: number; groups: string[][] } => {
+    let anchorK: string | null = null;
+    let ac: OkeyColor = 'R';
+    let ar = 0;
+    for (const c of OKEY_COLORS) {
+      for (let r = 1; r <= 13; r++)
+        if (get(key(c, r)) > 0) { anchorK = key(c, r); ac = c; ar = r; break; }
+      if (anchorK) break;
+    }
+    if (!anchorK) return { cov: 0, groups: [] };
+    const sk = stateKey(w);
+    const hit = memo.get(sk);
+    if (hit) return hit;
+
+    // 1) Çapanın bu kopyası boşta kalabilir.
+    take(anchorK);
+    let best = solve(w);
+    give(anchorK);
+
+    // 2) KÜT adayları.
+    const others = OKEY_COLORS.filter((c) => c !== ac && get(key(c, ar)) > 0);
+    for (let subset = 0; subset < (1 << others.length); subset++) {
+      const chosen: OkeyColor[] = [ac];
+      for (let b = 0; b < others.length; b++) if (subset & (1 << b)) chosen.push(others[b]!);
+      for (let size = 3; size <= 4; size++) {
+        const ju = size - chosen.length;
+        if (ju < 0 || ju > w) continue;
+        for (const c of chosen) take(key(c, ar));
+        const sub = solve(w - ju);
+        for (const c of chosen) give(key(c, ar));
+        if (sub.cov + size > best.cov) {
+          const grp: string[] = chosen.map((c) => key(c, ar));
+          for (let x = 0; x < ju; x++) grp.push('W');
+          best = { cov: sub.cov + size, groups: [...sub.groups, grp] };
+        }
+      }
+    }
+
+    // 3) SERİ adayları (çapa pozisyonunu içeren pencereler).
+    const apos = ar === 1 ? [1, 14] : [ar];
+    for (const ap of apos) {
+      for (let len = 3; len <= 14; len++) {
+        for (let start = Math.max(1, ap - len + 1); start <= ap; start++) {
+          const end = start + len - 1;
+          if (end > 14) continue;
+          const used: string[] = [];
+          const grpDesc: string[] = [];
+          let need = 0;
+          for (let pos = start; pos <= end; pos++) {
+            const k = key(ac, rankAtPos(pos));
+            if (get(k) > 0) { take(k); used.push(k); grpDesc.push(k); }
+            else { need++; grpDesc.push('W'); }
+          }
+          if (used.includes(anchorK) && need <= w) {
+            const sub = solve(w - need);
+            if (sub.cov + len > best.cov) best = { cov: sub.cov + len, groups: [...sub.groups, grpDesc] };
+          }
+          for (const k of used) give(k);
+        }
+      }
+    }
+
+    memo.set(sk, best);
+    return best;
+  };
+
+  const picked = solve(wildPool.length);
+  const result: OkeyTile[][] = [];
+  for (const grp of picked.groups) {
+    const real: OkeyTile[] = [];
+    for (const k of grp) real.push(k === 'W' ? wildPool.pop()! : pools.get(k)!.pop()!);
+    result.push(real);
+  }
+  return result;
+}

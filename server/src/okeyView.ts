@@ -1,3 +1,4 @@
+import { elMultOf } from '../../packages/engine/src/okey';
 import type { OkeyGameState } from '../../packages/engine/src/okey';
 
 /**
@@ -32,6 +33,11 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     okeyColor: state.okeyColor,
     okeyRank: state.okeyRank,
     stockCount: state.stock.length,
+    // BANKO varyantı
+    variant: state.rules.variant ?? 'duz',
+    elMult: state.rules.variant === 'banko' ? elMultOf(state) : 0,
+    bankoUsed: state.bankoUsed ?? [false, false, false, false],
+    bankoThisEl: state.bankoThisEl ?? [false, false, false, false],
     myHand: seat >= 0 && me ? me.hand.map(mapTile) : [],
     // Unity JsonUtility iç içe dizi desteklemez → koltuk başına DÜZ alanlar.
     disc0: state.discards[0]!.map(mapTile),
@@ -59,6 +65,7 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     turn: -1, phase: 'draw', elEnded: false, matchEnded: false, elWinner: -2, finishKind: '',
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
+    variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoThisEl: [false, false, false, false],
     myHand: [], disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,
   };

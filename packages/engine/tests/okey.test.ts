@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOkeyDeck, dealOkey, nextRank, identityOf, isOkeyTile,
   canFinishMelds, canFinishPairs, isValidRun, isValidSet, isValidPair,
-  createOkeyGame, applyOkeyMove, startNextEl, autoOkeyMove, playOkeyBotTurn,
+  createOkeyGame, applyOkeyMove, elMultOf, startNextEl, autoOkeyMove, playOkeyBotTurn,
 } from '../src/okey';
 import type { NormalOkeyTile, OkeyColor, OkeyRank, OkeyTile } from '../src/okey';
 
@@ -301,5 +301,47 @@ describe('oyun akışı', () => {
     const inDiscards = g.discards.reduce((n, d) => n + d.length, 0);
     expect(inHands + inDiscards + g.stock.length + 1 + (g.elWinner != null && g.elWinner >= 0 ? 1 : 0))
       .toBeGreaterThanOrEqual(105); // gösterge +1; kazanan bitiş taşı ortada (+1)
+  });
+});
+
+describe('BANKO varyantı', () => {
+  function bankoGame(seed = 42) {
+    const st = createOkeyGame({ seed, botSeats: [1, 2, 3], rules: { variant: 'banko', totalEls: 5 } as any });
+    return st;
+  }
+
+  it('banko maçta bir kez denir; ikinci deneme reddedilir', () => {
+    const st = bankoGame();
+    expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(true);
+    expect(st.bankoUsed[0]).toBe(true);
+    expect(st.bankoThisEl[0]).toBe(true);
+    expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(false);
+  });
+
+  it('düz masada banko reddedilir', () => {
+    const st = createOkeyGame({ seed: 7, botSeats: [1, 2, 3] });
+    expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(false);
+  });
+
+  it('el çarpanı: gösterge rengi × 2^banko', () => {
+    const st = bankoGame(11);
+    const base = st.gosterge!.color === 'K' ? 5 : st.gosterge!.color === 'R' ? 4 : st.gosterge!.color === 'Y' ? 3 : 2;
+    expect(elMultOf(st)).toBe(base);
+    applyOkeyMove(st, 0, { t: 'banko' } as any);
+    expect(elMultOf(st)).toBe(base * 2);
+    applyOkeyMove(st, 1, { t: 'banko' } as any);
+    expect(elMultOf(st)).toBe(base * 4);
+  });
+
+  it('son ellerde banko dememişlere OTOMATİK yazılır', () => {
+    const st = bankoGame(13);
+    // totalEls=5; elNumber=1'de remaining=5 > 4 → otomatik yok
+    expect(st.bankoUsed.some(Boolean)).toBe(false);
+    // elNumber'ı 2 yap (remaining=4 = 4 kişi) → sonraki el başında hepsine yazılır
+    (st as any).elNumber = 1;
+    st.elEnded = true; st.elWinner = -1;
+    startNextEl(st); // elNumber=2, remaining=4
+    expect(st.bankoUsed.every(Boolean)).toBe(true);
+    expect(st.bankoThisEl.every(Boolean)).toBe(true);
   });
 });
