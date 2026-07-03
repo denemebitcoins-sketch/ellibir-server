@@ -46,7 +46,9 @@ export interface OkeyGameState {
   // BANKO varyantı: maçta 1 kez "banko" hakkı; EL DAĞITILMADAN taahhüt edilir
   // (el içinde denen banko SONRAKİ el için kilitlenir), o el çarpanı ×2'ler.
   bankoUsed: boolean[];      // hak harcandı mı (maçta 1; geri alınamaz)
-  bankoPending: boolean[];   // SONRAKİ el için taahhüt (el başında bankoThisEl'e döner)
+  bankoPending: boolean[];   // seçim fazı sonucu (el başında bankoThisEl'e döner)
+  bankoPhase: boolean;       // SEÇİM FAZI: el dağıtılmadan 5sn — herkes kararını verir, HERKES GÖRÜR
+  bankoChoice: number[];     // faz içi canlı seçim: -1 kararsız, 0 pas, 1 BANKO
   bankoThisEl: boolean[];    // bu el banko OLAN koltuklar (çarpan 2^adet)
   bankoRows: number[][];     // YAZBOZ: el başına koltuk sonucu — 0 yok, 1 TAMAMLADI, 2 PATLADI
   matchLog: string[];
@@ -58,6 +60,8 @@ export interface OkeyMoveResult {
 }
 
 export interface OkeyCreateOptions {
+  /** false → ilk el HEMEN dağıtılmaz (banko seçim fazı önce koşar; oda resolve sonrası startNextEl çağırır). */
+  dealFirst?: boolean;
   seed: number;
   names?: string[];
   botSeats?: number[];
@@ -90,11 +94,64 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     elStartScores: [0, 0, 0, 0],
     bankoUsed: [false, false, false, false],
     bankoPending: [false, false, false, false],
+    bankoPhase: false,
+    bankoChoice: [-1, -1, -1, -1],
     bankoThisEl: [false, false, false, false],
     bankoRows: [],
   };
-  startNextEl(state);
+  if (opts.dealFirst !== false) startNextEl(state);
   return state;
+}
+
+/* ── BANKO SEÇİM FAZI (el dağıtılmadan): herkes kararını verir, kararlar HERKESE canlı görünür.
+   Kurallar: hak maçta 1; BANKO geri alınamaz (hak anında yanar); PAS liste kapanana dek BANKO'ya
+   yükseltilebilir; süre bitince kararsız = PAS; SON kullanılabilir ellerde hak dolmamışlara OTOMATİK
+   BANKO (mecburiyet). Botlar anında PAS der. ── */
+
+export function beginBankoPhase(state: OkeyGameState): void {
+  if (state.rules.variant !== 'banko' || state.matchEnded) return;
+  state.bankoPhase = true;
+  for (let s2 = 0; s2 < 4; s2++)
+    state.bankoChoice[s2] = state.bankoUsed[s2] ? 0 : -1; // hakkı yok → PAS kilitli
+  // Son eller mecburiyeti: kalan el (dağıtılacak dahil) hak dolmamış sayısına eşit/azsa hepsi BANKO.
+  const remaining = state.rules.totalEls - state.elNumber; // dağıtılacak el = elNumber+1
+  const nonUsers = [0, 1, 2, 3].filter((si) => !state.bankoUsed[si]);
+  if (nonUsers.length > 0 && remaining <= nonUsers.length) {
+    for (const si of nonUsers) {
+      state.bankoUsed[si] = true;
+      state.bankoChoice[si] = 1;
+      state.matchLog.push(`${state.players[si]!.name} için OTOMATİK BANKO (son eller mecburiyeti)`);
+    }
+  }
+  // Botlar anında PAS (kararsız kalmasınlar).
+  for (let s2 = 0; s2 < 4; s2++)
+    if (state.players[s2]!.isBot && state.bankoChoice[s2] === -1) state.bankoChoice[s2] = 0;
+}
+
+export function chooseBanko(state: OkeyGameState, seat: number): OkeyMoveResult {
+  if (!state.bankoPhase) return { ok: false, error: 'banko yalnız el arası seçim ekranında denir' };
+  if (state.bankoUsed[seat]) return { ok: false, error: 'banko hakkın yok' };
+  state.bankoUsed[seat] = true;      // hak anında yanar, geri alınamaz
+  state.bankoChoice[seat] = 1;
+  state.matchLog.push(`${state.players[seat]!.name} BANKO dedi! 🔥`);
+  return { ok: true };
+}
+
+export function choosePas(state: OkeyGameState, seat: number): OkeyMoveResult {
+  if (!state.bankoPhase) return { ok: false, error: 'seçim ekranı kapalı' };
+  if (state.bankoChoice[seat] === 1) return { ok: false, error: 'BANKO geri alınmaz' };
+  state.bankoChoice[seat] = 0;
+  return { ok: true };
+}
+
+/** Faz kapanışı: kararsızlar PAS; seçimler pending'e döner (startNextEl tüketir). */
+export function resolveBankoPhase(state: OkeyGameState): void {
+  if (!state.bankoPhase) return;
+  for (let s2 = 0; s2 < 4; s2++) {
+    if (state.bankoChoice[s2] === -1) state.bankoChoice[s2] = 0;
+    state.bankoPending[s2] = state.bankoChoice[s2] === 1;
+  }
+  state.bankoPhase = false;
 }
 
 /** Yeni el kur: dağıtıcı döner, taşlar yeniden dağıtılır. */
@@ -123,20 +180,7 @@ export function startNextEl(state: OkeyGameState): void {
   // Taahhütler bu elde devreye girer (el DAĞITILMADAN söylenmişti).
   state.bankoThisEl = [...(state.bankoPending ?? [false, false, false, false])];
   state.bankoPending = [false, false, false, false];
-  if (state.rules.variant === 'banko') {
-    const remaining = state.rules.totalEls - state.elNumber + 1;
-    const nonUsers = [0, 1, 2, 3].filter((si) => !state.bankoUsed[si]);
-    if (nonUsers.length > 0 && remaining <= nonUsers.length) {
-      for (const si of nonUsers) {
-        state.bankoUsed[si] = true;
-        state.bankoThisEl[si] = true;
-        state.matchLog.push(`${state.players[si]!.name} için OTOMATİK BANKO yazıldı (son eller)`);
-      }
-    }
-    for (let si = 0; si < 4; si++)
-      if (state.bankoThisEl[si] && !state.matchLog[state.matchLog.length - 1]?.includes('OTOMATİK'))
-        { /* taahhüt logu declare aninda atildi */ }
-  }
+  // (otomatik-banko mecburiyeti beginBankoPhase'te uygulanır — seçim listesi herkes görsün diye)
   state.matchLog.push(`El ${state.elNumber} başladı — gösterge: ${state.gosterge.color}${state.gosterge.rank}, dağıtan: ${state.players[state.dealerSeat]!.name}`);
 }
 
@@ -147,21 +191,19 @@ export type OkeyMove =
   | { t: 'discard'; tileId: string }
   | { t: 'finish'; tileId: string }
   | { t: 'gosterge' }
-  | { t: 'banko' };   // BANKO varyantı: bu el için çarpan ×2 (maçta 1 kez, sıra şartı yok)
+  | { t: 'banko' }    // BANKO varyantı: SEÇİM FAZINDA banko de (maçta 1 hak; geri alınmaz)
+  | { t: 'pas' };     // SEÇİM FAZINDA pas geç (liste kapanana dek banko'ya yükseltilebilir)
 
 export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove): OkeyMoveResult {
   if (state.matchEnded) return { ok: false, error: 'maç bitti' };
   if (state.elEnded) return { ok: false, error: 'el bitti' };
-  if (move.t === 'banko') {
-    // EL GÖRÜLDÜKTEN SONRA bu ele banko DENEMEZ — taahhüt SONRAKİ el içindir.
-    if (state.rules.variant !== 'banko') return { ok: false, error: 'bu masa banko değil' };
-    if (state.bankoUsed[seat]) return { ok: false, error: 'bankonu zaten kullandın' };
-    if (state.elNumber >= state.rules.totalEls) return { ok: false, error: 'son el — sonraki el yok' };
-    state.bankoUsed[seat] = true;      // hak o an harcanır, geri alınamaz
-    state.bankoPending[seat] = true;   // SONRAKİ el dağıtılmadan devreye girer
-    state.matchLog.push(`${state.players[seat]!.name} SONRAKİ EL için BANKO dedi! (çarpan ×2)`);
-    return { ok: true };
+  if (state.bankoPhase) {
+    if (move.t === 'banko') return chooseBanko(state, seat);
+    if (move.t === 'pas') return choosePas(state, seat);
+    return { ok: false, error: 'banko seçimi sürüyor' };
   }
+  if (move.t === 'banko' || move.t === 'pas')
+    return { ok: false, error: 'banko yalnız el arası SEÇİM ekranında denir' };
   const p = state.players[seat];
   if (!p) return { ok: false, error: 'geçersiz koltuk' };
 

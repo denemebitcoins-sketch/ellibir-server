@@ -38,6 +38,8 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     elMult: state.rules.variant === 'banko' ? elMultOf(state) : 0,
     bankoUsed: state.bankoUsed ?? [false, false, false, false],
     bankoPending: state.bankoPending ?? [false, false, false, false],
+    bankoPhase: state.bankoPhase ?? false,
+    bankoChoice: state.bankoChoice ?? [-1, -1, -1, -1],
     bankoThisEl: state.bankoThisEl ?? [false, false, false, false],
     sheetBankoFlat: ([] as number[]).concat(...(state.bankoRows ?? [])),
     myHand: seat >= 0 && me ? me.hand.map(mapTile) : [],
@@ -67,7 +69,7 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     turn: -1, phase: 'draw', elEnded: false, matchEnded: false, elWinner: -2, finishKind: '',
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
-    variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], sheetBankoFlat: [],
+    variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], bankoPhase: false, bankoChoice: [-1, -1, -1, -1], sheetBankoFlat: [],
     myHand: [], disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,
   };

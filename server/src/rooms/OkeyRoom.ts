@@ -1,7 +1,7 @@
 import { Room, Client } from '@colyseus/core';
 import {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, playOkeyBotTurn,
-  DEFAULT_OKEY_RULES,
+  beginBankoPhase, resolveBankoPhase, DEFAULT_OKEY_RULES,
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
@@ -39,6 +39,10 @@ export class OkeyRoom extends Room {
   private readonly START_MS = 7000;
   private readonly STEP_MS = 1100;             // bot tur temposu (client uçuş animasyonuna yer)
   private readonly EL_END_MS = 7000;           // el sonu gösterimi → yeni el
+  private readonly BANKO_PHASE_MS = 5000;      // banko SEÇİM listesi süresi
+  private bankoTimer: NodeJS.Timeout | null = null;
+  private bankoTick: NodeJS.Timeout | null = null;
+  private bankoDeadlineAt = 0;
   private readonly TURN_GRACE_MS = 6000;
   private bet = 0;
   private settled = false;
@@ -75,6 +79,16 @@ export class OkeyRoom extends Room {
       catch { client.send('moveError', { code: 'bad_json' }); return; }
       const r = applyOkeyMove(this.game, seat, cmd);
       if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
+      // SEÇİM FAZI: tüm oturan insanlar karar verdiyse listeyi 0.8sn'de kapat (görülsün diye kısa bekleme).
+      if ((this.game as any).bankoPhase && this.bankoTimer) {
+        const allDecided = [...this.seats.values()].every((s2) => (this.game as any).bankoChoice[s2] !== -1);
+        if (allDecided) {
+          clearTimeout(this.bankoTimer);
+          this.bankoDeadlineAt = Date.now() + 800;
+          this.bankoTimer = setTimeout(() => this.finishBankoPhase(), 800);
+        }
+      }
+      if ((this.game as any).bankoPhase) { this.pushViews(); return; }
       this.afterChange();
     });
 
@@ -210,14 +224,16 @@ export class OkeyRoom extends Room {
       clearInterval(tick);
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; }
-      this.game = createOkeyGame(this.cfg);
+      const banko = this.cfg?.rules?.variant === 'banko';
+      this.game = createOkeyGame({ ...this.cfg, dealFirst: !banko });
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players[seat];
         if (p && name) p.name = name;
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
-      console.log('[OkeyRoom] oyun başladı');
-      this.afterChange();
+      console.log('[OkeyRoom] oyun başladı' + (banko ? ' (banko: ilk el seçim fazı)' : ''));
+      if (banko) this.enterBankoPhase();
+      else this.afterChange();
     }, this.START_MS);
   }
 
@@ -310,10 +326,12 @@ export class OkeyRoom extends Room {
     }
     if (this.game.elEnded) {
       this.clearTurnTimers(); this.turnDeadlineAt = 0;
+      if ((this.game as any).bankoPhase) { this.pushViews(); return; } // faz sürüyor (kendi timer'ı var)
       if (!this.elTimer) {
         this.elTimer = setTimeout(() => {
           this.elTimer = null;
           if (!this.game || this.game.matchEnded) return;
+          if (this.game.rules.variant === 'banko') { this.enterBankoPhase(); return; }
           startNextEl(this.game);
           this.afterChange();
         }, this.EL_END_MS);
@@ -354,6 +372,28 @@ export class OkeyRoom extends Room {
         this.afterChange();
       }, ms);
     }
+  }
+
+  /** BANKO SEÇİM FAZI: 5sn liste — kararlar canlı push'lanır; süre bitince kararsız PAS. */
+  private enterBankoPhase() {
+    if (!this.game) return;
+    beginBankoPhase(this.game);
+    this.bankoDeadlineAt = Date.now() + this.BANKO_PHASE_MS;
+    this.pushViews();
+    if (this.bankoTick) clearInterval(this.bankoTick);
+    this.bankoTick = setInterval(() => this.pushViews(), 1000); // geri sayım canlı
+    if (this.bankoTimer) clearTimeout(this.bankoTimer);
+    this.bankoTimer = setTimeout(() => this.finishBankoPhase(), this.BANKO_PHASE_MS);
+  }
+
+  private finishBankoPhase() {
+    if (this.bankoTimer) { clearTimeout(this.bankoTimer); this.bankoTimer = null; }
+    if (this.bankoTick) { clearInterval(this.bankoTick); this.bankoTick = null; }
+    this.bankoDeadlineAt = 0;
+    if (!this.game) return;
+    resolveBankoPhase(this.game);
+    startNextEl(this.game);
+    this.afterChange();
   }
 
   private settleOnce() {
@@ -405,6 +445,7 @@ export class OkeyRoom extends Room {
       v.seated = seated;
       v.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
       v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
+      v.bankoMs = this.bankoDeadlineAt > 0 ? Math.max(0, this.bankoDeadlineAt - Date.now()) : 0;
       v.preLog = waiting ? this.preLog.slice(-30) : [];
     };
     this.clients.forEach((c) => {
@@ -418,6 +459,8 @@ export class OkeyRoom extends Room {
   onDispose() {
     if (this.startTimer) clearTimeout(this.startTimer);
     if (this.elTimer) clearTimeout(this.elTimer);
+    if (this.bankoTimer) clearTimeout(this.bankoTimer);
+    if (this.bankoTick) clearInterval(this.bankoTick);
     this.clearTurnTimers();
     console.log('[OkeyRoom] dispose');
   }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOkeyDeck, dealOkey, nextRank, identityOf, isOkeyTile,
   canFinishMelds, canFinishPairs, isValidRun, isValidSet, isValidPair,
-  createOkeyGame, applyOkeyMove, elMultOf, startNextEl, autoOkeyMove, playOkeyBotTurn,
+  createOkeyGame, applyOkeyMove, elMultOf, beginBankoPhase, resolveBankoPhase, startNextEl, autoOkeyMove, playOkeyBotTurn,
 } from '../src/okey';
 import type { NormalOkeyTile, OkeyColor, OkeyRank, OkeyTile } from '../src/okey';
 
@@ -304,60 +304,67 @@ describe('oyun akışı', () => {
   });
 });
 
-describe('BANKO varyantı (v2: el dağıtılmadan taahhüt)', () => {
+describe('BANKO v3: açık SEÇİM FAZI (el dağıtılmadan, herkes görür)', () => {
   function bankoGame(seed = 42) {
-    return createOkeyGame({ seed, botSeats: [1, 2, 3], rules: { variant: 'banko', totalEls: 5 } as any });
+    return createOkeyGame({
+      seed, botSeats: [1, 2, 3],
+      rules: { variant: 'banko', totalEls: 5 } as any,
+      dealFirst: false, // banko odası: ilk el SEÇİM FAZINDAN sonra dağıtılır
+    } as any);
   }
 
-  it('banko taahhüdü SONRAKİ el içindir; bu elin çarpanı değişmez; hak anında yanar', () => {
+  it('ilk el: faz açılır, botlar anında PAS, ben BANKO diyebilirim; el faz kapanınca dağıtılır', () => {
     const st = bankoGame(11);
-    const base = st.gosterge!.color === 'K' ? 5 : st.gosterge!.color === 'R' ? 4 : st.gosterge!.color === 'Y' ? 3 : 2;
+    expect(st.elNumber).toBe(0); // henüz dağıtılmadı
+    beginBankoPhase(st);
+    expect(st.bankoPhase).toBe(true);
+    expect(st.bankoChoice[1]).toBe(0); // bot PAS
+    expect(st.bankoChoice[0]).toBe(-1); // ben kararsız
     expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(true);
-    expect(st.bankoUsed[0]).toBe(true);
-    expect(st.bankoPending[0]).toBe(true);
-    expect(st.bankoThisEl[0]).toBe(false);          // bu el DEĞİL
-    expect(elMultOf(st)).toBe(base);                // çarpan bu elde değişmedi
-    expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(false); // bir daha diyemez
-    // Yeni el başlayınca taahhüt devreye girer.
-    st.elEnded = true; st.elWinner = -1;
+    expect(st.bankoChoice[0]).toBe(1);
+    expect(st.bankoUsed[0]).toBe(true);       // hak anında yandı
+    expect(applyOkeyMove(st, 0, { t: 'pas' } as any).ok).toBe(false); // BANKO geri alınmaz
+    // faz sırasında normal hamle yasak
+    expect(applyOkeyMove(st, 0, { t: 'draw', from: 'pile' } as any).ok).toBe(false);
+    resolveBankoPhase(st);
     startNextEl(st);
-    expect(st.bankoThisEl[0]).toBe(true);
-    expect(st.bankoPending[0]).toBe(false);
+    expect(st.elNumber).toBe(1);
+    expect(st.bankoThisEl[0]).toBe(true);     // seçim ele işledi
+    expect(st.players[0]!.hand.length).toBeGreaterThan(0); // el DAĞITILDI
   });
 
-  it('düz masada banko reddedilir; son elde de reddedilir (sonraki el yok)', () => {
-    const duz = createOkeyGame({ seed: 7, botSeats: [1, 2, 3] });
-    expect(applyOkeyMove(duz, 0, { t: 'banko' } as any).ok).toBe(false);
-    const st = bankoGame(9);
-    (st as any).elNumber = st.rules.totalEls;
+  it('faz dışında banko/pas reddedilir; hak yoksa fazda da reddedilir', () => {
+    const st = bankoGame(12);
+    expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(false); // faz kapalı
+    beginBankoPhase(st);
+    applyOkeyMove(st, 0, { t: 'banko' } as any);
+    resolveBankoPhase(st); startNextEl(st);
+    st.elEnded = true; st.elWinner = -1;
+    beginBankoPhase(st); // 2. el fazı
+    expect(st.bankoChoice[0]).toBe(0); // hak yandı → PAS kilitli
     expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(false);
   });
 
-  it('son ellerde banko dememişlere OTOMATİK yazılır', () => {
+  it('PAS liste kapanana dek BANKOya yükseltilebilir; kararsız resolve ile PAS olur', () => {
     const st = bankoGame(13);
-    expect(st.bankoUsed.some(Boolean)).toBe(false);
-    (st as any).elNumber = 1;
-    st.elEnded = true; st.elWinner = -1;
-    startNextEl(st); // elNumber=2, remaining=4 = 4 kişi → hepsine otomatik
-    expect(st.bankoUsed.every(Boolean)).toBe(true);
-    expect(st.bankoThisEl.every(Boolean)).toBe(true);
+    beginBankoPhase(st);
+    expect(applyOkeyMove(st, 0, { t: 'pas' } as any).ok).toBe(true);
+    expect(st.bankoChoice[0]).toBe(0);
+    expect(applyOkeyMove(st, 0, { t: 'banko' } as any).ok).toBe(true); // yükseltme
+    expect(st.bankoChoice[0]).toBe(1);
+    // yeni oyun: kararsız kalan resolve'da PAS
+    const st2 = bankoGame(14);
+    beginBankoPhase(st2);
+    resolveBankoPhase(st2);
+    expect(st2.bankoChoice[0]).toBe(0);
+    expect(st2.bankoPending[0]).toBe(false);
   });
 
-  it('yazboz banko satırı: tamamlayana 1, patlayana 2; düz elde 0', () => {
-    const st = bankoGame(21);
-    // el 1 biter (banko yok) → bankoRows[0] = 0'lar
-    st.elEnded = true; st.elWinner = -1;
-    // pushElDelta çağrısı endEl yollarından geçer; burada elle simüle etmek yerine
-    // startNextEl öncesi taahhüt verip 2. eli kurgu bitirelim.
-    applyOkeyMove(st, 0, { t: 'banko' } as any);
-    startNextEl(st);
-    expect(st.bankoThisEl[0]).toBe(true);
-    // Kurgu: seat0 KAZANIR → bankosu tamamlanır (1).
-    // endElWin private — finish yolunu zorlamak yerine banko satırı mantığını dolaylı test:
-    // taşlar bitti yolu: kazanan yok → patlar (2).
-    (st as any).stock = [];
-    autoOkeyMove(st, st.turn); // çekecek taş yok → el berabere kapanır (draw yolu)
-    const last = st.bankoRows[st.bankoRows.length - 1]!;
-    expect(last[0]).toBe(2); // kazanan yok → banko PATLADI
+  it('son eller mecburiyeti: kalan el <= hak dolmamış sayısı → fazda OTOMATİK BANKO görünür', () => {
+    const st = bankoGame(15);
+    (st as any).elNumber = 1; // dağıtılacak el 2; kalan (5-1)=4 = 4 kişi → hepsi otomatik
+    beginBankoPhase(st);
+    expect(st.bankoChoice.every((c) => c === 1)).toBe(true);
+    expect(st.bankoUsed.every(Boolean)).toBe(true);
   });
 });
