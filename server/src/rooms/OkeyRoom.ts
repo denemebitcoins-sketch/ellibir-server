@@ -300,11 +300,16 @@ export class OkeyRoom extends Room {
   /* ── OYUN AKIŞI: her değişimden sonra tek yerden zamanla ── */
 
   private afterChange() {
-    this.pushViews();
-    if (!this.game) return;
-    if (this.game.matchEnded) { this.settleOnce(); this.clearTurnTimers(); return; }
+    // SIRA ÖNEMLİ: önce zamanlayıcı (turnDeadlineAt) KURULUR, sonra push edilir — aksi halde
+    // view ESKİ deadline ile gider: insan sırasında turnMs=0 (sayaç hiç çıkmaz), bot sırasındaki
+    // push önceki insanın kalıntı süresini taşır (sayaç yanlış koltukta görünür bug'ı).
+    if (!this.game) { this.pushViews(); return; }
+    if (this.game.matchEnded) {
+      this.settleOnce(); this.clearTurnTimers(); this.turnDeadlineAt = 0;
+      this.pushViews(); return;
+    }
     if (this.game.elEnded) {
-      this.clearTurnTimers();
+      this.clearTurnTimers(); this.turnDeadlineAt = 0;
       if (!this.elTimer) {
         this.elTimer = setTimeout(() => {
           this.elTimer = null;
@@ -313,9 +318,10 @@ export class OkeyRoom extends Room {
           this.afterChange();
         }, this.EL_END_MS);
       }
-      return;
+      this.pushViews(); return;
     }
     this.scheduleTurn();
+    this.pushViews();
   }
 
   private clearTurnTimers() {

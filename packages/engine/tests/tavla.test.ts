@@ -233,3 +233,50 @@ describe('katlama küpü + teslim', () => {
     expect(st.pendingDouble).toBe(-1);
   });
 });
+
+describe('bot açılış bilgisi (tur-seviyesi arama)', () => {
+  function freshMoveTurn(seat: number, dice: number[]) {
+    const st = createTavlaGame({ seed: 77, botSeats: [0, 1] });
+    st.turn = seat; st.phase = 'move';
+    st.dice = [dice[0]!, dice[1]!];
+    st.movesLeft = dice[0] === dice[1] ? [dice[0]!, dice[0]!, dice[0]!, dice[0]!] : [...dice];
+    return st;
+  }
+
+  it('3-1 açılışı: 5-HANEYİ kapatır (8/5 6/5)', () => {
+    const st = freshMoveTurn(0, [3, 1]);
+    playTavlaBotTurn(st, 0);
+    expect(st.points[4]).toBe(2); // seat0 5-hanesi = idx4
+  });
+
+  it('6-1 açılışı: BAR-HANEYİ kapatır (13/7 8/7)', () => {
+    const st = freshMoveTurn(0, [6, 1]);
+    playTavlaBotTurn(st, 0);
+    expect(st.points[6]).toBe(2); // seat0 bar-hanesi = idx6
+  });
+
+  it('4-2 açılışı: 4-HANEYİ kapatır (8/4 6/4)', () => {
+    const st = freshMoveTurn(0, [4, 2]);
+    playTavlaBotTurn(st, 0);
+    expect(st.points[3]).toBe(2);
+  });
+
+  it('5-3 açılışı: 3-HANEYİ kapatır (8/3 6/3)', () => {
+    const st = freshMoveTurn(0, [5, 3]);
+    playTavlaBotTurn(st, 0);
+    expect(st.points[2]).toBe(2);
+  });
+
+  it('seat1 için de simetrik: 3-1 → kendi 5-hanesi (idx19)', () => {
+    const st = freshMoveTurn(1, [3, 1]);
+    playTavlaBotTurn(st, 1);
+    expect(st.points[19]).toBe(-2);
+  });
+
+  it('zorunlu maksimum oynama: iki zar da oynanabiliyorsa ikisini de kullanır', () => {
+    const st = freshMoveTurn(0, [2, 1]);
+    playTavlaBotTurn(st, 0);
+    expect(st.movesLeft.length).toBe(0);
+    expect(st.turn).toBe(1); // sıra geçti
+  });
+});

@@ -40,6 +40,7 @@ export interface TavlaGameState {
   matchEnded: boolean;
   gameWinner: number;        // -1 yok
   mars: boolean;             // son oyun mars mı bitti
+  endReason: string;         // '' | 'normal' | 'drop' (katlamada çekildi) | 'resign' (teslim)
   matchScore: number[];      // [s0, s1]
   gameDeltas: number[][];    // YAZBOZ: oyun başına [p0 kazanç, p1 kazanç]
   matchLog: string[];
@@ -76,7 +77,7 @@ export function createTavlaGame(opts: {
     players: [0, 1].map((s) => ({ seat: s, name: names[s] ?? `Oyuncu ${s + 1}`, isBot: bots.has(s) })),
     points: new Array(24).fill(0), bar: [0, 0], off: [0, 0],
     turn: 0, phase: 'roll', dice: [0, 0], movesLeft: [], openRoll: [0, 0],
-    gameEnded: false, matchEnded: false, gameWinner: -1, mars: false,
+    gameEnded: false, matchEnded: false, gameWinner: -1, mars: false, endReason: '',
     matchScore: [0, 0], gameDeltas: [], matchLog: [],
     cubeValue: 1, cubeOwner: -1, pendingDouble: -1,
   };
@@ -94,7 +95,7 @@ export function startNextGame(st: TavlaGameState): void {
   st.points[0] = -2; st.points[11] = -5; st.points[16] = -3; st.points[18] = -5;
   st.bar = [0, 0]; st.off = [0, 0];
   st.dice = [0, 0]; st.movesLeft = [];
-  st.gameEnded = false; st.gameWinner = -1; st.mars = false;
+  st.gameEnded = false; st.gameWinner = -1; st.mars = false; st.endReason = '';
   st.cubeValue = 1; st.cubeOwner = -1; st.pendingDouble = -1;
   // Başlama atışı: eşitse yeniden.
   let a = 0, b = 0;
@@ -195,7 +196,7 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
 
   // ── KATLAMA / TESLİM (sıra şartından bağımsız hamleler önce) ──
   if (move.t === 'resign') {
-    endGameWin(st, 1 - seat, st.cubeValue);
+    endGameWin(st, 1 - seat, st.cubeValue, 'resign');
     st.matchLog.push(`${st.players[seat]!.name} TESLİM OLDU`);
     return { ok: true };
   }
@@ -212,7 +213,7 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
     const offerer = st.pendingDouble;
     st.pendingDouble = -1;
     st.matchLog.push(`${st.players[seat]!.name} katlamada ÇEKİLDİ`);
-    endGameWin(st, offerer, st.cubeValue);
+    endGameWin(st, offerer, st.cubeValue, 'drop');
     return { ok: true };
   }
   if (st.pendingDouble >= 0) return { ok: false, error: 'katlama cevabı bekleniyor' };
@@ -254,7 +255,7 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
   return { ok: true };
 }
 
-function endGameWin(st: TavlaGameState, seat: number, ptsOverride?: number): void {
+function endGameWin(st: TavlaGameState, seat: number, ptsOverride?: number, reason: string = 'normal'): void {
   // ptsOverride: katlamada çekilme / teslim — mars sayılmaz, puan doğrudan küp değeri.
   const mars = ptsOverride == null && st.off[1 - seat] === 0;
   const pts = ptsOverride != null ? ptsOverride : (mars ? 2 : 1) * st.cubeValue;
@@ -264,6 +265,7 @@ function endGameWin(st: TavlaGameState, seat: number, ptsOverride?: number): voi
   st.gameEnded = true;
   st.gameWinner = seat;
   st.mars = mars;
+  st.endReason = reason;
   st.matchLog.push(`${st.players[seat]!.name} oyunu ${mars ? 'MARS ile' : 'kazandı'} (${pts} puan${st.cubeValue > 1 ? ', küp ×' + st.cubeValue : ''}) — skor ${st.matchScore[0]}-${st.matchScore[1]}`);
   if (st.matchScore[seat]! >= st.rules.targetScore) {
     st.matchEnded = true;

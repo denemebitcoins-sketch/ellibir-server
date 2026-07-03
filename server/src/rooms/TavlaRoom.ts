@@ -281,11 +281,15 @@ export class TavlaRoom extends Room {
   /* ── OYUN AKIŞI: her değişimden sonra tek yerden zamanla ── */
 
   private afterChange() {
-    this.pushViews();
-    if (!this.game) return;
-    if (this.game.matchEnded) { this.settleOnce(); this.clearTurnTimers(); return; }
+    // SIRA ÖNEMLİ: önce zamanlayıcı (turnDeadlineAt) KURULUR, sonra push — aksi halde view
+    // eski deadline ile gider (sayaç insan sırasında çıkmaz / yanlış koltukta görünür).
+    if (!this.game) { this.pushViews(); return; }
+    if (this.game.matchEnded) {
+      this.settleOnce(); this.clearTurnTimers(); this.turnDeadlineAt = 0;
+      this.pushViews(); return;
+    }
     if (this.game.gameEnded) {
-      this.clearTurnTimers();
+      this.clearTurnTimers(); this.turnDeadlineAt = 0;
       if (!this.gameTimer) {
         this.gameTimer = setTimeout(() => {
           this.gameTimer = null;
@@ -294,9 +298,10 @@ export class TavlaRoom extends Room {
           this.afterChange();
         }, this.GAME_END_MS);
       }
-      return;
+      this.pushViews(); return;
     }
     this.scheduleTurn();
+    this.pushViews();
   }
 
   private clearTurnTimers() {
