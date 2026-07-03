@@ -52,6 +52,8 @@ export class EllibirRoom extends Room {
   private bet = 0;                             // masa bahsi (maç sonu settle için)
   private settled = false;                     // çift settle koruması
 
+  private lastReconnectAt = new Map<string, number>(); // STALE-DROP kalkanı (wifi→mobil geçişi)
+
   onCreate(options: any) {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
@@ -280,6 +282,14 @@ export class EllibirRoom extends Room {
 
   /** ANORMAL kopma (0.17 onDrop): koltuğu HEMEN bota devret + 180s rezerve tut. */
   async onDrop(client: Client) {
+    // KALKAN: wifi→mobil geçişinde SDK yeni bağlantıyla ÇOKTAN döndükten sonra eski
+    // socket'in gecikmiş kapanışı ikinci bir onDrop tetikliyor; allowReconnection anında
+    // patlayıp KOLTUĞU SİLİYORDU (log: onReconnect ↔ onDrop aynı saniye → EXPIRED → 4002).
+    if (Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 3000) {
+      console.log(`[EllibirRoom.onDrop] STALE drop (yeni bağlantı canlı) → yok sayıldı sid=${client.sessionId}`);
+      return;
+    }
+
     console.log(`[onDrop] TETİKLENDİ sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
@@ -313,12 +323,18 @@ export class EllibirRoom extends Room {
     } catch (e: any) {
       console.log(`[onDrop-EXPIRED] seat=${seat} reconnect penceresi DOLDU/iptal: ${e?.message ?? e}`);
       stopPresenceKeepalive();
+      // KALKAN-2: pencere 'doldu' dese de bu sessionId hâlâ BAĞLIYSA (yarış) koltuğa dokunma.
+      if (this.clients.some((c) => c.sessionId === client.sessionId)) {
+        console.log(`[EllibirRoom.onDrop-EXPIRED] client CANLI → koltuk korunuyor (stale)`);
+        return;
+      }
       this.cleanupSeat(client.sessionId, seat);   // 3 dk geçti → bot KALICI devralır
     }
   }
 
   /** Zamanında reconnect (0.17 onReconnect): kontrolü insana geri ver (onDrop await'e ek garanti). */
   onReconnect(client: Client) {
+    this.lastReconnectAt.set(client.sessionId, Date.now());
     console.log(`[onReconnect] TETİKLENDİ sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) return;

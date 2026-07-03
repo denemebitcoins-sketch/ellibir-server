@@ -44,6 +44,7 @@ export class TavlaRoom extends Room {
   private bet = 0;
   private settled = false;
   private cfg: any = null;
+  private lastReconnectAt = new Map<string, number>(); // STALE-DROP kalkani (wifi->mobil gecisi)
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar
 
   onCreate(options: any) {
@@ -205,6 +206,14 @@ export class TavlaRoom extends Room {
   /* ── RECONNECT LIFECYCLE — 51/OKEY ile birebir (0.17: onDrop/onReconnect/onLeave) ── */
 
   async onDrop(client: Client) {
+    // KALKAN: wifi->mobil geciste SDK yeni baglantiyla COKTAN donduktan sonra eski
+    // socketin gecikmis kapanisi ikinci bir onDrop tetikliyor; allowReconnection aninda
+    // patlayip KOLTUGU SILIYORDU (log: onReconnect/onDrop ayni saniye -> EXPIRED -> 4002).
+    if (Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 3000) {
+      console.log(`[TavlaRoom.onDrop] STALE drop (yeni baglanti canli) -> yok sayildi sid=${client.sessionId}`);
+      return;
+    }
+
     console.log(`[TavlaRoom.onDrop] sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
@@ -234,12 +243,18 @@ export class TavlaRoom extends Room {
     } catch (e: any) {
       console.log(`[TavlaRoom.onDrop-EXPIRED] seat=${seat}: ${e?.message ?? e}`);
       stop();
+      // KALKAN-2: pencere doldu dese de bu sessionId hala BAGLIYSA (yaris) koltuga dokunma.
+      if (this.clients.some((c) => c.sessionId === client.sessionId)) {
+        console.log(`[TavlaRoom.onDrop-EXPIRED] client CANLI -> koltuk korunuyor (stale)`);
+        return;
+      }
       this.cleanupSeat(client.sessionId, seat); // kalıcı bot (abandoned SET'te kalır)
       this.pushViews();
     }
   }
 
   onReconnect(client: Client) {
+    this.lastReconnectAt.set(client.sessionId, Date.now());
     const seat = this.seats.get(client.sessionId);
     console.log(`[TavlaRoom.onReconnect] seat=${seat}`);
     if (seat == null) return;

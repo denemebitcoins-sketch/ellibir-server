@@ -39,7 +39,7 @@ export class OkeyRoom extends Room {
   private readonly START_MS = 7000;
   private readonly STEP_MS = 1100;             // bot tur temposu (client uçuş animasyonuna yer)
   private readonly EL_END_MS = 7000;           // el sonu gösterimi → yeni el
-  private readonly BANKO_PHASE_MS = 5000;      // banko SEÇİM listesi süresi
+  private readonly BANKO_PHASE_MS = 10000;      // banko SEÇİM listesi süresi
   private bankoTimer: NodeJS.Timeout | null = null;
   private bankoTick: NodeJS.Timeout | null = null;
   private bankoDeadlineAt = 0;
@@ -47,6 +47,7 @@ export class OkeyRoom extends Room {
   private bet = 0;
   private settled = false;
   private cfg: any = null;
+  private lastReconnectAt = new Map<string, number>(); // STALE-DROP kalkani (wifi->mobil gecisi)
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar (izleyici katıldı vb.)
 
   onCreate(options: any) {
@@ -240,6 +241,14 @@ export class OkeyRoom extends Room {
   /* ── RECONNECT LIFECYCLE — 51 ile birebir (0.17: onDrop/onReconnect/onLeave) ── */
 
   async onDrop(client: Client) {
+    // KALKAN: wifi->mobil geciste SDK yeni baglantiyla COKTAN donduktan sonra eski
+    // socketin gecikmis kapanisi ikinci bir onDrop tetikliyor; allowReconnection aninda
+    // patlayip KOLTUGU SILIYORDU (log: onReconnect/onDrop ayni saniye -> EXPIRED -> 4002).
+    if (Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 3000) {
+      console.log(`[OkeyRoom.onDrop] STALE drop (yeni baglanti canli) -> yok sayildi sid=${client.sessionId}`);
+      return;
+    }
+
     console.log(`[OkeyRoom.onDrop] sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
@@ -269,12 +278,18 @@ export class OkeyRoom extends Room {
     } catch (e: any) {
       console.log(`[OkeyRoom.onDrop-EXPIRED] seat=${seat}: ${e?.message ?? e}`);
       stop();
+      // KALKAN-2: pencere doldu dese de bu sessionId hala BAGLIYSA (yaris) koltuga dokunma.
+      if (this.clients.some((c) => c.sessionId === client.sessionId)) {
+        console.log(`[OkeyRoom.onDrop-EXPIRED] client CANLI -> koltuk korunuyor (stale)`);
+        return;
+      }
       this.cleanupSeat(client.sessionId, seat); // kalıcı bot (abandoned SET'te kalır)
       this.pushViews();
     }
   }
 
   onReconnect(client: Client) {
+    this.lastReconnectAt.set(client.sessionId, Date.now());
     const seat = this.seats.get(client.sessionId);
     console.log(`[OkeyRoom.onReconnect] seat=${seat}`);
     if (seat == null) return;
