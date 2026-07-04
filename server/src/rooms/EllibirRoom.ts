@@ -659,8 +659,9 @@ export class EllibirRoom extends Room {
     const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
     const specRoles = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.role ?? 'normal');
     const specGenders = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.gender ?? '');
-    // Koltuk listesine cinsiyet/rol enjekte et (yazboz sol panel isim rengi + rozet).
-    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; } } };
+    // Koltuk listesine cinsiyet/rol + UID enjekte et (isim rengi/rozet + masa-içi MiniProfile:
+    // profil kartından MESAJ/ARKADAŞ akışı uid ister — okey/tavla ile parite).
+    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; } s.uid = this.seatUsers.get(s.seat) ?? ''; } };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) {

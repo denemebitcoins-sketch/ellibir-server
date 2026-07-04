@@ -198,6 +198,18 @@ describe('katlama küpü + teslim', () => {
     expect(applyTavlaMove(st, t, { t: 'roll' }).ok).toBe(true);    // oyun aynen devam
   });
 
+  it('kırık + TÜM kapılar kapalı: rakibe zar attırılmaz, sıra otomatik geri döner (kullanıcı kuralı)', () => {
+    const st = fresh(12);
+    clearBoard(st);
+    for (let i = 0; i <= 5; i++) st.points[i] = 2; // seat0 evi tamamen kapalı (12 pul)
+    st.points[10] = 3;                              // seat0 kalan 3 pul
+    st.points[20] = -14; st.bar[1] = 1;             // seat1: 14 tahtada + 1 kırık = tam kilit
+    st.turn = 0; st.phase = 'move'; st.movesLeft = [5];
+    expect(applyTavlaMove(st, 0, { t: 'move', from: 10, die: 5 }).ok).toBe(true);
+    expect(st.turn).toBe(0);        // sıra kilitli seat1'e GEÇMEDİ
+    expect(st.phase).toBe('roll');  // seat0 yeniden zar atar
+  });
+
   it('kabul edilen küple normal bitiş ×küp; MARS ile ×2×küp', () => {
     const st = fresh(11);
     const t = st.turn, o = 1 - t;

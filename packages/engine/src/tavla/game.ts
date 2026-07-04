@@ -172,9 +172,27 @@ export function legalSteps(st: TavlaGameState, pl: number): TavlaStep[] {
   return out;
 }
 
+/** Kırık pulu var VE rakip evinin 6 kapısı da kapalı → hiçbir zar giremez (tam kilit). */
+function barLocked(st: TavlaGameState, pl: number): boolean {
+  if (st.bar[pl]! <= 0) return false;
+  for (let d = 1; d <= 6; d++) {
+    const to = pl === 0 ? 24 - d : d - 1;
+    if (oppCount(st, pl, to) < 2) return false;
+  }
+  return true;
+}
+
 function endTurn(st: TavlaGameState): void {
   st.movesLeft = [];
-  st.turn = 1 - st.turn;
+  const next = 1 - st.turn;
+  // KULLANICI KURALI: kırık + TÜM kapılar kapalıysa rakibe zar attırıp vakit kaybettirme —
+  // sıra otomatik geri döner. (Emniyet: iki taraf birden kilitliyse normal devir → deadlock yok.)
+  if (barLocked(st, next) && !barLocked(st, st.turn)) {
+    st.matchLog.push(`${st.players[next]!.name} kırık ve tüm kapılar kapalı — sıra otomatik geçti`);
+    st.phase = 'roll';
+    return; // turn değişmez
+  }
+  st.turn = next;
   st.phase = 'roll';
 }
 
