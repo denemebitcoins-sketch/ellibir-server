@@ -381,3 +381,18 @@ select cron.schedule(
 --   select column_name from information_schema.columns
 --    where table_name in ('profiles','presence') and column_name = 'gift_off';
 --   select jobname, schedule from cron.job where jobname = 'invites-temizlik';
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 32) GIFTS OKUMA İZNİ — hediyeler server (service-role) ile yazılır
+--   ama CLIENT'lar okuyamıyordu (SELECT policy yoktu → sorgu SESSİZCE boş
+--   dönüyordu = "okeyde ısmarladım, 51'de çikolata yok" kökü).
+--   Masadaki herkesin süreli hediyesi herkese görünür → select serbest.
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.gifts enable row level security;
+drop policy if exists gifts_select on public.gifts;
+create policy gifts_select on public.gifts
+  for select to authenticated
+  using (true);
+
+-- BÖLÜM 32 doğrulama:
+--   select policyname from pg_policies where tablename = 'gifts';

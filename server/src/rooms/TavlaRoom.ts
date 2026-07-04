@@ -470,6 +470,7 @@ export class TavlaRoom extends Room {
       winnerSeat,
       bet: this.bet,
       teamMode: false,
+      totalSeats: 2, // tavla 1v1 — pot = 2×bet (bot bahsi sanal; ECONOMY §4)
     }).catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
   }
 

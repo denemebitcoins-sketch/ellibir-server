@@ -210,6 +210,7 @@ export async function settleMatch(opts: {
   bet: number;
   teamMode: boolean;
   scores?: Map<number, number>; // koltuk → maç toplam skoru (51: DÜŞÜK kazanır) — kademeli tekli için
+  totalSeats?: number;          // masa koltuk sayısı (tavla 2, diğerleri 4) — bot bahisleri SANAL pota girer
 }): Promise<void> {
   const { seatUsers, winnerSeat, bet, teamMode, scores } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
@@ -237,24 +238,29 @@ export async function settleMatch(opts: {
   const winners: string[] = [];
   const losers: string[] = [];
   for (const [seat, uid] of seatUsers) (isWinner(seat) ? winners : losers).push(uid);
-  if (winners.length === 0) return;
+  if (winners.length === 0 && losers.length === 0) return;
 
-  // Pot = tüm gerçek oyuncuların bahsi; kaybedenlerden kes, kazananlara (komisyon sonrası) böl.
-  const pot = (winners.length + losers.length) * bet;
-  const prizePool = pot - Math.floor(pot * 0.1); // %10 komisyon
-  const perWinner = Math.floor(prizePool / winners.length);
+  // EKONOMİ (ECONOMY.md §4 — "sistem her yerde aynı", kullanıcı kuralı): pot = KOLTUK×bet;
+  // bot bahisleri SANAL pota girer (sink her maçta korunur). Kazanan taraf üye başına
+  // pot×0.9/tarafÜye; NET kazanç = perWinner − bet. Kaybeden İNSAN her durumda −bet.
+  // (Eski kod botlu maçta kaybı hiç kesmiyor, kazanca yanlış tutar ekliyordu.)
+  const seats = opts.totalSeats ?? 4;
+  const winSide = teamMode ? 2 : 1;                // kazanan taraf üye sayısı (bot dahil)
+  const pot = seats * bet;
+  const prizePool = pot - Math.floor(pot * 0.1);   // %10 komisyon (yarısı çanağa — faz B)
+  const perWinner = Math.floor(prizePool / winSide);
 
   for (const uid of losers) await rpc('deduct_chips', { p_user_id: uid, p_amount: bet });
-  for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: perWinner - bet > 0 ? perWinner - bet : perWinner });
+  for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: Math.max(0, perWinner - bet) });
 
   // İSTATİSTİK: oynanan maç (matches) HER gerçek oyuncuda +1; galibiyet (wins) yalnız
   // kazananlarda +1. Ayrıca kazanan serisi (cur_streak/best_streak) ve toplam kazanç
   // (total_won) güncellenir. Bot koltukları seatUsers'ta YOK → yalnız insanlar sayılır.
   // record_match_stats RPC tek atomik UPDATE yapar (winrate = wins/matches buradan doğru çıkar).
   for (const uid of winners)
-    await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: perWinner - bet > 0 ? perWinner - bet : 0 });
+    await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: Math.max(0, perWinner - bet) });
   for (const uid of losers)
     await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
 
-  console.log(`[settle] winners=${winners.length} losers=${losers.length} pot=${pot} perWinner=${perWinner}`);
+  console.log(`[settle] winners=${winners.length} losers=${losers.length} seats=${seats} pot=${pot} perWinner=${perWinner}`);
 }

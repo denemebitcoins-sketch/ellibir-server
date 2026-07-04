@@ -46,6 +46,9 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     bankoDealer: state.elNumber >= 1 ? (state.dealerSeat + 1) % 4 : state.dealerSeat,
     sheetBankoFlat: ([] as number[]).concat(...(state.bankoRows ?? [])),
     myHand: seat >= 0 && me ? me.hand.map(mapTile) : [],
+    // GÖSTERGE butonu koşulu (kullanıcı: ilk taş atıldıktan sonra buton GÖRÜNMESİN):
+    myShowedGosterge: !!(me && me.showedGosterge),
+    myDiscardCount: me ? me.discardCount : 0,
     // Unity JsonUtility iç içe dizi desteklemez → koltuk başına DÜZ alanlar.
     disc0: state.discards[0]!.map(mapTile),
     disc1: state.discards[1]!.map(mapTile),
@@ -73,7 +76,8 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
     variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], bankoPhase: false, bankoChoice: [-1, -1, -1, -1], bankoDealer: 0, sheetBankoFlat: [],
-    myHand: [], disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
+    myHand: [], myShowedGosterge: false, myDiscardCount: 0,
+    disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,
   };
 }
