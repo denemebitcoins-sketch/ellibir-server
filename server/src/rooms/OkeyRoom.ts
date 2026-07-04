@@ -449,6 +449,17 @@ export class OkeyRoom extends Room {
 
   private enterBankoPhase() {
     if (!this.game) return;
+    // HERKES hakkını kullandıysa liste HİÇ çıkmaz — el direkt başlar (kullanıcı kuralı).
+    // (Son el mecburiyeti bu kontrolden ETKİLENMEZ: mecburiyet hakkı DURANLARA yazılır;
+    //  hak kalmadıysa zaten gösterilecek karar yok.)
+    const anyRight = [0, 1, 2, 3].some((s) => !this.game!.bankoUsed[s]);
+    if (!anyRight) {
+      beginBankoPhase(this.game);
+      resolveBankoPhase(this.game);
+      startNextEl(this.game);
+      this.afterChange();
+      return;
+    }
     beginBankoPhase(this.game);
     this.bankoDeadlineAt = Date.now() + this.BANKO_PHASE_MS;
     this.pushViews();

@@ -41,6 +41,9 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     bankoPhase: state.bankoPhase ?? false,
     bankoChoice: state.bankoChoice ?? [-1, -1, -1, -1],
     bankoThisEl: state.bankoThisEl ?? [false, false, false, false],
+    // SEÇİM FAZINDA dağıtılacak elin dağıtıcısı (startNextEl elNumber>1'de döndürür; 15 taş ona
+    // gider — stratejik bilgi, listede gösterilir).
+    bankoDealer: state.elNumber >= 1 ? (state.dealerSeat + 1) % 4 : state.dealerSeat,
     sheetBankoFlat: ([] as number[]).concat(...(state.bankoRows ?? [])),
     myHand: seat >= 0 && me ? me.hand.map(mapTile) : [],
     // Unity JsonUtility iç içe dizi desteklemez → koltuk başına DÜZ alanlar.
@@ -69,7 +72,7 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     turn: -1, phase: 'draw', elEnded: false, matchEnded: false, elWinner: -2, finishKind: '',
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
-    variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], bankoPhase: false, bankoChoice: [-1, -1, -1, -1], sheetBankoFlat: [],
+    variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], bankoPhase: false, bankoChoice: [-1, -1, -1, -1], bankoDealer: 0, sheetBankoFlat: [],
     myHand: [], disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,
   };

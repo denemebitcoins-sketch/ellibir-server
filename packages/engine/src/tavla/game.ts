@@ -210,10 +210,11 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
       st.matchLog.push(`${st.players[seat]!.name} katlamayı KABUL etti — küp ×${st.cubeValue}`);
       return { ok: true };
     }
-    const offerer = st.pendingDouble;
+    // RED = TESLİM DEĞİL (kullanıcı kuralı): teklif düşer, oyun MEVCUT değerle sürer.
+    // Küp reddedene geçer — aynı oyuncu üst üste teklifle taciz edemez; reddeden ileride katlayabilir.
     st.pendingDouble = -1;
-    st.matchLog.push(`${st.players[seat]!.name} katlamada ÇEKİLDİ`);
-    endGameWin(st, offerer, st.cubeValue, 'drop');
+    st.cubeOwner = seat;
+    st.matchLog.push(`${st.players[seat]!.name} katlamayı KABUL ETMEDİ — oyun ×${st.cubeValue} sürüyor`);
     return { ok: true };
   }
   if (st.pendingDouble >= 0) return { ok: false, error: 'katlama cevabı bekleniyor' };

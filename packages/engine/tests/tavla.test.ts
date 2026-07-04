@@ -185,15 +185,17 @@ describe('katlama küpü + teslim', () => {
     expect(applyTavlaMove(st, t, { t: 'double' }).ok).toBe(false);
   });
 
-  it('katlamada çekilme: teklif eden ESKİ küp değerince kazanır', () => {
+  it('katlama REDDİ teslim DEĞİL: oyun mevcut değerle sürer, küp reddedene geçer (kullanıcı kuralı)', () => {
     const st = fresh(10);
     const t = st.turn, o = 1 - t;
     applyTavlaMove(st, t, { t: 'double' });
     expect(applyTavlaMove(st, o, { t: 'dropDouble' }).ok).toBe(true);
-    expect(st.gameEnded).toBe(true);
-    expect(st.gameWinner).toBe(t);
-    expect(st.matchScore[t]).toBe(1); // eski küp = 1
-    expect(st.mars).toBe(false);
+    expect(st.gameEnded).toBe(false);          // RED = çekilme değil
+    expect(st.cubeValue).toBe(1);              // değer katlanmadı
+    expect(st.cubeOwner).toBe(o);              // küp reddedene geçti
+    expect(st.pendingDouble).toBe(-1);
+    expect(applyTavlaMove(st, t, { t: 'double' }).ok).toBe(false); // teklif eden tekrar teklifle taciz edemez
+    expect(applyTavlaMove(st, t, { t: 'roll' }).ok).toBe(true);    // oyun aynen devam
   });
 
   it('kabul edilen küple normal bitiş ×küp; MARS ile ×2×küp', () => {

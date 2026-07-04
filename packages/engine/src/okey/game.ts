@@ -213,12 +213,14 @@ export type OkeyMove =
 
 export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove): OkeyMoveResult {
   if (state.matchEnded) return { ok: false, error: 'maç bitti' };
-  if (state.elEnded) return { ok: false, error: 'el bitti' };
+  // BANKO FAZI elEnded kontrolünden ÖNCE: faz eller ARASINDA (elEnded=true iken) koşar.
+  // Eski sıra ilk el (maç başı) hariç TÜM insan banko/pas komutlarını 'el bitti' diye reddediyordu.
   if (state.bankoPhase) {
     if (move.t === 'banko') return chooseBanko(state, seat);
     if (move.t === 'pas') return choosePas(state, seat);
     return { ok: false, error: 'banko seçimi sürüyor' };
   }
+  if (state.elEnded) return { ok: false, error: 'el bitti' };
   if (move.t === 'banko' || move.t === 'pas')
     return { ok: false, error: 'banko yalnız el arası SEÇİM ekranında denir' };
   const p = state.players[seat];
