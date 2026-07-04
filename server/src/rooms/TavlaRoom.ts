@@ -378,7 +378,10 @@ export class TavlaRoom extends Room {
     this.canakGame = this.game.gameNumber;
     const w = this.game.gameWinner;
     const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
-    if (!uid || !this.game.mars || Math.random() >= 0.03) { this.refreshCanak(); return; }
+    // ⚠ TEST MODU (kullanıcı, 2026-07-04): MARS patlatma şansı GEÇİCİ %100 — canlı prova.
+    // Prova bitince NORMAL değere dön: const MARS_P = 0.03;
+    const MARS_P = 1.0; // TEST! normal: 0.03
+    if (!uid || !this.game.mars || Math.random() >= MARS_P) { this.refreshCanak(); return; }
     canakBurst('tavla', uid).then((amt) => {
       if (amt <= 0 || !this.game) return;
       this.canakAmount = 0;
