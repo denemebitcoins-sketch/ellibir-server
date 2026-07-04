@@ -356,3 +356,28 @@ $$;
 -- + bans tabloları; profiles.gender/role/banned/allow_dm/allow_friend_req/
 -- chat_banned_until/game_banned_until + presence.* kolonları ve RLS hazır.
 -- =====================================================================
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 30) HEDİYE KABUL TERCİHİ — gift_off = true → hediye ALMAK istemiyor.
+--   Hediye gönderim listesinde bu kişi GRİ görünür (tıklanamaz).
+--   Default false = kabul ediyor (mevcut davranış değişmez).
+--   (2026-07-04; client bağlaması ayarlar toggle'ı ile sonraki turda)
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.profiles add column if not exists gift_off boolean not null default false;
+alter table public.presence add column if not exists gift_off boolean not null default false;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 31) MASA DAVETİ SÜPÜRGESİ — client 10dk TTL uygular (listede
+--   gizler + siler); bu cron hiç giriş yapmayan hesapların davetleri
+--   için sunucu sigortası. (pg_cron lobby retention ile aynı desen)
+-- ─────────────────────────────────────────────────────────────────────
+select cron.schedule(
+  'invites-temizlik',
+  '17 * * * *',   -- her saat :17'de
+  $q$ delete from public.invites where created_at < now() - interval '10 minutes' $q$
+);
+
+-- BÖLÜM 30/31 doğrulama:
+--   select column_name from information_schema.columns
+--    where table_name in ('profiles','presence') and column_name = 'gift_off';
+--   select jobname, schedule from cron.job where jobname = 'invites-temizlik';

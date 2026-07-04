@@ -44,6 +44,7 @@ export class TavlaRoom extends Room {
   private bet = 0;
   private settled = false;
   private cfg: any = null;
+  private rematchVotes = new Set<number>(); // maç sonu TEKRAR OYNA oyları (koltuk)
   private lastReconnectAt = new Map<string, number>();
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkani (wifi->mobil gecisi)
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar
@@ -117,6 +118,27 @@ export class TavlaRoom extends Room {
       catch { client.send('moveError', { code: 'bad_json' }); return; }
       const r = applyTavlaMove(this.game, seat, cmd);
       if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
+      this.afterChange();
+    });
+
+    // TEKRAR OYNA (kullanıcı isteği): maç bitince oyuncular oy verir; bağlı TÜM insan
+    // koltukları isteyince aynı ayarlarla YENİ MAÇ başlar (bot rakipte tek oy yeter).
+    this.onMessage('rematch', (client) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null || !this.game || !this.game.matchEnded) return;
+      this.rematchVotes.add(seat);
+      const connected = [...this.seats.values()];
+      const all = connected.length > 0 && connected.every((s) => this.rematchVotes.has(s));
+      if (!all) { this.pushViews(); return; } // oy listede görünsün (rakip bekleniyor…)
+      this.rematchVotes.clear();
+      this.settled = false;
+      this.game = createTavlaGame({ ...this.cfg, seed: Date.now() % 2147483647 });
+      for (const [st, name] of this.seatNames) {
+        const p = this.game.players[st];
+        if (p && name) p.name = name;
+      }
+      this.game.matchLog.push('TEKRAR OYNA — yeni maç başladı');
+      console.log('[TavlaRoom] rematch — yeni maç');
       this.afterChange();
     });
 
@@ -485,6 +507,7 @@ export class TavlaRoom extends Room {
       v.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
       v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
       v.preLog = waiting ? this.preLog.slice(-30) : [];
+      v.rematchVotes = [...this.rematchVotes]; // maç sonu TEKRAR OYNA oy listesi
     };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
