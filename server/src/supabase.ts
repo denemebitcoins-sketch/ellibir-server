@@ -150,6 +150,54 @@ export async function rpc(fn: string, args: Record<string, unknown>): Promise<bo
   }
 }
 
+/* ── ÇANAK (ilerleyen jackpot; BÖLÜM 33) ─────────────────────────────────────
+   Oyun başına 1 çanak ('51'/'okey'/'tavla'). Komisyonun %50'si birikir; patlatma
+   şansları odalarda. RPC'ler atomik (canak_add/canak_take) ve service-role-only. */
+
+/** Değer döndüren RPC (rpc() bool döner; çanak tutar okur). Hata → null. */
+async function rpcValue(fn: string, args: Record<string, unknown>): Promise<number | null> {
+  if (!supabaseConfigured()) return null;
+  try {
+    const r = await fetch(`${URL}/rest/v1/rpc/${fn}`, {
+      method: 'POST',
+      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    });
+    if (!r.ok) { console.error(`[supabase] RPC ${fn} hata ${r.status}:`, await r.text()); return null; }
+    const v = Number(await r.text());
+    return Number.isFinite(v) ? v : null;
+  } catch (e: any) { console.error(`[supabase] RPC ${fn}:`, e?.message); return null; }
+}
+
+/** Çanağa ekle; yeni toplamı döner (hata → null). */
+export async function canakAdd(game: string, amount: number): Promise<number | null> {
+  if (amount <= 0) return null;
+  return rpcValue('canak_add', { p_game: game, p_amount: Math.floor(amount) });
+}
+
+/** Çanağın güncel tutarını oku (gösterge için). */
+export async function fetchCanak(game: string): Promise<number> {
+  if (!supabaseConfigured()) return 0;
+  try {
+    const r = await fetch(`${URL}/rest/v1/canak?game=eq.${game}&select=amount&limit=1`, {
+      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` },
+    });
+    if (!r.ok) return 0;
+    const arr = (await r.json()) as Array<{ amount: number }>;
+    return arr?.[0]?.amount ?? 0;
+  } catch { return 0; }
+}
+
+/** ÇANAK PATLAT: tutarı atomik sıfırla + bitiren İNSANA çip olarak yaz. Patlayan tutarı döner (0 = boş/başarısız). */
+export async function canakBurst(game: string, uid: string): Promise<number> {
+  if (!uid) return 0;
+  const amt = await rpcValue('canak_take', { p_game: game });
+  if (!amt || amt <= 0) return 0;
+  await rpc('add_chips', { p_user_id: uid, p_amount: amt });
+  console.log(`[canak] PATLADI game=${game} uid=${uid} tutar=${amt}`);
+  return amt;
+}
+
 /** Oyun-içi hediye kaydı (service-role INSERT) — alıcının yanında SÜRELİ görünür (her masaya taşınır). */
 export async function insertGift(
   fromUser: string,
@@ -211,6 +259,7 @@ export async function settleMatch(opts: {
   teamMode: boolean;
   scores?: Map<number, number>; // koltuk → maç toplam skoru (51: DÜŞÜK kazanır) — kademeli tekli için
   totalSeats?: number;          // masa koltuk sayısı (tavla 2, diğerleri 4) — bot bahisleri SANAL pota girer
+  game?: string;                // çanak hedefi: '51' | 'okey' | 'tavla' (komisyonun %50'si birikir)
 }): Promise<void> {
   const { seatUsers, winnerSeat, bet, teamMode, scores } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
@@ -228,6 +277,8 @@ export async function settleMatch(opts: {
     await rpc('deduct_chips', { p_user_id: fourth, p_amount: E });
     await rpc('record_match_stats', { p_user_id: first,  p_won: true,  p_winnings: Math.round(2.2 * E) });
     for (const uid of [second, third, fourth]) await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
+    // ÇANAK: ev payının (0.1E) yarısı çanağa, yarısı yanar (ECONOMY §4 CanakPct=%50).
+    if (opts.game) await canakAdd(opts.game, Math.floor(0.1 * E * 0.5));
     console.log(`[settle] tekli KADEMELİ 4-kisi E=${E} sira=${ranked.map((r) => r[0])}`);
     return;
   }
@@ -252,6 +303,9 @@ export async function settleMatch(opts: {
 
   for (const uid of losers) await rpc('deduct_chips', { p_user_id: uid, p_amount: bet });
   for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: Math.max(0, perWinner - bet) });
+
+  // ÇANAK: komisyonun %50'si ilgili oyunun çanağına birikir (kalan %50 yakılır — ECONOMY §4).
+  if (opts.game) await canakAdd(opts.game, Math.floor((pot - prizePool) * 0.5));
 
   // İSTATİSTİK: oynanan maç (matches) HER gerçek oyuncuda +1; galibiyet (wins) yalnız
   // kazananlarda +1. Ayrıca kazanan serisi (cur_streak/best_streak) ve toplam kazanç

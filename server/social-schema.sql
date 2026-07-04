@@ -396,3 +396,64 @@ create policy gifts_select on public.gifts
 
 -- BÖLÜM 32 doğrulama:
 --   select policyname from pg_policies where tablename = 'gifts';
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 33) ÇANAK (ilerleyen jackpot) — oyun başına 1 çanak: '51' / 'okey' / 'tavla'.
+--   Her maçta kesilen komisyonun %50'si ilgili çanağa birikir (kalan %50 yakılır).
+--   PATLATMA (el/oyun bitiren İNSAN, şansla): okey atarak %3 · çift %5 · çift+okey %8
+--   (51 ve okey düz/banko ortak tetikler) · tavlada MARS %3. Patlayan çanağın TAMAMI
+--   bitirene gider; çanak 0'dan yeniden birikir.
+--   Yazma YALNIZ service-role RPC'lerle (atomik); client yalnız OKUR (lobi göstergesi).
+-- ─────────────────────────────────────────────────────────────────────
+create table if not exists public.canak (
+  game       text primary key,            -- '51' | 'okey' | 'tavla'
+  amount     bigint not null default 0,
+  updated_at timestamptz not null default now()
+);
+insert into public.canak (game, amount) values ('51',0), ('okey',0), ('tavla',0)
+  on conflict (game) do nothing;
+
+alter table public.canak enable row level security;
+drop policy if exists canak_select on public.canak;
+create policy canak_select on public.canak
+  for select to authenticated using (true);
+-- (insert/update policy YOK → client yazamaz; service-role RLS'i zaten geçer)
+
+-- Çanağa ekle (atomik) — yeni toplamı döner.
+create or replace function public.canak_add(p_game text, p_amount bigint)
+returns bigint
+language plpgsql
+security definer
+as $$
+declare v bigint;
+begin
+  update public.canak
+     set amount = amount + greatest(0, p_amount), updated_at = now()
+   where game = p_game
+   returning amount into v;
+  return coalesce(v, 0);
+end;
+$$;
+
+-- Çanağı patlat (atomik): mevcut tutarı döner ve sıfırlar. Boşsa 0.
+create or replace function public.canak_take(p_game text)
+returns bigint
+language plpgsql
+security definer
+as $$
+declare v bigint;
+begin
+  select amount into v from public.canak where game = p_game for update;
+  if v is null or v <= 0 then return 0; end if;
+  update public.canak set amount = 0, updated_at = now() where game = p_game;
+  return v;
+end;
+$$;
+
+-- GÜVENLİK: security definer RPC'ler varsayılan PUBLIC execute alır → client çağıramasın.
+revoke execute on function public.canak_add(text, bigint) from public, anon, authenticated;
+revoke execute on function public.canak_take(text) from public, anon, authenticated;
+
+-- BÖLÜM 33 doğrulama:
+--   select * from public.canak;
+--   select proname from pg_proc where proname in ('canak_add','canak_take');

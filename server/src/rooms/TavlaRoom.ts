@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/tavla';
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds, canakBurst, fetchCanak } from '../supabase';
 
 // 51/OKEY ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -107,6 +107,7 @@ export class TavlaRoom extends Room {
 
     this.bet = Number(options?.bet) || 0;
     this.cfg = { seed, names, botSeats, rules };
+    this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
     this.setMetadata({ game: 'tavla', mode, table: Number(options?.table) || 1, humans: this.humanSeats.length });
 
     // Oyun komutları: {t:'roll'} | {t:'move', from, die}  (from: 0-23, -1 = kırık)
@@ -366,12 +367,35 @@ export class TavlaRoom extends Room {
     else this.preLog.push(msg);
   }
 
+  /* ── ÇANAK (BÖLÜM 33): MARS yapan İNSAN %3 şansla çanağı patlatır. ── */
+  private canakGame = -1;        // oyun başına TEK kontrol
+  private canakAmount = 0;       // gösterge (bellek kopyası; view'a gider)
+
+  private refreshCanak() { fetchCanak('tavla').then((v) => { this.canakAmount = v; }).catch(() => {}); }
+
+  private maybeCanak() {
+    if (!this.game || this.canakGame === this.game.gameNumber) return;
+    this.canakGame = this.game.gameNumber;
+    const w = this.game.gameWinner;
+    const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
+    if (!uid || !this.game.mars || Math.random() >= 0.03) { this.refreshCanak(); return; }
+    canakBurst('tavla', uid).then((amt) => {
+      if (amt <= 0 || !this.game) return;
+      this.canakAmount = 0;
+      const name = this.seatNames.get(w) ?? `Oyuncu ${w + 1}`;
+      this.game.matchLog.push(`🏺 ÇANAK PATLADI! ${name} ${amt} çip kazandı!`);
+      this.broadcast('canak', { seat: w, name, amount: amt });
+      this.pushViews();
+    }).catch(() => {});
+  }
+
   /* ── OYUN AKIŞI: her değişimden sonra tek yerden zamanla ── */
 
   private afterChange() {
     // SIRA ÖNEMLİ: önce zamanlayıcı (turnDeadlineAt) KURULUR, sonra push — aksi halde view
     // eski deadline ile gider (sayaç insan sırasında çıkmaz / yanlış koltukta görünür).
     if (!this.game) { this.pushViews(); return; }
+    if (this.game.gameEnded || this.game.matchEnded) this.maybeCanak();
     if (this.game.matchEnded) {
       this.settleOnce(); this.clearTurnTimers(); this.turnDeadlineAt = 0;
       this.pushViews(); return;
@@ -471,6 +495,7 @@ export class TavlaRoom extends Room {
       bet: this.bet,
       teamMode: false,
       totalSeats: 2, // tavla 1v1 — pot = 2×bet (bot bahsi sanal; ECONOMY §4)
+      game: 'tavla', // çanak hedefi
     }).catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
   }
 
@@ -509,6 +534,7 @@ export class TavlaRoom extends Room {
       v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
       v.preLog = waiting ? this.preLog.slice(-30) : [];
       v.rematchVotes = [...this.rematchVotes]; // maç sonu TEKRAR OYNA oy listesi
+      v.canak = this.canakAmount;              // 🏺 çanak göstergesi
     };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);

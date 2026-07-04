@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds, canakBurst, fetchCanak } from '../supabase';
 
 // 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -112,6 +112,7 @@ export class OkeyRoom extends Room {
     this.bet = Number(options?.bet) || 0;
     this.cfg = { seed, names, botSeats, rules };
     this.setMetadata({ game: 'okey', mode, table: Number(options?.table) || 1, humans: this.humanSeats.length });
+    this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
 
     // Oyun komutları: {t:'draw',from} | {t:'discard',tileId} | {t:'finish',tileId} | {t:'gosterge'}
     this.onMessage('cmd', (client, raw) => {
@@ -385,7 +386,33 @@ export class OkeyRoom extends Room {
 
   /* ── OYUN AKIŞI: her değişimden sonra tek yerden zamanla ── */
 
+  /* ── ÇANAK (BÖLÜM 33): el bitiren İNSAN, bitiş türüne göre şansla çanağı patlatır.
+     okey %3 · çift %5 · çift+okey %8. Patlayan tutarın tamamı bitirene; çanak sıfırlanır. ── */
+  private canakEl = -1;          // el başına TEK kontrol
+  private canakAmount = 0;       // gösterge (bellek kopyası; view'a gider)
+
+  private refreshCanak() { fetchCanak('okey').then((v) => { this.canakAmount = v; }).catch(() => {}); }
+
+  private maybeCanak() {
+    if (!this.game || this.canakEl === this.game.elNumber) return;
+    this.canakEl = this.game.elNumber;
+    const w = this.game.elWinner ?? -1;
+    const fk = this.game.finishKind;
+    const p = fk === 'pairsOkey' ? 0.08 : fk === 'pairs' ? 0.05 : fk === 'okey' ? 0.03 : 0;
+    const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
+    if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
+    canakBurst('okey', uid).then((amt) => {
+      if (amt <= 0 || !this.game) return;
+      this.canakAmount = 0;
+      const name = this.nameOfSeat(w);
+      this.game.matchLog.push(`🏺 ÇANAK PATLADI! ${name} ${amt} çip kazandı!`);
+      this.broadcast('canak', { seat: w, name, amount: amt });
+      this.pushViews();
+    }).catch(() => {});
+  }
+
   private afterChange() {
+    if (this.game && (this.game.elEnded || this.game.matchEnded)) this.maybeCanak();
     // SIRA ÖNEMLİ: önce zamanlayıcı (turnDeadlineAt) KURULUR, sonra push edilir — aksi halde
     // view ESKİ deadline ile gider: insan sırasında turnMs=0 (sayaç hiç çıkmaz), bot sırasındaki
     // push önceki insanın kalıntı süresini taşır (sayaç yanlış koltukta görünür bug'ı).
@@ -509,6 +536,7 @@ export class OkeyRoom extends Room {
       bet: this.bet,
       teamMode: this.game.rules.teamMode,
       scores,
+      game: 'okey', // çanak hedefi (düz + banko ortak çanak)
     }).catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
   }
 
@@ -546,6 +574,7 @@ export class OkeyRoom extends Room {
       v.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
       v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
       v.bankoMs = this.bankoDeadlineAt > 0 ? Math.max(0, this.bankoDeadlineAt - Date.now()) : 0;
+      v.canak = this.canakAmount; // 🏺 çanak göstergesi (bellek kopyası)
       v.preLog = waiting ? this.preLog.slice(-30) : [];
     };
     this.clients.forEach((c) => {
