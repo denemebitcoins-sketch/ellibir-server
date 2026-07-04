@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/tavla';
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds, canakBurst, fetchCanak } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds, canakBurst, fetchCanak, deductEntry } from '../supabase';
 
 // 51/OKEY ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -134,6 +134,7 @@ export class TavlaRoom extends Room {
       this.rematchVotes.clear();
       this.settled = false;
       this.game = createTavlaGame({ ...this.cfg, seed: Date.now() % 2147483647 });
+      deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS — yeni maç yeni giriş
       for (const [st, name] of this.seatNames) {
         const p = this.game.players[st];
         if (p && name) p.name = name;
@@ -264,6 +265,7 @@ export class TavlaRoom extends Room {
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
       console.log('[TavlaRoom] oyun başladı');
+      deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS (kullanıcı modeli)
       this.afterChange();
     }, this.START_MS);
   }
@@ -382,7 +384,7 @@ export class TavlaRoom extends Room {
     // Prova bitince NORMAL değere dön: const MARS_P = 0.03;
     const MARS_P = 1.0; // TEST! normal: 0.03
     if (!uid || !this.game.mars || Math.random() >= MARS_P) { this.refreshCanak(); return; }
-    canakBurst('tavla', uid).then((amt) => {
+    canakBurst('tavla', uid, this.seatNames.get(w) ?? '').then((amt) => {
       if (amt <= 0 || !this.game) return;
       this.canakAmount = 0;
       const name = this.seatNames.get(w) ?? `Oyuncu ${w + 1}`;

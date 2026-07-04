@@ -150,6 +150,14 @@ export async function rpc(fn: string, args: Record<string, unknown>): Promise<bo
   }
 }
 
+/** PEŞİN BAHİS GİRİŞİ: maç fiilen BAŞLARKEN her gerçek oturandan bahsi kes (odalar çağırır).
+ *  Kaçan/düşen zaten ödemiş olur; settle yalnız ödeme yapar. */
+export async function deductEntry(seatUsers: Map<number, string>, bet: number): Promise<void> {
+  if (!supabaseConfigured() || bet <= 0) return;
+  for (const [, uid] of seatUsers) await rpc('deduct_chips', { p_user_id: uid, p_amount: bet });
+  console.log(`[entry] PESIN bahis kesildi: ${seatUsers.size} oyuncu × ${bet}`);
+}
+
 /* ── ÇANAK (ilerleyen jackpot; BÖLÜM 33) ─────────────────────────────────────
    Oyun başına 1 çanak ('51'/'okey'/'tavla'). Komisyonun %50'si birikir; patlatma
    şansları odalarda. RPC'ler atomik (canak_add/canak_take) ve service-role-only. */
@@ -188,13 +196,29 @@ export async function fetchCanak(game: string): Promise<number> {
   } catch { return 0; }
 }
 
-/** ÇANAK PATLAT: tutarı atomik sıfırla + bitiren İNSANA çip olarak yaz. Patlayan tutarı döner (0 = boş/başarısız). */
-export async function canakBurst(game: string, uid: string): Promise<number> {
+/** ÇANAK PATLAT: tutarı atomik sıfırla + bitiren İNSANA çip yaz + GEÇMİŞE kaydet (BÖLÜM 34)
+ *  + TOPLULUK sohbetine sistem duyurusu düşür. Patlayan tutarı döner (0 = boş/başarısız). */
+export async function canakBurst(game: string, uid: string, name = ''): Promise<number> {
   if (!uid) return 0;
   const amt = await rpcValue('canak_take', { p_game: game });
   if (!amt || amt <= 0) return 0;
   await rpc('add_chips', { p_user_id: uid, p_amount: amt });
   console.log(`[canak] PATLADI game=${game} uid=${uid} tutar=${amt}`);
+  const gameLbl = game === '51' ? '51' : game.toUpperCase();
+  const svc = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' };
+  // Geçmiş kaydı (canak_events) — ekrandaki GEÇMİŞ sekmesi + "son patlatma" bilgisi.
+  fetch(`${URL}/rest/v1/canak_events`, {
+    method: 'POST', headers: svc,
+    body: JSON.stringify({ game, user_id: uid, name, amount: amt }),
+  }).catch((e) => console.error('[canak] event kaydı:', e?.message));
+  // Topluluk (lobby_chat) sistem duyurusu — herkes görsün (FOMO motoru).
+  fetch(`${URL}/rest/v1/lobby_chat`, {
+    method: 'POST', headers: svc,
+    body: JSON.stringify({
+      user_id: uid, name: '🏺 ÇANAK', role: 'normal',
+      text: `${name || 'Bir oyuncu'}, ${gameLbl} çanağını patlattı: +${amt} çip! 🎉`,
+    }),
+  }).catch((e) => console.error('[canak] lobi duyurusu:', e?.message));
   return amt;
 }
 
@@ -267,14 +291,18 @@ export async function settleMatch(opts: {
   // KADEMELİ TEKLİ (kararlaştırılan model): 4 gerçek oyuncu + skorlar → sıralamaya göre dağıt.
   //   Havuz 4E. 1.→3.20E, 2.→0.70E, 3-4→0, ev→0.10E. Net: 1.+2.20E, 2.−0.30E, 3-4 −E.
   //   (Sıralama: en DÜŞÜK skor 1., en yüksek 4.)
+  // ── PEŞİN BAHİS MODELİ (2026-07-04, kullanıcı): bahis MAÇ BAŞINDA kesilir (odalar
+  //    deductEntry çağırır). Settle YALNIZ ÖDEME yapar — kazanan BRÜT alır (bahis iadesi
+  //    içinde), kaybedene EK KESİNTİ YOK. Kaçan/düşen de peşin ödediği için ayrıca cezalanmaz.
+  //    Eski model (kaybedenden settle'da kesinti) win ekranıyla ("+9.000 aldım ama +4.000
+  //    yazıyor") ve kullanıcı zihin modeliyle çelişiyordu. ──
   if (!teamMode && seatUsers.size === 4 && scores) {
     const ranked = [...seatUsers.entries()].sort((a, b) => (scores.get(a[0]) ?? 0) - (scores.get(b[0]) ?? 0));
     const E = bet;
     const [first, second, third, fourth] = ranked.map((r) => r[1]);
-    await rpc('add_chips',    { p_user_id: first,  p_amount: Math.round(2.2 * E) });
-    await rpc('deduct_chips', { p_user_id: second, p_amount: Math.round(0.3 * E) });
-    await rpc('deduct_chips', { p_user_id: third,  p_amount: E });
-    await rpc('deduct_chips', { p_user_id: fourth, p_amount: E });
+    await rpc('add_chips', { p_user_id: first,  p_amount: Math.round(3.2 * E) }); // brüt (peşin E ödendi → net +2.2E)
+    await rpc('add_chips', { p_user_id: second, p_amount: Math.round(0.7 * E) }); // iade (net −0.3E)
+    // 3.-4. ödeme yok (peşinleri masada kaldı → net −E)
     await rpc('record_match_stats', { p_user_id: first,  p_won: true,  p_winnings: Math.round(2.2 * E) });
     for (const uid of [second, third, fourth]) await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
     // ÇANAK: ev payının (0.1E) yarısı çanağa, yarısı yanar (ECONOMY §4 CanakPct=%50).
@@ -291,18 +319,16 @@ export async function settleMatch(opts: {
   for (const [seat, uid] of seatUsers) (isWinner(seat) ? winners : losers).push(uid);
   if (winners.length === 0 && losers.length === 0) return;
 
-  // EKONOMİ (ECONOMY.md §4 — "sistem her yerde aynı", kullanıcı kuralı): pot = KOLTUK×bet;
-  // bot bahisleri SANAL pota girer (sink her maçta korunur). Kazanan taraf üye başına
-  // pot×0.9/tarafÜye; NET kazanç = perWinner − bet. Kaybeden İNSAN her durumda −bet.
-  // (Eski kod botlu maçta kaybı hiç kesmiyor, kazanca yanlış tutar ekliyordu.)
+  // EKONOMİ (ECONOMY.md §4): pot = KOLTUK×bet; bot bahisleri SANAL pota girer (sink korunur).
+  // PEŞİN model: kazanan taraf üyesi BRÜT perWinner alır (net = perWinner − peşin bet);
+  // kaybedene EK kesinti yok (peşini masada kaldı).
   const seats = opts.totalSeats ?? 4;
   const winSide = teamMode ? 2 : 1;                // kazanan taraf üye sayısı (bot dahil)
   const pot = seats * bet;
-  const prizePool = pot - Math.floor(pot * 0.1);   // %10 komisyon (yarısı çanağa — faz B)
+  const prizePool = pot - Math.floor(pot * 0.1);   // %10 komisyon
   const perWinner = Math.floor(prizePool / winSide);
 
-  for (const uid of losers) await rpc('deduct_chips', { p_user_id: uid, p_amount: bet });
-  for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: Math.max(0, perWinner - bet) });
+  for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: perWinner });
 
   // ÇANAK: komisyonun %50'si ilgili oyunun çanağına birikir (kalan %50 yakılır — ECONOMY §4).
   if (opts.game) await canakAdd(opts.game, Math.floor((pot - prizePool) * 0.5));
@@ -316,5 +342,5 @@ export async function settleMatch(opts: {
   for (const uid of losers)
     await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
 
-  console.log(`[settle] winners=${winners.length} losers=${losers.length} seats=${seats} pot=${pot} perWinner=${perWinner}`);
+  console.log(`[settle] PESIN winners=${winners.length} losers=${losers.length} seats=${seats} pot=${pot} perWinner(brut)=${perWinner}`);
 }

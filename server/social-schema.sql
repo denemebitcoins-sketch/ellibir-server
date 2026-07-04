@@ -457,3 +457,29 @@ revoke execute on function public.canak_take(text) from public, anon, authentica
 -- BÖLÜM 33 doğrulama:
 --   select * from public.canak;
 --   select proname from pg_proc where proname in ('canak_add','canak_take');
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 34) ÇANAK GEÇMİŞİ — her patlama kalıcı kayıt (kim, hangi oyun,
+--   ne zaman, kaç çip). ÇANAK ekranı (ana menü 🏺) geçmiş sekmesi +
+--   kartlarda "son patlatma" bilgisi + patlama sıklığı analizi buradan.
+--   Yazma yalnız server (service-role); client OKUR.
+-- ─────────────────────────────────────────────────────────────────────
+create table if not exists public.canak_events (
+  id         bigint generated always as identity primary key,
+  game       text   not null,             -- '51' | 'okey' | 'tavla'
+  user_id    text   not null,
+  name       text   not null default '',
+  amount     bigint not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists canak_events_game_idx on public.canak_events (game, created_at desc);
+create index if not exists canak_events_created_idx on public.canak_events (created_at desc);
+
+alter table public.canak_events enable row level security;
+drop policy if exists canak_events_select on public.canak_events;
+create policy canak_events_select on public.canak_events
+  for select to authenticated using (true);
+-- (insert policy YOK → yalnız service-role yazar)
+
+-- BÖLÜM 34 doğrulama:
+--   select * from public.canak_events order by id desc limit 5;

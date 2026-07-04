@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds, canakBurst, fetchCanak } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds, canakBurst, fetchCanak, deductEntry } from '../supabase';
 
 // 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -280,6 +280,7 @@ export class OkeyRoom extends Room {
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
       console.log('[OkeyRoom] oyun başladı' + (banko ? ' (banko: ilk el seçim fazı)' : ''));
+      deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS (kullanıcı modeli)
       if (banko) this.enterBankoPhase();
       else this.afterChange();
     }, this.START_MS);
@@ -401,7 +402,7 @@ export class OkeyRoom extends Room {
     const p = fk === 'pairsOkey' ? 0.08 : fk === 'pairs' ? 0.05 : fk === 'okey' ? 0.03 : 0;
     const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
     if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
-    canakBurst('okey', uid).then((amt) => {
+    canakBurst('okey', uid, this.nameOfSeat(w)).then((amt) => {
       if (amt <= 0 || !this.game) return;
       this.canakAmount = 0;
       const name = this.nameOfSeat(w);
