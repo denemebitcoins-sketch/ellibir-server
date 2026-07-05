@@ -576,3 +576,40 @@ $$;
 -- BÖLÜM 35/36 doğrulama:
 --   select proname from pg_proc where proname in ('claim_admin_reward','friend_count','admin_set_avatar_status');
 --   select column_name from information_schema.columns where table_name='profiles' and column_name='avatar_status';
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 37) DESTEK/ŞİKAYET: 'bug' kategorisi + SPAM KORUMASI
+--   1) SupportScreen'e Bug kategorisi eklendi — eski CHECK ('istek','sikayet','oneri')
+--      bug'ı REDDEDİYORDU; kısıt genişletildi.
+--   2) Makro/flood koruması: 10 dakikada en çok 3, günde en çok 20 rapor.
+--      TUZAK: reports SELECT'i admin-only → policy içindeki normal count()
+--      kullanıcı için HEP 0 dönerdi; sayaç SECURITY DEFINER fonksiyonla alınır.
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.reports drop constraint if exists reports_type_check;
+alter table public.reports add constraint reports_type_check
+  check (type in ('istek','sikayet','oneri','bug'));
+
+create index if not exists reports_from_idx on public.reports (from_user, created_at desc);
+
+create or replace function public.my_report_count(p_minutes int)
+returns integer
+language sql
+security definer
+as $$
+  select count(*)::int from public.reports
+   where from_user = auth.uid()
+     and created_at > now() - make_interval(mins => p_minutes);
+$$;
+
+drop policy if exists reports_insert on public.reports;
+create policy reports_insert on public.reports
+  for insert to authenticated
+  with check (
+    auth.uid() = from_user
+    and public.my_report_count(10)   < 3    -- 10 dakikada en çok 3 rapor
+    and public.my_report_count(1440) < 20   -- 24 saatte en çok 20 rapor
+  );
+
+-- BÖLÜM 37 doğrulama:
+--   select conname from pg_constraint where conname='reports_type_check';
+--   select proname from pg_proc where proname='my_report_count';

@@ -48,6 +48,9 @@ export interface TavlaGameState {
   cubeValue: number;         // 1,2,4,...,64
   cubeOwner: number;         // -1 ortada (ikisi de katlayabilir), 0/1 sahibi
   pendingDouble: number;     // teklifi bekleyen değil TEKLİF EDEN koltuk (-1 yok); rakip cevaplamalı
+  // GERİ AL: zar atıldığı andaki tahta fotoğrafı — tur içinde 'undo' TÜMÜNÜ (kırık dahil)
+  // bu fotoğrafa döndürür. Sıra rakibe geçince işlevsiz kalır (yeni roll üzerine yazar).
+  turnSnap?: { points: number[]; bar: number[]; off: number[]; movesLeft: number[] } | null;
 }
 
 export interface TavlaMoveResult { ok: boolean; error?: string; }
@@ -55,6 +58,7 @@ export interface TavlaMoveResult { ok: boolean; error?: string; }
 export type TavlaMove =
   | { t: 'roll' }
   | { t: 'move'; from: number; die: number } // from: 0-23 ya da -1 = KIRIK (bar)
+  | { t: 'undo' }          // GERİ AL: bu turda oynanan adımları zar-atıldı anına döndür (kırık dahil)
   | { t: 'double' }        // KATLAMA teklifi (sıra bende, zar atmadan; küp ortada/bende)
   | { t: 'takeDouble' }    // rakip kabul: küp ×2, sahiplik kabul edene geçer
   | { t: 'dropDouble' }    // rakip çekilir: teklif eden ESKİ küp değerince kazanır
@@ -80,6 +84,7 @@ export function createTavlaGame(opts: {
     gameEnded: false, matchEnded: false, gameWinner: -1, mars: false, endReason: '',
     matchScore: [0, 0], gameDeltas: [], matchLog: [],
     cubeValue: 1, cubeOwner: -1, pendingDouble: -1,
+    turnSnap: null,
   };
   startNextGame(st);
   return st;
@@ -97,6 +102,7 @@ export function startNextGame(st: TavlaGameState): void {
   st.dice = [0, 0]; st.movesLeft = [];
   st.gameEnded = false; st.gameWinner = -1; st.mars = false; st.endReason = '';
   st.cubeValue = 1; st.cubeOwner = -1; st.pendingDouble = -1;
+  st.turnSnap = null;
   // Başlama atışı: eşitse yeniden.
   let a = 0, b = 0;
   do { a = nextDie(st); b = nextDie(st); } while (a === b);
@@ -246,12 +252,27 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
     return { ok: true };
   }
 
+  // GERİ AL: yalnız kendi turunda, zar atılmış ve en az bir adım oynanmışken.
+  // Fotoğraf geri yüklenir → kırılan rakip pulu da yerine döner.
+  if (move.t === 'undo') {
+    if (st.phase !== 'move' || !st.turnSnap) return { ok: false, error: 'geri alınacak hamle yok' };
+    if (st.movesLeft.length >= st.turnSnap.movesLeft.length) return { ok: false, error: 'geri alınacak hamle yok' };
+    st.points = [...st.turnSnap.points];
+    st.bar = [...st.turnSnap.bar];
+    st.off = [...st.turnSnap.off];
+    st.movesLeft = [...st.turnSnap.movesLeft];
+    st.matchLog.push(`${st.players[seat]!.name} hamlesini geri aldı`);
+    return { ok: true };
+  }
+
   if (move.t === 'roll') {
     if (st.phase !== 'roll') return { ok: false, error: 'zaten attın — hamleni oyna' };
     const d1 = nextDie(st), d2 = nextDie(st);
     st.dice = [d1, d2];
     st.movesLeft = d1 === d2 ? [d1, d1, d1, d1] : [d1, d2];
     st.phase = 'move';
+    // GERİ AL fotoğrafı: adımlar bu tahtaya göre geri sarılır.
+    st.turnSnap = { points: [...st.points], bar: [...st.bar], off: [...st.off], movesLeft: [...st.movesLeft] };
     if (legalSteps(st, seat).length === 0) {
       st.matchLog.push(`${st.players[seat]!.name} ${d1}-${d2} attı — oynayacak hamle yok`);
       endTurn(st);
