@@ -246,7 +246,7 @@ export async function insertGift(
 ): Promise<void> {
   if (!supabaseConfigured()) return;
   try {
-    await fetch(`${URL}/rest/v1/gifts`, {
+    const r = await fetch(`${URL}/rest/v1/gifts`, {
       method: 'POST',
       headers: {
         apikey: SERVICE,
@@ -262,6 +262,10 @@ export async function insertGift(
         expires_at: expiresAtISO,
       }),
     });
+    // ⚠ r.ok kontrolü ŞART: eski kod HTTP hatasını yutuyordu → "ısmarladım ama
+    // başka oyunda yok" sınıfı sorunlar hiç iz bırakmadan kayboluyordu.
+    if (!r.ok) console.error('[supabase] insertGift HTTP', r.status, await r.text());
+    else console.log(`[gift] kalıcı kayıt: ${fromUser.slice(0, 8)}→${toUser.slice(0, 8)} tip=${giftType}`);
   } catch (e: any) {
     console.error('[supabase] insertGift:', e?.message);
   }

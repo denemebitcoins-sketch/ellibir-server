@@ -165,6 +165,7 @@ export class OkeyRoom extends Room {
       const hours = GIFT_HOURS[giftType] ?? 2;
       const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
       if (fromUid && toUid) insertGift(fromUid, toUid, giftType, 'table', expiresAt).catch(() => {});
+      else console.warn('[gift] KALICI KAYIT ATLANDI (uid yok) from=', fromSeat, fromUid ?? '-', 'to=', toSeat, toUid ?? '-');
       this.broadcast('giftSent', {
         from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
       });
@@ -221,6 +222,7 @@ export class OkeyRoom extends Room {
     }
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
     this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
     client.send('seat', { seat });
@@ -244,6 +246,7 @@ export class OkeyRoom extends Room {
     this.spectators.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
     this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
     client.send('seat', { seat });
