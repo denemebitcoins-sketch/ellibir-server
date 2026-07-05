@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, insertGift, deductDiamonds, canakBurst, fetchCanak, deductEntry } from '../supabase';
+import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry } from '../supabase';
 
 // 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -164,8 +164,7 @@ export class OkeyRoom extends Room {
       const fromName = this.seatNames.get(fromSeat) ?? `Oyuncu ${fromSeat + 1}`;
       const hours = GIFT_HOURS[giftType] ?? 2;
       const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
-      if (fromUid && toUid) insertGift(fromUid, toUid, giftType, 'table', expiresAt).catch(() => {});
-      else console.warn('[gift] KALICI KAYIT ATLANDI (uid yok) from=', fromSeat, fromUid ?? '-', 'to=', toSeat, toUid ?? '-');
+      // HEDİYE O MASAYA ÖZEL (kullanıcı kararı 2026-07-05): Supabase kalıcılığı KALDIRILDI — yalnız broadcast.
       this.broadcast('giftSent', {
         from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
       });
