@@ -200,6 +200,20 @@ export async function fetchCanak(game: string): Promise<number> {
  *  + TOPLULUK sohbetine sistem duyurusu düşür. Patlayan tutarı döner (0 = boş/başarısız). */
 export async function canakBurst(game: string, uid: string, name = ''): Promise<number> {
   if (!uid) return 0;
+  // 24 SAAT KURALI (kullanıcı): aynı kişi 24 saat içinde İKİNCİ kez patlatamaz.
+  try {
+    const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const r = await fetch(`${URL}/rest/v1/canak_events?user_id=eq.${uid}&created_at=gt.${cutoff}&select=id&limit=1`, {
+      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` },
+    });
+    if (r.ok) {
+      const arr = (await r.json()) as unknown[];
+      if (Array.isArray(arr) && arr.length > 0) {
+        console.log(`[canak] 24h kurali: uid=${uid} bugun zaten patlatti — atlandi`);
+        return 0;
+      }
+    }
+  } catch { /* kontrol başarısızsa patlatmayı engelleme */ }
   const amt = await rpcValue('canak_take', { p_game: game });
   if (!amt || amt <= 0) return 0;
   await rpc('add_chips', { p_user_id: uid, p_amount: amt });

@@ -483,3 +483,93 @@ create policy canak_events_select on public.canak_events
 
 -- BÖLÜM 34 doğrulama:
 --   select * from public.canak_events order by id desc limit 5;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 35) ADMİN ÖDÜLLERİ + ARKADAŞ SAYISI
+--   Admin, kullanıcıya mesaj + çip/elmas ödülü gönderir ("güzel bildirim için
+--   teşekkürler, 10.000 çip"). Kullanıcı oyuna girince modal görür, AL deyince
+--   claim_admin_reward RPC'si ATOMİK olarak hesaba işler (ikinci kez alınamaz).
+--   friend_count: profillerde "Arkadaşlar (N)" — RLS'e takılmadan sayı döner.
+-- ─────────────────────────────────────────────────────────────────────
+create table if not exists public.admin_rewards (
+  id         bigint generated always as identity primary key,
+  user_id    text   not null,
+  message    text   not null default '',
+  chips      bigint not null default 0,
+  diamonds   int    not null default 0,
+  admin_name text   not null default '',
+  claimed    boolean not null default false,
+  created_at timestamptz not null default now(),
+  claimed_at timestamptz
+);
+create index if not exists admin_rewards_user_idx on public.admin_rewards (user_id, claimed);
+
+alter table public.admin_rewards enable row level security;
+drop policy if exists admin_rewards_select on public.admin_rewards;
+create policy admin_rewards_select on public.admin_rewards
+  for select to authenticated
+  using (user_id = auth.uid()::text
+     or exists (select 1 from public.profiles pr where pr.id = auth.uid()::text and pr.role = 'admin'));
+drop policy if exists admin_rewards_insert on public.admin_rewards;
+create policy admin_rewards_insert on public.admin_rewards
+  for insert to authenticated
+  with check (exists (select 1 from public.profiles pr where pr.id = auth.uid()::text and pr.role = 'admin'));
+
+-- Ödülü AL (atomik; yalnız sahibi, yalnız bir kez). Ödenen çip miktarını döner (-1 = geçersiz).
+create or replace function public.claim_admin_reward(p_id bigint)
+returns bigint
+language plpgsql
+security definer
+as $$
+declare r record;
+begin
+  select * into r from public.admin_rewards
+   where id = p_id and user_id = auth.uid()::text and claimed = false
+   for update;
+  if r is null then return -1; end if;
+  update public.admin_rewards set claimed = true, claimed_at = now() where id = p_id;
+  update public.profiles
+     set chips = coalesce(chips,0) + r.chips,
+         diamonds = coalesce(diamonds,0) + r.diamonds
+   where id = r.user_id;
+  return r.chips;
+end;
+$$;
+
+-- Arkadaş sayısı (profil rozeti) — herkes herkesinkini SAYI olarak görebilir.
+create or replace function public.friend_count(p_user text)
+returns integer
+language sql
+security definer
+as $$
+  select count(*)::int from public.friendships
+   where status = 'accepted' and (requester = p_user or addressee = p_user);
+$$;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 36) FOTOĞRAF ONAY SİSTEMİ — yeni yüklenen profil fotoğrafı admin
+--   onayına düşer: pending → visible / rejected. Mevcut fotolar 'visible'
+--   (kırılma yok); YENİ yüklemede client 'pending' yazar ve foto onaylanana
+--   dek presence'a YAYINLANMAZ (heartbeat client tarafı).
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.profiles add column if not exists avatar_status text not null default 'visible';
+
+-- Admin foto kararı (visible/rejected) — içeride admin kontrolü.
+create or replace function public.admin_set_avatar_status(p_user text, p_status text)
+returns boolean
+language plpgsql
+security definer
+as $$
+begin
+  if not exists (select 1 from public.profiles pr where pr.id = auth.uid()::text and pr.role = 'admin') then
+    return false;
+  end if;
+  if p_status not in ('visible','rejected','pending','invisible') then return false; end if;
+  update public.profiles set avatar_status = p_status where id = p_user;
+  return true;
+end;
+$$;
+
+-- BÖLÜM 35/36 doğrulama:
+--   select proname from pg_proc where proname in ('claim_admin_reward','friend_count','admin_set_avatar_status');
+--   select column_name from information_schema.columns where table_name='profiles' and column_name='avatar_status';

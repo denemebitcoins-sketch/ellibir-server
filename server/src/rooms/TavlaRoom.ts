@@ -134,6 +134,8 @@ export class TavlaRoom extends Room {
       this.rematchVotes.clear();
       this.settled = false;
       this.game = createTavlaGame({ ...this.cfg, seed: Date.now() % 2147483647 });
+      this.canakGame = -1;   // yeni maç: gameNumber sayacı sıfırdan — patlama kontrolü kilitlenmesin
+      this.refreshCanak();   // "tekrar oyna sonrası çanak eski kalıyor" fix'i
       deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS — yeni maç yeni giriş
       for (const [st, name] of this.seatNames) {
         const p = this.game.players[st];
@@ -369,11 +371,15 @@ export class TavlaRoom extends Room {
     else this.preLog.push(msg);
   }
 
-  /* ── ÇANAK (BÖLÜM 33): MARS yapan İNSAN %3 şansla çanağı patlatır. ── */
+  /* ── ÇANAK (BÖLÜM 33): MARS yapan İNSAN %3 şansla çanağı patlatır.
+     Modal GARANTİSİ: patlama bilgisi SEQ'li olarak view'a da yazılır — broadcast kaçsa bile
+     (yarış/yeniden bağlanma) client sonraki push'ta sequence artışını görüp modalı açar. ── */
   private canakGame = -1;        // oyun başına TEK kontrol
   private canakAmount = 0;       // gösterge (bellek kopyası; view'a gider)
+  private canakSeq = 0;          // patlama sayacı (view garantisi)
+  private canakWin: { seat: number; name: string; amount: number } | null = null;
 
-  private refreshCanak() { fetchCanak('tavla').then((v) => { this.canakAmount = v; }).catch(() => {}); }
+  private refreshCanak() { fetchCanak('tavla').then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
 
   private maybeCanak() {
     if (!this.game || this.canakGame === this.game.gameNumber) return;
@@ -385,11 +391,13 @@ export class TavlaRoom extends Room {
     const MARS_P = 1.0; // TEST! normal: 0.03
     if (!uid || !this.game.mars || Math.random() >= MARS_P) { this.refreshCanak(); return; }
     canakBurst('tavla', uid, this.seatNames.get(w) ?? '').then((amt) => {
-      if (amt <= 0 || !this.game) return;
+      if (amt <= 0 || !this.game) { this.refreshCanak(); return; }
       this.canakAmount = 0;
       const name = this.seatNames.get(w) ?? `Oyuncu ${w + 1}`;
+      this.canakSeq += 1;
+      this.canakWin = { seat: w, name, amount: amt };
       this.game.matchLog.push(`🏺 ÇANAK PATLADI! ${name} ${amt} çip kazandı!`);
-      this.broadcast('canak', { seat: w, name, amount: amt });
+      this.broadcast('canak', { seat: w, name, amount: amt, seq: this.canakSeq });
       this.pushViews();
     }).catch(() => {});
   }
@@ -501,7 +509,8 @@ export class TavlaRoom extends Room {
       teamMode: false,
       totalSeats: 2, // tavla 1v1 — pot = 2×bet (bot bahsi sanal; ECONOMY §4)
       game: 'tavla', // çanak hedefi
-    }).catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
+    }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
+      .catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
   }
 
   /* ── GÖRÜNÜM ── */
@@ -540,6 +549,11 @@ export class TavlaRoom extends Room {
       v.preLog = waiting ? this.preLog.slice(-30) : [];
       v.rematchVotes = [...this.rematchVotes]; // maç sonu TEKRAR OYNA oy listesi
       v.canak = this.canakAmount;              // 🏺 çanak göstergesi
+      // Patlama GARANTİSİ: seq artışını gören client modalı açar (broadcast kaçsa bile).
+      v.canakSeq = this.canakSeq;
+      v.canakWinSeat = this.canakWin?.seat ?? -1;
+      v.canakWinName = this.canakWin?.name ?? '';
+      v.canakWinAmount = this.canakWin?.amount ?? 0;
     };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);

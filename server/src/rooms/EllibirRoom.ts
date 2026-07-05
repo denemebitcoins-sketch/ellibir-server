@@ -517,8 +517,10 @@ export class EllibirRoom extends Room {
      okey atarak %3 · çift %5 · çift+okey %8 (okey ile aynı tetikler). ── */
   private canakHand = -1;
   private canakAmount = 0;
+  private canakSeq = 0;          // patlama sayacı (view garantisi — broadcast kaçsa da modal açılır)
+  private canakWin: { seat: number; name: string; amount: number } | null = null;
 
-  private refreshCanak() { fetchCanak('51').then((v) => { this.canakAmount = v; }).catch(() => {}); }
+  private refreshCanak() { fetchCanak('51').then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
 
   private maybeCanak() {
     const hr: any = this.game?.lastHandResult;
@@ -531,11 +533,13 @@ export class EllibirRoom extends Room {
     const p = hr.okeyFinish && hr.pairFinish ? 0.08 : hr.pairFinish ? 0.05 : hr.okeyFinish ? 0.03 : 0;
     if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
     canakBurst('51', uid, this.seatNames.get(w) ?? '').then((amt) => {
-      if (amt <= 0 || !this.game) return;
+      if (amt <= 0 || !this.game) { this.refreshCanak(); return; }
       this.canakAmount = 0;
       const name = this.seatNames.get(w) ?? `Oyuncu ${w + 1}`;
+      this.canakSeq += 1;
+      this.canakWin = { seat: w, name, amount: amt };
       this.logEvent(`🏺 ÇANAK PATLADI! ${name} ${amt} çip kazandı!`);
-      this.broadcast('canak', { seat: w, name, amount: amt });
+      this.broadcast('canak', { seat: w, name, amount: amt, seq: this.canakSeq });
       this.pushViews();
     }).catch(() => {});
   }
@@ -559,7 +563,8 @@ export class EllibirRoom extends Room {
         teamMode: !!r.teamMode,
         scores: new Map(this.game.players.map((p: any) => [p.seat, p.totalScore])), // kademeli sıralama için
         game: '51', // çanak hedefi
-      }).catch((e) => console.error('[settle] hata:', e?.message));
+      }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
+        .catch((e) => console.error('[settle] hata:', e?.message));
       // Masa KAPANMAZ: 10sn (yazboz+kazanan gösterilir) sonra AYNI ayarla yeni maç.
       if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
       this.matchEndTimer = setTimeout(() => this.newMatch(), this.MATCH_END_MS);
@@ -661,6 +666,8 @@ export class EllibirRoom extends Room {
       if (p && name) p.name = name;
     }
     this.settled = false;
+    this.canakHand = -1;   // yeni maç: el sayacı sıfırdan — patlama kontrolü kilitlenmesin
+    this.refreshCanak();
     this.resetHandOrder();
     console.log('[EllibirRoom] yeni maç başladı (aynı masa)');
     this.pushViews();
@@ -711,6 +718,10 @@ export class EllibirRoom extends Room {
         sv.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
         sv.sorguMs = this.sorguDeadlineAt ? Math.max(0, this.sorguDeadlineAt - Date.now()) : 0;
         sv.canak = this.canakAmount; // 🏺 çanak göstergesi
+        sv.canakSeq = this.canakSeq;
+        sv.canakWinSeat = this.canakWin?.seat ?? -1;
+        sv.canakWinName = this.canakWin?.name ?? '';
+        sv.canakWinAmount = this.canakWin?.amount ?? 0;
         c.send('view', JSON.stringify(sv));
         return;
       }
@@ -725,6 +736,10 @@ export class EllibirRoom extends Room {
       view.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0; // geri sayım
       view.sorguMs = this.sorguDeadlineAt ? Math.max(0, this.sorguDeadlineAt - Date.now()) : 0; // sorgu geri sayımı
       view.canak = this.canakAmount; // 🏺 çanak göstergesi
+      view.canakSeq = this.canakSeq;
+      view.canakWinSeat = this.canakWin?.seat ?? -1;
+      view.canakWinName = this.canakWin?.name ?? '';
+      view.canakWinAmount = this.canakWin?.amount ?? 0;
       c.send('view', JSON.stringify(view));
     });
   }

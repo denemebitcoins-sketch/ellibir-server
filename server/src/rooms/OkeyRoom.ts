@@ -123,19 +123,7 @@ export class OkeyRoom extends Room {
       catch { client.send('moveError', { code: 'bad_json' }); return; }
       const r = applyOkeyMove(this.game, seat, cmd);
       if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
-      // SEÇİM FAZI: tüm oturan insanlar karar verdiyse listeyi 0.8sn'de kapat (görülsün diye kısa bekleme).
-      if ((this.game as any).bankoPhase && this.bankoTimer) {
-        const allDecided = [...this.seats.values()].every((s2) => (this.game as any).bankoChoice[s2] !== -1);
-        if (allDecided) {
-          clearTimeout(this.bankoTimer);
-          // Erken kapanış 3sn: karar listede OKUNSUN (0.8sn 'süre birden düştü' hissi veriyordu);
-          // kalan süre zaten 3sn'den azsa dokunma.
-          const kalanMs = Math.max(0, this.bankoDeadlineAt - Date.now());
-          const closeMs = Math.min(kalanMs, 3000);
-          this.bankoDeadlineAt = Date.now() + closeMs;
-          this.bankoTimer = setTimeout(() => this.finishBankoPhase(), closeMs);
-        }
-      }
+      this.maybeAccelerateBanko(); // insan kararı sonrası erken kapanış kontrolü
       if ((this.game as any).bankoPhase) { this.pushViews(); return; }
       this.afterChange();
     });
@@ -391,8 +379,10 @@ export class OkeyRoom extends Room {
      okey %3 · çift %5 · çift+okey %8. Patlayan tutarın tamamı bitirene; çanak sıfırlanır. ── */
   private canakEl = -1;          // el başına TEK kontrol
   private canakAmount = 0;       // gösterge (bellek kopyası; view'a gider)
+  private canakSeq = 0;          // patlama sayacı (view garantisi — broadcast kaçsa da modal açılır)
+  private canakWin: { seat: number; name: string; amount: number } | null = null;
 
-  private refreshCanak() { fetchCanak('okey').then((v) => { this.canakAmount = v; }).catch(() => {}); }
+  private refreshCanak() { fetchCanak('okey').then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
 
   private maybeCanak() {
     if (!this.game || this.canakEl === this.game.elNumber) return;
@@ -403,11 +393,13 @@ export class OkeyRoom extends Room {
     const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
     if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
     canakBurst('okey', uid, this.nameOfSeat(w)).then((amt) => {
-      if (amt <= 0 || !this.game) return;
+      if (amt <= 0 || !this.game) { this.refreshCanak(); return; }
       this.canakAmount = 0;
       const name = this.nameOfSeat(w);
+      this.canakSeq += 1;
+      this.canakWin = { seat: w, name, amount: amt };
       this.game.matchLog.push(`🏺 ÇANAK PATLADI! ${name} ${amt} çip kazandı!`);
-      this.broadcast('canak', { seat: w, name, amount: amt });
+      this.broadcast('canak', { seat: w, name, amount: amt, seq: this.canakSeq });
       this.pushViews();
     }).catch(() => {});
   }
@@ -475,6 +467,23 @@ export class OkeyRoom extends Room {
   /** BANKO SEÇİM FAZI: 5sn liste — kararlar canlı push'lanır; süre bitince kararsız PAS. */
   private bankoBotTimers: NodeJS.Timeout[] = [];
 
+  /** SEÇİM FAZI erken kapanışı: bağlı TÜM insanlar kararlıysa süreyi 3sn'e indir.
+   *  HER karar yolundan çağrılır — eski hali yalnız cmd handler'daydı; hakkını geçmiş elde
+   *  kullanan oyuncu HİÇ komut göndermediği için 2. el ve sonrası hızlandırma çalışmıyordu. */
+  private maybeAccelerateBanko() {
+    if (!this.game || !(this.game as any).bankoPhase || !this.bankoTimer) return;
+    const humans = [...this.seats.values()];
+    if (humans.length === 0) return;
+    const allDecided = humans.every((s2) => (this.game as any).bankoChoice[s2] !== -1);
+    if (!allDecided) return;
+    const kalanMs = Math.max(0, this.bankoDeadlineAt - Date.now());
+    const closeMs = Math.min(kalanMs, 3000);
+    if (closeMs >= kalanMs) return; // zaten 3sn altı
+    clearTimeout(this.bankoTimer);
+    this.bankoDeadlineAt = Date.now() + closeMs;
+    this.bankoTimer = setTimeout(() => this.finishBankoPhase(), closeMs);
+  }
+
   private enterBankoPhase() {
     if (!this.game) return;
     // HERKES hakkını kullandıysa liste HİÇ çıkmaz — el direkt başlar (kullanıcı kuralı).
@@ -491,6 +500,8 @@ export class OkeyRoom extends Room {
     beginBankoPhase(this.game);
     this.bankoDeadlineAt = Date.now() + this.BANKO_PHASE_MS;
     this.pushViews();
+    if (this.bankoTimer) clearTimeout(this.bankoTimer);
+    this.bankoTimer = setTimeout(() => this.finishBankoPhase(), this.BANKO_PHASE_MS);
     // BOT KARARLARI: 0.8-2.5sn rastgele gecikmeyle listeye CANLI düşer (%35 banko / %65 pas motor'da).
     for (let si = 0; si < 4; si++) {
       const pl = this.game.players[si]!;
@@ -505,8 +516,9 @@ export class OkeyRoom extends Room {
     }
     if (this.bankoTick) clearInterval(this.bankoTick);
     this.bankoTick = setInterval(() => this.pushViews(), 1000); // geri sayım canlı
-    if (this.bankoTimer) clearTimeout(this.bankoTimer);
-    this.bankoTimer = setTimeout(() => this.finishBankoPhase(), this.BANKO_PHASE_MS);
+    // İnsanların HEPSİ zaten kararlıysa (hak yanmış → otomatik PAS kilidi) süre BAŞTAN 3sn'e iner
+    // — eski akışta bu oyuncular hiç komut göndermediği için 2. el+ hızlandırma çalışmıyordu.
+    this.maybeAccelerateBanko();
   }
 
   private finishBankoPhase() {
@@ -538,7 +550,8 @@ export class OkeyRoom extends Room {
       teamMode: this.game.rules.teamMode,
       scores,
       game: 'okey', // çanak hedefi (düz + banko ortak çanak)
-    }).catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
+    }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
+      .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
   }
 
   /* ── GÖRÜNÜM ── */
@@ -576,6 +589,10 @@ export class OkeyRoom extends Room {
       v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
       v.bankoMs = this.bankoDeadlineAt > 0 ? Math.max(0, this.bankoDeadlineAt - Date.now()) : 0;
       v.canak = this.canakAmount; // 🏺 çanak göstergesi (bellek kopyası)
+      v.canakSeq = this.canakSeq;
+      v.canakWinSeat = this.canakWin?.seat ?? -1;
+      v.canakWinName = this.canakWin?.name ?? '';
+      v.canakWinAmount = this.canakWin?.amount ?? 0;
       v.preLog = waiting ? this.preLog.slice(-30) : [];
     };
     this.clients.forEach((c) => {

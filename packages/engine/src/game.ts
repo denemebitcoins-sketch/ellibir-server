@@ -121,6 +121,10 @@ function dealHand(state: GameState): GameState {
       openMode: null,
       isCift: false, // çift statüsü EL BAŞINA sıfırlanır
       openedOnTurn: null,
+      // ROZET FIX (kullanıcı bug'ı): açış değerleri de EL BAŞINA sıfırlanır — eski elin
+      // "5 çift"i yeni elde seri açana yapışıyordu (badge yanlış, yazboz doğruydu).
+      openingValue: 0,
+      openingPairs: 0,
     })),
     melds: [],
     stock,
