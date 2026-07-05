@@ -537,13 +537,16 @@ end;
 $$;
 
 -- Arkadaş sayısı (profil rozeti) — herkes herkesinkini SAYI olarak görebilir.
+-- NOT: friendships.requester/addressee UUID, p_user TEXT → ::uuid cast ŞART
+--   (profiles.id text / auth.uid() uuid ikiliğinin aynısı — BÖLÜM 8 dersi).
 create or replace function public.friend_count(p_user text)
 returns integer
 language sql
 security definer
 as $$
   select count(*)::int from public.friendships
-   where status = 'accepted' and (requester = p_user or addressee = p_user);
+   where status = 'accepted'
+     and (requester = p_user::uuid or addressee = p_user::uuid);
 $$;
 
 -- ─────────────────────────────────────────────────────────────────────
