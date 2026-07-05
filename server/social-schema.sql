@@ -642,3 +642,46 @@ revoke execute on function public.deduct_diamonds(text, int) from public, anon, 
 -- BÖLÜM 38 doğrulama:
 --   select proname from pg_proc where proname='deduct_diamonds';
 --   (test) select public.deduct_diamonds('<kendi-uid>', 1);  -- service rolüyle true dönmeli
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 39) deduct_diamonds ONARIM — BÖLÜM 38 ÇAKIŞMA DÜZELTMESİ
+--   deduct_diamonds Supabase'te 2026-07-01'den beri VARDI (şema dosyasına
+--   yazılmamıştı). BÖLÜM 38'in create'i farklı imzanın yanına İKİNCİ bir
+--   kopya yarattı → PostgREST aday seçemedi (ambiguous) → her hediye
+--   "Yetersiz elmas". Bu bölüm İSİMLE EŞLEŞEN TÜM kopyaları düşürüp tek
+--   kanonik (text,int) fonksiyonu bırakır + service_role'e açık EXECUTE.
+-- ─────────────────────────────────────────────────────────────────────
+do $$
+declare r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = 'deduct_diamonds'
+  loop
+    execute 'drop function ' || r.sig;
+  end loop;
+end $$;
+
+create function public.deduct_diamonds(p_user_id text, p_amount int)
+returns boolean
+language plpgsql
+security definer
+as $$
+declare cur int;
+begin
+  if p_amount is null or p_amount <= 0 then return false; end if;
+  select coalesce(diamonds, 0) into cur
+    from public.profiles where id = p_user_id for update;
+  if not found or cur < p_amount then return false; end if;
+  update public.profiles set diamonds = cur - p_amount where id = p_user_id;
+  return true;
+end;
+$$;
+revoke execute on function public.deduct_diamonds(text, int) from anon, authenticated;
+grant  execute on function public.deduct_diamonds(text, int) to service_role;
+
+-- Doğrulama (TEK satır dönmeli):
+--   select p.oid::regprocedure from pg_proc p
+--     join pg_namespace n on n.oid=p.pronamespace
+--    where n.nspname='public' and p.proname='deduct_diamonds';
