@@ -613,3 +613,32 @@ create policy reports_insert on public.reports
 -- BÖLÜM 37 doğrulama:
 --   select conname from pg_constraint where conname='reports_type_check';
 --   select proname from pg_proc where proname='my_report_count';
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 38) deduct_diamonds — HEDİYE ELMAS KESİNTİSİ (kayıp fonksiyon!)
+--   Odalar (Okey/Tavla/51) hediyede rpc/deduct_diamonds çağırıyordu ama
+--   fonksiyon HİÇ TANIMLANMAMIŞTI → RPC 404 → false → bakiye ne olursa olsun
+--   "Yetersiz elmas". ("1050 elmasım var, yetersiz diyor" kökü buydu.)
+--   Atomik: FOR UPDATE kilidi ile bakiye kontrol + düşüm tek adımda.
+--   Yalnız sunucu (service-role) çağırır — client'a EXECUTE yok.
+-- ─────────────────────────────────────────────────────────────────────
+create or replace function public.deduct_diamonds(p_user_id text, p_amount int)
+returns boolean
+language plpgsql
+security definer
+as $$
+declare cur int;
+begin
+  if p_amount is null or p_amount <= 0 then return false; end if;
+  select coalesce(diamonds, 0) into cur
+    from public.profiles where id = p_user_id for update;
+  if not found or cur < p_amount then return false; end if;
+  update public.profiles set diamonds = cur - p_amount where id = p_user_id;
+  return true;
+end;
+$$;
+revoke execute on function public.deduct_diamonds(text, int) from public, anon, authenticated;
+
+-- BÖLÜM 38 doğrulama:
+--   select proname from pg_proc where proname='deduct_diamonds';
+--   (test) select public.deduct_diamonds('<kendi-uid>', 1);  -- service rolüyle true dönmeli
