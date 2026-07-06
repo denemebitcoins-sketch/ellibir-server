@@ -223,14 +223,29 @@ describe('katlama küpü + teslim', () => {
     expect(st.matchScore[0]).toBe(4); // mars 2 × küp 2
   });
 
-  it('teslim ol: rakip küp değerince kazanır, mars sayılmaz', () => {
+  it('teslim teklifinde oyun hemen bitmez; rakip kabul ederse küp değerince oyun olur, mars sayılmaz', () => {
     const st = fresh(12);
-    const t = st.turn;
+    const t = st.turn, o = 1 - t;
     expect(applyTavlaMove(st, t, { t: 'resign' }).ok).toBe(true);
+    expect(st.gameEnded).toBe(false);
+    expect(st.pendingResign).toBe(t);
+    expect(applyTavlaMove(st, t, { t: 'acceptResign' }).ok).toBe(false); // cevabı rakip verir
+    expect(applyTavlaMove(st, o, { t: 'acceptResign' }).ok).toBe(true);
     expect(st.gameEnded).toBe(true);
     expect(st.gameWinner).toBe(1 - t);
     expect(st.matchScore[1 - t]).toBe(1);
     expect(st.mars).toBe(false);
+  });
+
+  it('teslim teklifi reddedilirse oyun aynı yerden devam eder', () => {
+    const st = fresh(13);
+    const t = st.turn, o = 1 - t;
+    expect(applyTavlaMove(st, t, { t: 'resign' }).ok).toBe(true);
+    expect(applyTavlaMove(st, o, { t: 'roll' }).ok).toBe(false);
+    expect(applyTavlaMove(st, o, { t: 'declineResign' }).ok).toBe(true);
+    expect(st.pendingResign).toBe(-1);
+    expect(st.gameEnded).toBe(false);
+    expect(applyTavlaMove(st, t, { t: 'roll' }).ok).toBe(true);
   });
 
   it('yeni oyunda küp sıfırlanır; autoTavlaMove bekleyen teklifi oto-kabul eder', () => {
@@ -240,11 +255,13 @@ describe('katlama küpü + teslim', () => {
     autoTavlaMove(st, o); // süre doldu senaryosu
     expect(st.cubeValue).toBe(2);
     applyTavlaMove(st, o, { t: 'resign' });
+    autoTavlaMove(st, t); // süre doldu senaryosu: teslim kabul
     expect(st.gameEnded).toBe(true);
     startNextGame(st);
     expect(st.cubeValue).toBe(1);
     expect(st.cubeOwner).toBe(-1);
     expect(st.pendingDouble).toBe(-1);
+    expect(st.pendingResign).toBe(-1);
   });
 });
 

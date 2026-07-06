@@ -4,7 +4,7 @@ import {
 
 /** Bot KATLAMA teklif etsin mi? Belirgin pip üstünlüğü + küp erişilebilir + tavan altı. */
 export function shouldOfferDouble(st: TavlaGameState, seat: number): boolean {
-  if (st.phase !== 'roll' || st.pendingDouble >= 0) return false;
+  if (st.phase !== 'roll' || st.pendingDouble >= 0 || st.pendingResign >= 0) return false;
   if (st.cubeOwner !== -1 && st.cubeOwner !== seat) return false;
   if (st.cubeValue >= 8) return false; // bot küpü aşırı şişirmesin
   const my = pipCount(st, seat), opp = pipCount(st, 1 - seat);
@@ -15,6 +15,15 @@ export function shouldOfferDouble(st: TavlaGameState, seat: number): boolean {
 export function shouldTakeDouble(st: TavlaGameState, seat: number): boolean {
   const my = pipCount(st, seat), opp = pipCount(st, 1 - seat);
   return my <= opp * 1.35 + 8;
+}
+
+/** Bot teslim teklifini kabul etsin mi? Mars şansı belirginse reddeder. */
+export function shouldAcceptResign(st: TavlaGameState, seat: number): boolean {
+  const offerer = 1 - seat;
+  if (st.off[offerer]! > 0) return true; // Mars zaten kaçtı, oyun olsun.
+  const my = pipCount(st, seat), opp = pipCount(st, offerer);
+  const strongMarsChance = my + 18 < opp || st.bar[offerer]! > 0 || st.off[seat]! >= 8;
+  return !strongMarsChance;
 }
 
 /* ════════ POZİSYON DEĞERLENDİRME (tur-seviyesi arama için) ════════
@@ -122,6 +131,7 @@ function cloneState(st: TavlaGameState): TavlaGameState {
     dice: st.dice.slice(),
     movesLeft: st.movesLeft.slice(),
     openRoll: st.openRoll.slice(),
+    pendingResign: st.pendingResign,
     matchScore: st.matchScore.slice(),
     gameDeltas: st.gameDeltas,   // salt-okunur kullanılır
     matchLog: [],                // plan simülasyonunda log biriktirme

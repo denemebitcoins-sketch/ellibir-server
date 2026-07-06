@@ -1,7 +1,7 @@
 import { Room, Client } from '@colyseus/core';
 import {
   createTavlaGame, startNextGame, applyTavlaMove, autoTavlaMove, bestTavlaStep,
-  shouldOfferDouble, shouldTakeDouble, DEFAULT_TAVLA_RULES,
+  shouldOfferDouble, shouldTakeDouble, shouldAcceptResign, DEFAULT_TAVLA_RULES,
 } from '../../../packages/engine/src/tavla';
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
@@ -439,6 +439,34 @@ export class TavlaRoom extends Room {
   private scheduleTurn() {
     if (!this.game || this.game.gameEnded || this.game.matchEnded) return;
     this.clearTurnTimers();
+
+    // ── TESLİM CEVABI BEKLENİYOR: rakip kabul ederse oyun olsun, reddederse oyun sürer ──
+    if (this.game.pendingResign >= 0) {
+      const responder = 1 - this.game.pendingResign;
+      const rp = this.game.players[responder]!;
+      const rBot = rp.isBot || this.abandoned.has(responder);
+      if (rBot) {
+        this.turnDeadlineAt = 0;
+        this.botTimer = setTimeout(() => {
+          this.botTimer = null;
+          if (!this.game || this.game.pendingResign < 0) { this.afterChange(); return; }
+          const accept = shouldAcceptResign(this.game, responder);
+          applyTavlaMove(this.game, responder, { t: accept ? 'acceptResign' : 'declineResign' });
+          this.afterChange();
+        }, 1400);
+      } else {
+        const ms = 20000 + this.TURN_GRACE_MS;
+        this.turnDeadlineAt = Date.now() + ms;
+        this.humanTimer = setTimeout(() => {
+          this.humanTimer = null;
+          if (!this.game || this.game.pendingResign < 0) { this.afterChange(); return; }
+          applyTavlaMove(this.game, responder, { t: 'acceptResign' }); // süre doldu → oyun olsun
+          this.logEvent(`${this.nameOfSeat(responder)} süresi doldu — teslim kabul sayıldı`);
+          this.afterChange();
+        }, ms);
+      }
+      return;
+    }
 
     // ── KATLAMA CEVABI BEKLENİYOR: cevap verecek olan rakip (teklif eden DEĞİL) ──
     if (this.game.pendingDouble >= 0) {

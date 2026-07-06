@@ -6,4 +6,4 @@ export {
 export type {
   TavlaGameState, TavlaPlayer, TavlaMove, TavlaMoveResult, TavlaRuleConfig, TavlaStep,
 } from './game';
-export { playTavlaBotTurn, bestTavlaStep, shouldOfferDouble, shouldTakeDouble } from './bot';
+export { playTavlaBotTurn, bestTavlaStep, shouldOfferDouble, shouldTakeDouble, shouldAcceptResign } from './bot';

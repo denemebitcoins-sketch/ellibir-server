@@ -7,7 +7,8 @@ import { createRng } from '../deck';
  * kırık rakip evinden girer; tüm pullar evdeyse TOPLAMA (tam sayı; daha büyük zarla en geriden);
  * oyunu ilk toplayan kazanır — rakip HİÇ toplayamadıysa MARS (2 puan), yoksa 1 puan;
  * KATLAMA KÜPÜ (mobil standart): sıra sende + zar atmadan önce, küp ortada/sende ise ×2 teklif;
- * rakip KABUL (küp rakibe geçer) ya da ÇEKİLİR (eski küp değerince kaybeder). TESLİM OL = küp değeri.
+ * rakip KABUL (küp rakibe geçer) ya da ÇEKİLİR (eski küp değerince kaybeder).
+ * TESLİM teklif edilir; rakip kabul ederse oyun olsun (mars değil), reddederse oyun sürer.
  * Oyun puanı = (mars?2:1) × küp. Maç `targetScore` puana (vars. 5).
  *
  * Yön: seat0 23→0 (ev 0-5), seat1 0→23 (ev 18-23). points[i] işaretli: + seat0 adedi, − seat1.
@@ -48,6 +49,7 @@ export interface TavlaGameState {
   cubeValue: number;         // 1,2,4,...,64
   cubeOwner: number;         // -1 ortada (ikisi de katlayabilir), 0/1 sahibi
   pendingDouble: number;     // teklifi bekleyen değil TEKLİF EDEN koltuk (-1 yok); rakip cevaplamalı
+  pendingResign: number;     // teslim teklif eden koltuk (-1 yok); rakip kabul/red cevaplamalı
   // GERİ AL: zar atıldığı andaki tahta fotoğrafı — tur içinde 'undo' TÜMÜNÜ (kırık dahil)
   // bu fotoğrafa döndürür. Sıra rakibe geçince işlevsiz kalır (yeni roll üzerine yazar).
   turnSnap?: { points: number[]; bar: number[]; off: number[]; movesLeft: number[] } | null;
@@ -62,7 +64,9 @@ export type TavlaMove =
   | { t: 'double' }        // KATLAMA teklifi (sıra bende, zar atmadan; küp ortada/bende)
   | { t: 'takeDouble' }    // rakip kabul: küp ×2, sahiplik kabul edene geçer
   | { t: 'dropDouble' }    // rakip çekilir: teklif eden ESKİ küp değerince kazanır
-  | { t: 'resign' };       // TESLİM OL: rakip küp değerince kazanır (her an)
+  | { t: 'resign' }        // TESLİM teklif et: rakip kabul ederse oyun olsun
+  | { t: 'acceptResign' }  // rakip teslim teklifini kabul eder: mars sayılmaz
+  | { t: 'declineResign' };// rakip teslim teklifini reddeder: oyun sürer
 
 function nextDie(state: TavlaGameState): number {
   state.rollCount++;
@@ -83,7 +87,7 @@ export function createTavlaGame(opts: {
     turn: 0, phase: 'roll', dice: [0, 0], movesLeft: [], openRoll: [0, 0],
     gameEnded: false, matchEnded: false, gameWinner: -1, mars: false, endReason: '',
     matchScore: [0, 0], gameDeltas: [], matchLog: [],
-    cubeValue: 1, cubeOwner: -1, pendingDouble: -1,
+    cubeValue: 1, cubeOwner: -1, pendingDouble: -1, pendingResign: -1,
     turnSnap: null,
   };
   startNextGame(st);
@@ -101,7 +105,7 @@ export function startNextGame(st: TavlaGameState): void {
   st.bar = [0, 0]; st.off = [0, 0];
   st.dice = [0, 0]; st.movesLeft = [];
   st.gameEnded = false; st.gameWinner = -1; st.mars = false; st.endReason = '';
-  st.cubeValue = 1; st.cubeOwner = -1; st.pendingDouble = -1;
+  st.cubeValue = 1; st.cubeOwner = -1; st.pendingDouble = -1; st.pendingResign = -1;
   st.turnSnap = null;
   // Başlama atışı: eşitse yeniden.
   let a = 0, b = 0;
@@ -220,12 +224,28 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
 
   // ── KATLAMA / TESLİM (sıra şartından bağımsız hamleler önce) ──
   if (move.t === 'resign') {
-    endGameWin(st, 1 - seat, st.cubeValue, 'resign');
-    st.matchLog.push(`${st.players[seat]!.name} TESLİM OLDU`);
+    if (st.pendingDouble >= 0) return { ok: false, error: 'katlama cevabı bekleniyor' };
+    if (st.pendingResign >= 0) return { ok: false, error: 'teslim cevabı bekleniyor' };
+    st.pendingResign = seat;
+    st.matchLog.push(`${st.players[seat]!.name} teslim teklif etti — oyun olsun`);
+    return { ok: true };
+  }
+  if (move.t === 'acceptResign' || move.t === 'declineResign') {
+    if (st.pendingResign < 0) return { ok: false, error: 'teslim teklifi yok' };
+    if (seat === st.pendingResign) return { ok: false, error: 'cevabı rakip verir' };
+    const offerer = st.pendingResign;
+    st.pendingResign = -1;
+    if (move.t === 'acceptResign') {
+      st.matchLog.push(`${st.players[seat]!.name} teslim teklifini KABUL etti — oyun olsun`);
+      endGameWin(st, 1 - offerer, st.cubeValue, 'resign');
+    } else {
+      st.matchLog.push(`${st.players[seat]!.name} teslim teklifini REDDETTİ — oyun devam`);
+    }
     return { ok: true };
   }
   if (move.t === 'takeDouble' || move.t === 'dropDouble') {
     if (st.pendingDouble < 0) return { ok: false, error: 'katlama teklifi yok' };
+    if (st.pendingResign >= 0) return { ok: false, error: 'teslim cevabı bekleniyor' };
     if (seat === st.pendingDouble) return { ok: false, error: 'cevabı rakip verir' };
     if (move.t === 'takeDouble') {
       st.cubeValue = Math.min(64, st.cubeValue * 2);
@@ -242,6 +262,7 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
     return { ok: true };
   }
   if (st.pendingDouble >= 0) return { ok: false, error: 'katlama cevabı bekleniyor' };
+  if (st.pendingResign >= 0) return { ok: false, error: 'teslim cevabı bekleniyor' };
   if (st.turn !== seat) return { ok: false, error: 'sıra sende değil' };
   if (move.t === 'double') {
     if (st.phase !== 'roll') return { ok: false, error: 'katlama zar atmadan önce yapılır' };
@@ -306,6 +327,8 @@ function endGameWin(st: TavlaGameState, seat: number, ptsOverride?: number, reas
   st.gameWinner = seat;
   st.mars = mars;
   st.endReason = reason;
+  st.pendingDouble = -1;
+  st.pendingResign = -1;
   st.matchLog.push(`${st.players[seat]!.name} oyunu ${mars ? 'MARS ile' : 'kazandı'} (${pts} puan${st.cubeValue > 1 ? ', küp ×' + st.cubeValue : ''}) — skor ${st.matchScore[0]}-${st.matchScore[1]}`);
   if (st.matchScore[seat]! >= st.rules.targetScore) {
     st.matchEnded = true;
@@ -326,10 +349,16 @@ export function pipCount(st: TavlaGameState, pl: number): number {
 /** Süre dolunca: zar at (gerekirse) + kalan zarları ilk geçerli hamleyle oyna. */
 export function autoTavlaMove(st: TavlaGameState, seat: number): void {
   if (st.gameEnded || st.matchEnded) return;
+  if (st.pendingResign >= 0 && st.pendingResign !== seat) {
+    applyTavlaMove(st, seat, { t: 'acceptResign' }); // süre doldu → oyun olsun
+    return;
+  }
+  if (st.pendingResign >= 0) return;
   if (st.pendingDouble >= 0 && st.pendingDouble !== seat) {
     applyTavlaMove(st, seat, { t: 'takeDouble' }); // süre doldu → oto-kabul
     return;
   }
+  if (st.pendingDouble >= 0) return;
   if (st.turn !== seat) return;
   if (st.phase === 'roll') applyTavlaMove(st, seat, { t: 'roll' });
   let guard = 0;
