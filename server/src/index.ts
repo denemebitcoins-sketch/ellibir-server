@@ -14,6 +14,12 @@ const port = Number(process.env.PORT) || 2567;
 
 const app = express();
 app.get('/', (_req, res) => res.send('Elli Bir Colyseus sunucusu çalışıyor ✦'));
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  service: 'ellibir-server',
+  okey101Deal: true,
+  commit: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local',
+}));
 
 const httpServer = createServer(app);
 // DÜŞME ALGISI HIZLI OLSUN (P1-a): varsayılan ping ~20-60s → oyuncu kopunca onLeave geç tetikleniyor,
