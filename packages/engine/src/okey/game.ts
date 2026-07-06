@@ -390,7 +390,8 @@ function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][])
   if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
   if (state.phase !== 'discard') return { ok: false, error: 'açmak için önce taş çekmelisin' };
   const p = state.players[seat]!;
-  if (p.hasOpened) return { ok: false, error: 'zaten açtın' };
+  const alreadyOpened = p.hasOpened;
+  if (p.hasOpened && p.openMode === 'pairs') return { ok: false, error: 'çift açan seri açamaz' };
   const picked = pickGroupsFromHand(p, groups);
   if (typeof picked === 'string') return { ok: false, error: picked };
   if (picked.length === 0) return { ok: false, error: 'açmak için per seç' };
@@ -402,16 +403,20 @@ function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][])
     total += c.points;
     melds.push({ id: `m${state.nextMeldId++}`, ownerSeat: seat, kind: c.kind, tiles: g, points: c.points });
   }
-  const min = yuzbirOpeningMin(state);
-  if (total < min) return { ok: false, error: `açmak için en az ${min} gerek` };
+  if (!p.hasOpened) {
+    const min = yuzbirOpeningMin(state);
+    if (total < min) return { ok: false, error: `açmak için en az ${min} gerek` };
+  }
   removeTiles(p, melds.flatMap((m) => m.tiles.map((t) => t.id)));
-  p.hasOpened = true;
-  p.openMode = 'melds';
-  p.openingPoints = total;
-  p.openingPairs = 0;
-  state.yuzbirMaxOpenPoints = Math.max(state.yuzbirMaxOpenPoints, total);
+  if (!p.hasOpened) {
+    p.hasOpened = true;
+    p.openMode = 'melds';
+    p.openingPoints = total;
+    p.openingPairs = 0;
+    state.yuzbirMaxOpenPoints = Math.max(state.yuzbirMaxOpenPoints, total);
+  }
   state.openMelds.push(...melds);
-  state.matchLog.push(`${p.name} ${total} ile seri açtı`);
+  state.matchLog.push(alreadyOpened ? `${p.name} per ekledi` : `${p.name} ${total} ile seri açtı`);
   return { ok: true };
 }
 
@@ -419,11 +424,14 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
   if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
   if (state.phase !== 'discard') return { ok: false, error: 'açmak için önce taş çekmelisin' };
   const p = state.players[seat]!;
-  if (p.hasOpened) return { ok: false, error: 'zaten açtın' };
+  const alreadyOpened = p.hasOpened;
+  if (p.hasOpened && p.openMode !== 'pairs') return { ok: false, error: 'seri açan çift açamaz' };
   const picked = pickGroupsFromHand(p, pairs);
   if (typeof picked === 'string') return { ok: false, error: picked };
-  const min = yuzbirPairOpeningMin(state);
-  if (picked.length < min) return { ok: false, error: `çift açmak için en az ${min} çift gerek` };
+  if (!p.hasOpened) {
+    const min = yuzbirPairOpeningMin(state);
+    if (picked.length < min) return { ok: false, error: `çift açmak için en az ${min} çift gerek` };
+  }
   const melds: OkeyPublicMeld[] = [];
   for (const g of picked) {
     if (g.length !== 2 || !isValidPair(g, state.okeyColor, state.okeyRank))
@@ -432,13 +440,15 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
     melds.push({ id: `m${state.nextMeldId++}`, ownerSeat: seat, kind: 'pair', tiles: g, points: c.points });
   }
   removeTiles(p, melds.flatMap((m) => m.tiles.map((t) => t.id)));
-  p.hasOpened = true;
-  p.openMode = 'pairs';
-  p.openingPoints = 0;
-  p.openingPairs = melds.length;
-  state.yuzbirMaxOpenPairs = Math.max(state.yuzbirMaxOpenPairs, melds.length);
+  if (!p.hasOpened) {
+    p.hasOpened = true;
+    p.openMode = 'pairs';
+    p.openingPoints = 0;
+    p.openingPairs = melds.length;
+    state.yuzbirMaxOpenPairs = Math.max(state.yuzbirMaxOpenPairs, melds.length);
+  }
   state.openMelds.push(...melds);
-  state.matchLog.push(`${p.name} ${melds.length} çift ile açtı`);
+  state.matchLog.push(alreadyOpened ? `${p.name} çift ekledi` : `${p.name} ${melds.length} çift ile açtı`);
   return { ok: true };
 }
 

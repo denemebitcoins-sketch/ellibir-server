@@ -458,6 +458,24 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(applyOkeyMove(st, 1, { t: 'openPairs', pairs: p5.map((x) => x.map((z) => z.id)) } as any).ok).toBe(false);
   });
 
+  it('açtıktan sonra ek per açabilir; ilk açılış puanı ve katlamalı eşik sabit kalır', () => {
+    const st = g101();
+    const first = [
+      [t('R', 10), t('R', 11), t('R', 12), t('R', 13)],
+      [t('Y', 10), t('Y', 11), t('Y', 12), t('Y', 13)],
+      [t('B', 10), t('B', 11), t('B', 12)],
+    ];
+    const extra = [t('K', 4), t('K', 5), t('K', 6)];
+    st.players[0]!.hand = first.flat().concat(extra, [t('R', 1)]);
+    expect(applyOkeyMove(st, 0, { t: 'open', groups: first.map((x) => x.map((z) => z.id)) } as any).ok).toBe(true);
+    expect(st.players[0]!.openingPoints).toBe(125);
+    expect(yuzbirOpeningMin(st)).toBe(126);
+    expect(applyOkeyMove(st, 0, { t: 'open', groups: [extra.map((z) => z.id)] } as any).ok).toBe(true);
+    expect(st.openMelds.length).toBe(4);
+    expect(st.players[0]!.openingPoints).toBe(125);
+    expect(yuzbirOpeningMin(st)).toBe(126);
+  });
+
   it('101 bitişte açmayan oyuncuya 202 yazar, bitiren -101 alır', () => {
     const st = g101();
     const open = [
