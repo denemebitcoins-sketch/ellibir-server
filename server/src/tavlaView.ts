@@ -1,5 +1,6 @@
 import { pipCount } from '../../packages/engine/src/tavla';
 import type { TavlaGameState } from '../../packages/engine/src/tavla';
+import { VIEW_VERSION } from './viewContract';
 
 /**
  * TAVLA istemci görünümü (otoriter). Tavlada GİZLİ BİLGİ YOK → tüm tahta herkese açık;
@@ -9,6 +10,7 @@ import type { TavlaGameState } from '../../packages/engine/src/tavla';
 export function tavlaViewFor(state: TavlaGameState | null, seat: number): Record<string, unknown> {
   if (!state) return emptyTavlaView(seat);
   return {
+    viewVersion: VIEW_VERSION,
     game: 'tavla',
     seat,
     spectator: seat < 0,
@@ -45,6 +47,7 @@ export function tavlaViewFor(state: TavlaGameState | null, seat: number): Record
 
 export function emptyTavlaView(seat: number): Record<string, unknown> {
   return {
+    viewVersion: VIEW_VERSION,
     game: 'tavla', seat, spectator: seat < 0,
     gameNumber: 0, targetScore: 5, turnTimerSeconds: 45,
     turn: -1, phase: 'roll',

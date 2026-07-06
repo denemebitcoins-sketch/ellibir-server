@@ -685,3 +685,102 @@ grant  execute on function public.deduct_diamonds(text, int) to service_role;
 --   select p.oid::regprocedure from pg_proc p
 --     join pg_namespace n on n.oid=p.pronamespace
 --    where n.nspname='public' and p.proname='deduct_diamonds';
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 40) PROFILES EKONOMİ KALKANI — CLIENT HASSAS ALAN YAZAMAZ
+--   Unity profil push'u artık yalnız sosyal/profil alanlarını gönderir. Bu DB kalkanı da
+--   kötü niyetli veya eski client chips/diamonds/role/vip/stat yazmaya kalkarsa değeri
+--   INSERT'te güvenli başlangıca, UPDATE'te eski haline sabitler.
+--   Service-role ve admin akışları serbesttir; ekonomi RPC'leri bu yüzden etkilenmez.
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.profiles add column if not exists chips bigint not null default 5000;
+alter table public.profiles add column if not exists diamonds int not null default 5;
+alter table public.profiles add column if not exists matches integer not null default 0;
+alter table public.profiles add column if not exists wins integer not null default 0;
+alter table public.profiles add column if not exists best_streak integer not null default 0;
+alter table public.profiles add column if not exists cur_streak integer not null default 0;
+alter table public.profiles add column if not exists total_won bigint not null default 0;
+alter table public.profiles add column if not exists vip_until timestamptz;
+alter table public.profiles add column if not exists last_daily date;
+alter table public.profiles add column if not exists daily_day integer not null default 0;
+alter table public.profiles add column if not exists vip_daily_day integer not null default 0;
+alter table public.profiles add column if not exists role text not null default 'normal';
+alter table public.profiles add column if not exists banned boolean not null default false;
+alter table public.profiles add column if not exists chat_banned_until timestamptz;
+alter table public.profiles add column if not exists game_banned_until timestamptz;
+alter table public.profiles add column if not exists avatar_status text not null default 'visible';
+
+create or replace function public.profiles_guard_client_sensitive()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  jwt_role text := coalesce(auth.role(), '');
+  is_admin boolean := false;
+begin
+  if jwt_role = 'service_role' or current_user in ('postgres', 'service_role') then
+    return new;
+  end if;
+
+  if auth.uid() is not null then
+    select exists(
+      select 1 from public.profiles p
+       where p.id::text = auth.uid()::text and p.role = 'admin'
+    ) into is_admin;
+  end if;
+
+  if is_admin then
+    return new;
+  end if;
+
+  if TG_OP = 'INSERT' then
+    new.chips := 5000;
+    new.diamonds := 5;
+    new.matches := 0;
+    new.wins := 0;
+    new.best_streak := 0;
+    new.cur_streak := 0;
+    new.total_won := 0;
+    new.vip_until := null;
+    new.last_daily := null;
+    new.daily_day := 0;
+    new.vip_daily_day := 0;
+    new.role := 'normal';
+    new.banned := false;
+    new.chat_banned_until := null;
+    new.game_banned_until := null;
+    new.avatar_status := 'visible';
+  elsif TG_OP = 'UPDATE' then
+    new.chips := old.chips;
+    new.diamonds := old.diamonds;
+    new.matches := old.matches;
+    new.wins := old.wins;
+    new.best_streak := old.best_streak;
+    new.cur_streak := old.cur_streak;
+    new.total_won := old.total_won;
+    new.vip_until := old.vip_until;
+    new.last_daily := old.last_daily;
+    new.daily_day := old.daily_day;
+    new.vip_daily_day := old.vip_daily_day;
+    new.role := old.role;
+    new.banned := old.banned;
+    new.chat_banned_until := old.chat_banned_until;
+    new.game_banned_until := old.game_banned_until;
+    new.avatar_status := old.avatar_status;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_profiles_guard_client_sensitive on public.profiles;
+create trigger trg_profiles_guard_client_sensitive
+before insert or update on public.profiles
+for each row execute function public.profiles_guard_client_sensitive();
+
+-- BÖLÜM 40 doğrulama:
+--   select tgname from pg_trigger where tgname='trg_profiles_guard_client_sensitive';
+--   authenticated client update chips/diamonds denemesi eski değerde kalmalı;
+--   service_role RPC add_chips/deduct_chips çalışmaya devam etmeli.

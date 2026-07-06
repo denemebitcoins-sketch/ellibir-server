@@ -21,6 +21,10 @@ export interface FakeOkeyTile {
 
 export type OkeyTile = NormalOkeyTile | FakeOkeyTile;
 
+export function isNormalOkeyTile(tile: OkeyTile): tile is NormalOkeyTile {
+  return tile.fake === false;
+}
+
 /** Bir taşın oyun içi "etkin kimliği": okey taşı = joker (her şey yerine),
  *  sahte okey = okeyin renk+sayısı, diğerleri kendisi. */
 export interface TileIdentity {

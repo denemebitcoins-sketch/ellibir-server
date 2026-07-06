@@ -8,7 +8,11 @@
   },
   "scripts": {
     "start": "ts-node --transpile-only src/index.ts",
-    "dev": "ts-node-dev --transpile-only --respawn src/index.ts"
+    "dev": "ts-node-dev --transpile-only --respawn src/index.ts",
+    "typecheck": "tsc --noEmit --pretty false",
+    "test:engine": "vitest run --root ..",
+    "test": "npm run test:engine",
+    "verify": "npm run typecheck && npm test"
   },
   "dependencies": {
     "@colyseus/schema": "^4.0.7",
@@ -20,6 +24,7 @@
     "@types/node": "^20.11.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.10"
   }
 }

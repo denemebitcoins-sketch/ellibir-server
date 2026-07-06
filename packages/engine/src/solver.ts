@@ -1,4 +1,5 @@
 import type { Card, NormalCard } from './types';
+import { isNormalCard } from './types';
 import { SUITS } from './types';
 import type { RuleConfig } from './rules';
 import { analyzeCards } from './melds';
@@ -51,7 +52,7 @@ export function enumerateCandidateMelds(hand: readonly Card[], rules: RuleConfig
   // KÜT adayları: rank başına farklı renkler + jokerler.
   const byRank = new Map<number, NormalCard[]>();
   for (const c of hand) {
-    if (c.joker) continue;
+    if (!isNormalCard(c)) continue;
     const list = byRank.get(c.rank) ?? [];
     list.push(c);
     byRank.set(c.rank, list);
@@ -78,7 +79,7 @@ export function enumerateCandidateMelds(hand: readonly Card[], rules: RuleConfig
 
   // SERİ adayları: renk başına ardışık pencereler, joker boşluk doldurur.
   for (const suit of SUITS) {
-    const ofSuit = hand.filter((c): c is NormalCard => !c.joker && c.suit === suit);
+    const ofSuit = hand.filter((c): c is NormalCard => isNormalCard(c) && c.suit === suit);
     if (ofSuit.length === 0) continue;
     const byPos = new Map<number, NormalCard>();
     for (const c of ofSuit) {

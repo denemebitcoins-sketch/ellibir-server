@@ -1,7 +1,7 @@
 import { createRng, shuffle } from '../deck';
 import type { Rng } from '../deck';
 import type { FakeOkeyTile, NormalOkeyTile, OkeyColor, OkeyRank, OkeyTile, TileIdentity } from './types';
-import { OKEY_COLORS, OKEY_RANKS } from './types';
+import { OKEY_COLORS, OKEY_RANKS, isNormalOkeyTile } from './types';
 
 export { createRng, shuffle };
 export type { Rng };
@@ -29,13 +29,13 @@ export function nextRank(rank: OkeyRank): OkeyRank {
 
 /** Taşın etkin kimliği: okey → joker; sahte okey → okeyin renk+sayısı; diğerleri kendisi. */
 export function identityOf(tile: OkeyTile, okeyColor: OkeyColor, okeyRank: OkeyRank): TileIdentity {
-  if (tile.fake) return { wild: false, color: okeyColor, rank: okeyRank };
+  if (!isNormalOkeyTile(tile)) return { wild: false, color: okeyColor, rank: okeyRank };
   if (tile.color === okeyColor && tile.rank === okeyRank) return { wild: true, color: okeyColor, rank: okeyRank };
   return { wild: false, color: tile.color, rank: tile.rank };
 }
 
 export function isOkeyTile(tile: OkeyTile, okeyColor: OkeyColor, okeyRank: OkeyRank): boolean {
-  return !tile.fake && tile.color === okeyColor && tile.rank === okeyRank;
+  return isNormalOkeyTile(tile) && tile.color === okeyColor && tile.rank === okeyRank;
 }
 
 export interface OkeyDealResult {
@@ -53,7 +53,7 @@ export function dealOkey(seed: number, dealerSeat: number): OkeyDealResult {
 
   // Gösterge: karışık desteden sahte olmayan İLK taş (deterministik).
   let gIdx = -1;
-  for (let i = 0; i < deck.length; i++) if (!deck[i]!.fake) { gIdx = i; break; }
+  for (let i = 0; i < deck.length; i++) if (isNormalOkeyTile(deck[i]!)) { gIdx = i; break; }
   const gosterge = deck[gIdx] as NormalOkeyTile;
   deck.splice(gIdx, 1);
 

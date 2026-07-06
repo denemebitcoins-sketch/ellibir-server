@@ -1,4 +1,5 @@
 import type { NormalOkeyTile, OkeyColor, OkeyFinishKind, OkeyRank, OkeyTile } from './types';
+import { isNormalOkeyTile } from './types';
 import type { OkeyRuleConfig } from './rules';
 import { DEFAULT_OKEY_RULES } from './rules';
 import { dealOkey, isOkeyTile, identityOf } from './deck';
@@ -282,7 +283,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
 function showGosterge(state: OkeyGameState, p: OkeyPlayer): OkeyMoveResult {
   if (p.showedGosterge) return { ok: false, error: 'zaten gösterdin' };
   if (p.discardCount > 0) return { ok: false, error: 'gösterge yalnız ilk taşını atmadan önce gösterilir' };
-  const has = p.hand.some((t) => !t.fake && t.color === state.gosterge.color && t.rank === state.gosterge.rank);
+  const has = p.hand.some((t) => isNormalOkeyTile(t) && t.color === state.gosterge.color && t.rank === state.gosterge.rank);
   if (!has) return { ok: false, error: 'gösterge teki elinde yok' };
   p.showedGosterge = true;
   // KAHVE USULÜ: gösteren KENDİ cezasından düşer (rakiplere ceza yazılmaz).

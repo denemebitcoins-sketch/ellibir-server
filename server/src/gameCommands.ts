@@ -39,7 +39,7 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
   } else if (cmd.t === 'playJoker') {
     turnGuard();
     if (typeof cmd.meldId !== 'string' || typeof cmd.cardId !== 'string') throw new CmdError('invalid_move');
-    state = applyMove(state, { type: 'extend', meldId: cmd.meldId, cardId: cmd.cardId, preferLeft: cmd.end === 'left' });
+    state = applyMove(state, { type: 'extend', meldId: cmd.meldId, cardId: cmd.cardId });
 
   } else if (cmd.t === 'openSelected') {
     turnGuard();
@@ -53,7 +53,7 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
       // karşılığı). Tek grup olarak göndermek (eski hata) seri+küt karışık seçimi geçersiz
       // kılıp engine'i reddettiriyordu (client 101 puan görse de). Her grup ayrı meld açılır.
       const byId = new Map((player?.hand ?? []).map((c: any) => [c.id, c]));
-      const selCards = (cmd.cards as string[]).map((id) => byId.get(id)).filter(Boolean);
+      const selCards = (cmd.cards as string[]).map((id) => byId.get(id)).filter(Boolean) as any[];
       if (selCards.length !== cmd.cards.length) throw new CmdError('invalid_move', 'Seçili kart elde değil.');
       // ÇİFT AÇIŞ (SORUN 2/5): seçili kartların TAMAMI geçerli çiftlere bölünebiliyorsa
       // openPairs ile aç (C# OpenSelected birebir). Aksi halde per/küt/seri bölümlemesi.
@@ -134,7 +134,7 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
     if (!ex || !ex.joker) return { state, skipBots: true, noop: true };
     const orderedIds = sortHandOrder(player.hand, state.rules, 'seri');
     const byId = new Map((player.hand ?? []).map((c: any) => [c.id, c]));
-    const ordered = orderedIds.map((id: string) => byId.get(id)).filter((c: any) => c && c.id !== excludeId);
+    const ordered = orderedIds.map((id: string) => byId.get(id)).filter((c: any) => c && c.id !== excludeId) as any[];
     const groups: any[][] = [];
     let gi = 0;
     while (gi < ordered.length) {
@@ -263,7 +263,7 @@ export function stepOnce(state: any, isHumanTurn: (seat: number) => boolean): { 
         sg.asama === 'ortakGorus' ? { type: 'sorguOrtakGorus', gorus: sorulanP?.hasOpened ? 'ver' : 'verme' }
         : sg.asama === 'cevap' ? { type: 'sorguCevap', cevap: (sorulanP?.hasOpened || sg.partnerGorus === 'ver') ? 'ver' : 'verme' }
         : { type: 'sorguSonuc', al: false };
-      try { return { state: applyMove(state, fb), moved: true }; }
+      try { return { state: applyMove(state, fb as any), moved: true }; }
       catch { return { state, moved: false }; }
     }
   }

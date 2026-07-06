@@ -5,7 +5,8 @@
 import { viewFor, isIslekCard, canSor, canCancelOpen, legalExtendTargets, canRetrieveJoker } from '../../packages/engine/src/game';
 import { analyzeHand } from '../../packages/engine/src/insight';
 import { meldPoints, analyzeCards, analyzePair } from '../../packages/engine/src/melds';
-import type { GameState } from '../../packages/engine/src/game';
+import type { GameState } from '../../packages/engine/src/types';
+import { VIEW_VERSION } from './viewContract';
 
 /* ── Per-koltuk el dizilim sırası (handOrder) — C# HandOrder/ReconcileOrder portu ──
    Motor kuralını DEĞİŞTİRMEZ; yalnız el'in GÖRSEL sırasını izler. Çekilen kart sona,
@@ -207,7 +208,9 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
   const sorgu = v.sorgu ?? null;
 
   return {
+    viewVersion:       VIEW_VERSION,
     seat:              v.seat            ?? seat,
+    spectator:         false,
     phase:             v.phase           ?? 'draw',
     currentSeat:       v.currentSeat     ?? 0,
     yourTurn:          v.currentSeat === seat && (v.phase === 'draw' || v.phase === 'action'),
@@ -384,6 +387,7 @@ export function clientViewForSpectator(state: GameState): Record<string, unknown
 
   return {
     ...base,
+    viewVersion: VIEW_VERSION,
     spectator: true,
     phase: state.phase ?? 'draw',
     currentSeat: state.currentSeat ?? 0,
@@ -408,6 +412,8 @@ export function clientViewForSpectator(state: GameState): Record<string, unknown
 
 function emptyView(seat: number): Record<string, unknown> {
   return {
+    viewVersion: VIEW_VERSION,
+    spectator: seat < 0,
     seat, phase: 'draw', currentSeat: 0, yourTurn: false,
     handNumber: 1, totalHands: 5, openingMin: 0, pairsMin: 0, teamMode: false,
     myHand: [], handGaps: [], melds: [], seats: [],

@@ -1,4 +1,5 @@
 import type { Card, CardId, Meld, Move, NormalCard, PlayerView, Rank, Suit } from './types';
+import { isNormalCard } from './types';
 import type { MoveProvider } from './provider';
 import { canExtend, canRetrieveJoker, canTakeDiscardView } from './game';
 import { analyzePair, handCardPenalty } from './melds';
@@ -443,7 +444,7 @@ export class HeuristicBot implements MoveProvider {
       if (m) taken.push({ suit: m[1] as Suit, rank: Number(m[2]) as Rank });
     }
     return (card: Card) => {
-      if (card.joker) return false;
+      if (!isNormalCard(card)) return false;
       return taken.some(
         (t) =>
           t.rank === card.rank ||
@@ -465,12 +466,12 @@ export class HeuristicBot implements MoveProvider {
     // Kısmi yapılar da (çift / komşu kartlar) tutulmaya değer.
     const useful = new Set<CardId>(planned);
     for (const a of hand) {
-      if (a.joker) {
+      if (!isNormalCard(a)) {
         useful.add(a.id);
         continue;
       }
       for (const b of hand) {
-        if (a.id === b.id || b.joker) continue;
+        if (a.id === b.id || !isNormalCard(b)) continue;
         const pair = a.rank === b.rank; // küt ortağı ya da özdeş çift adayı
         const near = a.suit === b.suit && Math.abs(a.rank - b.rank) <= 2 && a.rank !== b.rank;
         if (pair || near) {
@@ -486,7 +487,7 @@ export class HeuristicBot implements MoveProvider {
 
     const disposable = hand.filter((c) => !useful.has(c.id));
     const safeDisposable = disposable.filter((c) => !dangerous(c));
-    const semiDisposable = hand.filter((c) => !planned.has(c.id) && !c.joker);
+    const semiDisposable = hand.filter((c) => !planned.has(c.id) && isNormalCard(c));
     const safeSemi = semiDisposable.filter((c) => !dangerous(c));
 
     const chosen =
@@ -494,7 +495,7 @@ export class HeuristicBot implements MoveProvider {
       pick(disposable) ??
       pick(safeSemi) ??
       pick(semiDisposable) ??
-      pick(hand.filter((c) => !c.joker)) ??
+      pick(hand.filter(isNormalCard)) ??
       hand[hand.length - 1]!;
 
     return { type: 'discard', cardId: chosen.id };

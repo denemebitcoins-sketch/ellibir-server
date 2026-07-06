@@ -6,7 +6,7 @@ import type {
   Rank,
   Suit,
 } from './types';
-import { SUITS } from './types';
+import { SUITS, isNormalCard } from './types';
 import type { RuleConfig } from './rules';
 
 /**
@@ -39,12 +39,12 @@ export function rankPoints(rank: Rank, rules: RuleConfig): number {
 
 /** Elde kalan kartın ceza değeri. */
 export function handCardPenalty(card: Card, rules: RuleConfig): number {
-  if (card.joker) return rules.jokerHandPenalty;
+  if (!isNormalCard(card)) return rules.jokerHandPenalty;
   return rankPoints(card.rank, rules);
 }
 
 function naturals(cards: readonly Card[]): NormalCard[] {
-  return cards.filter((c): c is NormalCard => !c.joker);
+  return cards.filter(isNormalCard);
 }
 
 // RULES.md 1.3: per başına yapay okey sınırı YOKTUR. Geçerlilik yalnız
@@ -113,7 +113,7 @@ export function analyzeRun(cards: readonly Card[], rules: RuleConfig): MeldAnaly
     for (let i = 0; i < cards.length; i++) {
       const pos = start + i;
       const card = cards[i]!;
-      if (card.joker) {
+      if (!isNormalCard(card)) {
         slots.push({ jokerId: card.id, rank: rankAtPosition(pos), suits: [suit] });
       } else if (card.rank !== rankAtPosition(pos)) {
         continue outer;

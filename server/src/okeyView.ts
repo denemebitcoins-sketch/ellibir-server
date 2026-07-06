@@ -1,5 +1,6 @@
 import { elMultOf } from '../../packages/engine/src/okey';
 import type { OkeyGameState } from '../../packages/engine/src/okey';
+import { VIEW_VERSION } from './viewContract';
 
 /**
  * OKEY istemci görünümü (otoriter): kendi elin AÇIK, rakiplerin yalnız TAŞ SAYISI.
@@ -13,6 +14,7 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
   if (!state) return emptyOkeyView(seat);
   const me = state.players.find((p) => p.seat === seat);
   return {
+    viewVersion: VIEW_VERSION,
     game: 'okey',
     seat,
     spectator: seat < 0,
@@ -70,6 +72,7 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
 
 export function emptyOkeyView(seat: number): Record<string, unknown> {
   return {
+    viewVersion: VIEW_VERSION,
     game: 'okey', seat, spectator: seat < 0,
     elNumber: 0, totalEls: 0, teamMode: false, dealerSeat: 0,
     turn: -1, phase: 'draw', elEnded: false, matchEnded: false, elWinner: -2, finishKind: '',

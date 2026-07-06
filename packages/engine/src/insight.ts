@@ -1,4 +1,5 @@
 import type { Card, CardId, NormalCard } from './types';
+import { isNormalCard } from './types';
 import type { RuleConfig } from './rules';
 import { enumerateCandidateMelds, solveHand } from './solver';
 import { meldPoints } from './melds';
@@ -32,7 +33,7 @@ export function analyzeHand(
   // Özdeş çiftler: (renk, sayı) başına ikişerli gruplar.
   const byIdentity = new Map<string, NormalCard[]>();
   for (const c of hand) {
-    if (c.joker) continue;
+    if (!isNormalCard(c)) continue;
     const key = `${c.suit}${c.rank}`;
     const list = byIdentity.get(key) ?? [];
     list.push(c);
@@ -155,7 +156,7 @@ export function bestPairOpening(hand: readonly Card[], rules: RuleConfig): PairP
   if (!rules.pairs.enabled) return { pairs: [], count: 0 };
   const byIdentity = new Map<string, NormalCard[]>();
   for (const c of hand) {
-    if (c.joker) continue;
+    if (!isNormalCard(c)) continue;
     const key = `${c.suit}${c.rank}`;
     const list = byIdentity.get(key) ?? [];
     list.push(c);

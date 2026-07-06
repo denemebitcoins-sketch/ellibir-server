@@ -24,6 +24,10 @@ export interface JokerCard {
 
 export type Card = NormalCard | JokerCard;
 
+export function isNormalCard(card: Card): card is NormalCard {
+  return card.joker === false;
+}
+
 export type MeldType = 'set' | 'run' | 'pair';
 
 /** Açış modu: per (51+ puan) ya da çift — el boyunca kilitlenir. */

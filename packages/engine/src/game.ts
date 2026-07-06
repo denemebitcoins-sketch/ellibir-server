@@ -10,7 +10,7 @@ import type {
   PublicEvent,
   SheetEntry,
 } from './types';
-import { MoveError } from './types';
+import { MoveError, isNormalCard } from './types';
 import type { RuleConfig } from './rules';
 import { DEFAULT_RULES } from './rules';
 import { buildDeck, createRng, deal, shuffle } from './deck';
@@ -532,7 +532,7 @@ export function canRetrieveJoker(
   replacement: Card,
   rules: RuleConfig,
 ): CardId | null {
-  if (replacement.joker) return null;
+  if (!isNormalCard(replacement)) return null;
   // RULES.md 1.3 istisnası (C4): ÇİFT perindeki okey de gerçek kartıyla
   // takas edilebilir (perde bozulmaz, okey ele gelir).
   const analysis =
@@ -1258,8 +1258,8 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
   // oyuncunun elinde o karttan 2 ADET (özdeş çift) varsa (yani atıştan SONRA elde hâlâ
   // aynı kart kalıyorsa), CEZA YEMEZ. ("çift olması/olmaması" ile ALAKASIZ.)
   const islekCiftMuaf =
-    !card.joker &&
-    newHand0.some((c) => c.rank === card.rank && c.suit === card.suit);
+    isNormalCard(card) &&
+    newHand0.some((c) => isNormalCard(c) && c.rank === card.rank && c.suit === card.suit);
 
   // CEZALAR (RULES.md 1.7): BİTİŞ atışı tek değerlendirilir — bitişte işlek/okey
   // ıskarta cezası YAZILMAZ (çift ceza yok). Okey ıskartaya atılırsa 100, işlek 50.
@@ -1361,6 +1361,8 @@ function applyGostergeGoster(state: GameState, cardId: CardId): GameState {
   const g = state.gostergeKart;
   if (!g || state.gostergeTaken)
     throw new MoveError('gosterge', 'Gösterge yok.');
+  if (!isNormalCard(g))
+    throw new MoveError('gosterge', 'Gösterge kartı geçersiz.');
   const seat = state.currentSeat;
   if (!gostergeDrawWindow(state, seat))
     throw new MoveError('gosterge', 'Gösterge yalnız ilk turda, kart çekmeden gösterilir.');
@@ -1369,7 +1371,7 @@ function applyGostergeGoster(state: GameState, cardId: CardId): GameState {
   if ((state.gostergeShown ?? []).includes(seat))
     throw new MoveError('gosterge', 'Göstergeyi zaten gösterdin.');
   const player = state.players[seat]!;
-  const es = player.hand.find((c) => c.rank === g.rank && c.suit === g.suit);
+  const es = player.hand.find((c) => isNormalCard(c) && c.rank === g.rank && c.suit === g.suit);
   if (!es || es.id !== cardId)
     throw new MoveError('gosterge', 'Göstergenin eşi elinde değil.');
   return {
@@ -1485,6 +1487,11 @@ function endHand(
 
 export function viewFor(state: GameState, seat: number): PlayerView {
   const me = state.players[seat]!;
+  const gosterge = state.gostergeKart ?? null;
+  const hasGostergeMate =
+    gosterge !== null &&
+    isNormalCard(gosterge) &&
+    me.hand.some((c) => isNormalCard(c) && c.rank === gosterge.rank && c.suit === gosterge.suit);
   return {
     seat,
     rules: state.rules,
@@ -1524,18 +1531,18 @@ export function viewFor(state: GameState, seat: number): PlayerView {
     matchLog: (state.matchLog ?? []).slice(),
     // GÖSTERGE (HER EL, herkese açık deste dibi kartı). Alındıktan sonra da görünür kalır
     // (yerine konan kart açık durur); alınamaz olması canTake/canShow ile kontrol edilir.
-    gostergeKart: state.gostergeKart ?? null,
+    gostergeKart: gosterge,
     gostergeShown: (state.gostergeShown ?? []).includes(seat),
     gostergeCanShow:
-      !!state.gostergeKart &&
+      !!gosterge &&
       !state.gostergeTaken &&
       state.currentSeat === seat &&
       gostergeDrawWindow(state, seat) &&
       !(state.gostergeLocked ?? []).includes(seat) &&
       !(state.gostergeShown ?? []).includes(seat) &&
-      me.hand.some((c) => c.rank === state.gostergeKart!.rank && c.suit === state.gostergeKart!.suit),
+      hasGostergeMate,
     gostergeCanTake:
-      !!state.gostergeKart &&
+      !!gosterge &&
       !state.gostergeTaken &&
       state.currentSeat === seat &&
       (state.gostergeShown ?? []).includes(seat) && // gösterdiyse + 4 çiftle her faz (yer değiştirme)
