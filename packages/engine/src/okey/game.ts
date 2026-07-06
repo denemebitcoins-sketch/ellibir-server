@@ -10,7 +10,7 @@ import { canFinishMelds, canFinishPairs, bestGrouping, isValidPair, isValidRun, 
  * DÜZ OKEY oyun makinesi (otoriter). 51 motoruyla aynı ilkeler:
  * saf TS, ortam bağımsız, JSON-serileşebilir state, deterministik (seed).
  *
- * Akış: dağıtıcı 15 taşla başlar, ÇEKMEDEN atar. Sıra saat yönünün TERSİNE
+ * Akış: eli başlatan oyuncu ekstra taşla başlar, ÇEKMEDEN atar. Sıra saat yönünün TERSİNE
  * 0→1→2→3 döner; oyuncu ya ortadan çeker ya SOL komşusunun (bir önceki
  * oyuncunun) attığı son taşı alır; sonra kendi atık yığınına (sağ köşesi) atar.
  * Bitiş: 15. taşı bitiş alanına atıp kalan 14'ü seri/küt (veya 7 çift) dizmek.
@@ -43,7 +43,7 @@ export interface OkeyGameState {
   rules: OkeyRuleConfig;
   seed: number;
   elNumber: number;          // 1'den başlar
-  dealerSeat: number;        // 15 taş alan (eli başlatan)
+  dealerSeat: number;        // ekstra taşı alan (eli başlatan)
   players: OkeyPlayer[];
   stock: OkeyTile[];         // kapalı yığın; çekiş dizinin SONUNDAN (pop)
   discards: OkeyTile[][];    // koltuk başına atık yığını (son eleman = üstteki)
@@ -203,7 +203,10 @@ export function startNextEl(state: OkeyGameState): void {
   if (state.matchEnded) return;
   state.elNumber += 1;
   if (state.elNumber > 1) state.dealerSeat = (state.dealerSeat + 1) % 4;
-  const deal = dealOkey(state.seed + state.elNumber * 7919, state.dealerSeat); // el başına farklı ama deterministik dağıtım
+  const isYuzbir = state.rules.variant === 'yuzbir';
+  const deal = dealOkey(state.seed + state.elNumber * 7919, state.dealerSeat, isYuzbir
+    ? { starterCount: 22, otherCount: 21 }
+    : undefined); // el başına farklı ama deterministik dağıtım
   for (let s = 0; s < 4; s++) {
     const p = state.players[s]!;
     p.hand = deal.hands[s]!;
@@ -515,9 +518,9 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
           melds = p.openMode !== 'pairs' && canLayAllRemaining(remaining, state, 'melds');
           pairs = !melds && p.openMode === 'pairs' && canLayAllRemaining(remaining, state, 'pairs');
         } else {
-          // Elden bitiş: kapalı eldeki 14 taş tamamen per/çift olmalı; açma eşiğini pratikte zaten aşar.
-          melds = canFinishMelds(remaining, state.okeyColor, state.okeyRank);
-          pairs = !melds && canFinishPairs(remaining, state.okeyColor, state.okeyRank);
+          // 101 elden bitiş: atılan taştan sonra kalan 21 taş tamamen perlere yatmalı.
+          melds = canLayAllRemaining(remaining, state, 'melds');
+          pairs = false;
         }
       }
       if (!melds && !pairs) return { ok: false, error: 'el bitmiyor — taşlar geçerli perlere dizilemiyor' };

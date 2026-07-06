@@ -48,6 +48,16 @@ describe('deste ve gösterge', () => {
     expect(r.okeyRank).toBe(nextRank(r.gosterge.rank));
   });
 
+  it('101 dağıtımı: başlatan 22, diğerleri 21 taş alır', () => {
+    const r = dealOkey(42, 2, { starterCount: 22, otherCount: 21 });
+    expect(r.hands[2]!.length).toBe(22);
+    expect(r.hands[0]!.length).toBe(21);
+    expect(r.hands[1]!.length).toBe(21);
+    expect(r.hands[3]!.length).toBe(21);
+    expect(r.stock.length).toBe(20);
+    expect(r.hands.flat().length + r.stock.length + 1).toBe(106);
+  });
+
   it('sahte okey, okeyin kimliğine bürünür; okey taşı jokerdir', () => {
     const f = fake();
     const id = identityOf(f, OC, OR);
@@ -386,6 +396,17 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     return st;
   }
 
+  it('101 masası 22/21 taşla başlar ve stok normal okey gibi kalmaz', () => {
+    const st = createOkeyGame({ seed: 2026, dealerSeat: 0, rules: { variant: 'yuzbir', totalEls: 1 } as any });
+    expect(st.players[0]!.hand.length).toBe(22);
+    expect(st.players[1]!.hand.length).toBe(21);
+    expect(st.players[2]!.hand.length).toBe(21);
+    expect(st.players[3]!.hand.length).toBe(21);
+    expect(st.stock.length).toBe(20);
+    expect(yuzbirOpeningMin(st)).toBe(101);
+    expect(yuzbirPairOpeningMin(st)).toBe(5);
+  });
+
   it('seri/küt açışı 101 eşiğini ister ve katlamalıda bir üstüne çıkar', () => {
     const st = g101();
     const groups = [
@@ -456,5 +477,25 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.scores[2]).toBe(202);
     expect(st.scores[3]).toBe(202);
     expect(st.matchEnded).toBe(true);
+  });
+
+  it('101 elden bitişte 21 kalan taş tamamen perlere yatabiliyorsa el biter', () => {
+    const st = g101();
+    const win21 = [
+      t('R', 1), t('R', 2), t('R', 3),
+      t('R', 4), t('R', 5), t('R', 6),
+      t('R', 7), t('R', 8), t('R', 9),
+      t('R', 10), t('R', 11), t('R', 12),
+      t('Y', 1), t('Y', 2), t('Y', 3),
+      t('Y', 4), t('Y', 5), t('Y', 6),
+      t('Y', 7), t('Y', 8), t('Y', 9),
+    ];
+    const throwaway = t('K', 4);
+    st.players[0]!.hand = [...win21, throwaway];
+    const r = applyOkeyMove(st, 0, { t: 'finish', tileId: throwaway.id });
+    expect(r.ok).toBe(true);
+    expect(st.elEnded).toBe(true);
+    expect(st.scores[0]).toBe(-101);
+    expect(st.scores[1]).toBe(202);
   });
 });

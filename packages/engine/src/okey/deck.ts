@@ -39,15 +39,20 @@ export function isOkeyTile(tile: OkeyTile, okeyColor: OkeyColor, okeyRank: OkeyR
 }
 
 export interface OkeyDealResult {
-  hands: OkeyTile[][];       // 4 el: dağıtıcı 15, diğerleri 14
+  hands: OkeyTile[][];       // 4 el: başlatan ekstra taş alır
   stock: OkeyTile[];         // ortadaki kapalı yığın (çekiş sırası = dizinin sonundan)
   gosterge: NormalOkeyTile;  // açık gösterge (çekilemez)
   okeyColor: OkeyColor;
   okeyRank: OkeyRank;
 }
 
-/** Karıştır + gösterge seç (sahte okey gösterge OLAMAZ) + dağıt (dağıtıcıya 15). */
-export function dealOkey(seed: number, dealerSeat: number): OkeyDealResult {
+export interface OkeyDealOptions {
+  starterCount?: number;
+  otherCount?: number;
+}
+
+/** Karıştır + gösterge seç (sahte okey gösterge OLAMAZ) + dağıt. */
+export function dealOkey(seed: number, dealerSeat: number, opts: OkeyDealOptions = {}): OkeyDealResult {
   const rng = createRng(seed);
   const deck = shuffle(buildOkeyDeck(), rng);
 
@@ -61,9 +66,11 @@ export function dealOkey(seed: number, dealerSeat: number): OkeyDealResult {
   const okeyRank = nextRank(gosterge.rank);
 
   const hands: OkeyTile[][] = [[], [], [], []];
+  const starterCount = opts.starterCount ?? 15;
+  const otherCount = opts.otherCount ?? 14;
   let cursor = 0;
   for (let s = 0; s < 4; s++) {
-    const count = s === dealerSeat ? 15 : 14;
+    const count = s === dealerSeat ? starterCount : otherCount;
     hands[s] = deck.slice(cursor, cursor + count);
     cursor += count;
   }
