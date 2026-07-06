@@ -476,6 +476,26 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(yuzbirOpeningMin(st)).toBe(126);
   });
 
+  it('çift açtıktan sonra ek çift açabilir; ilk çift açılışı sabit kalır', () => {
+    const st = g101();
+    const first = [
+      [t('R', 1), t('R', 1)],
+      [t('Y', 2), t('Y', 2)],
+      [t('B', 3), t('B', 3)],
+      [t('K', 4), t('K', 4)],
+      [t('R', 5), t('R', 5)],
+    ];
+    const extra = [t('Y', 6), t('Y', 6)];
+    st.players[0]!.hand = first.flat().concat(extra, [t('B', 8)]);
+    expect(applyOkeyMove(st, 0, { t: 'openPairs', pairs: first.map((x) => x.map((z) => z.id)) } as any).ok).toBe(true);
+    expect(st.players[0]!.openingPairs).toBe(5);
+    expect(yuzbirPairOpeningMin(st)).toBe(6);
+    expect(applyOkeyMove(st, 0, { t: 'openPairs', pairs: [extra.map((z) => z.id)] } as any).ok).toBe(true);
+    expect(st.openMelds.length).toBe(6);
+    expect(st.players[0]!.openingPairs).toBe(5);
+    expect(yuzbirPairOpeningMin(st)).toBe(6);
+  });
+
   it('101 bitişte açmayan oyuncuya 202 yazar, bitiren -101 alır', () => {
     const st = g101();
     const open = [
