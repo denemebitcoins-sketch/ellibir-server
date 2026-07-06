@@ -797,6 +797,13 @@ for each row execute function public.profiles_guard_client_sensitive();
 -- ─────────────────────────────────────────────────────────────────────
 alter table public.profiles add column if not exists vip_last_daily date;
 
+-- Mevcut kurulumlarda bu RPC'ler farkli return type ile tanimli olabilir.
+-- PostgreSQL `create or replace function` ile return type degisimine izin vermez;
+-- bu yuzden once dusurup asagida kanonik imzayla yeniden kuruyoruz.
+drop function if exists public.buy_vip_mock(integer);
+drop function if exists public.get_daily_state();
+drop function if exists public.claim_daily(integer);
+
 create or replace function public.buy_vip_mock(p_months int)
 returns jsonb
 language plpgsql
