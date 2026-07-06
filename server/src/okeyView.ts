@@ -1,4 +1,4 @@
-import { elMultOf } from '../../packages/engine/src/okey';
+import { elMultOf, yuzbirOpeningMin, yuzbirPairOpeningMin } from '../../packages/engine/src/okey';
 import type { OkeyGameState } from '../../packages/engine/src/okey';
 import { VIEW_VERSION } from './viewContract';
 
@@ -9,6 +9,13 @@ import { VIEW_VERSION } from './viewContract';
  */
 
 const mapTile = (t: any) => t == null ? null : { id: t.id ?? '', fake: !!t.fake, color: t.fake ? '' : t.color, rank: t.fake ? 0 : t.rank };
+const mapMeld = (m: any) => ({
+  id: m.id ?? '',
+  ownerSeat: m.ownerSeat ?? -1,
+  kind: m.kind ?? '',
+  points: m.points ?? 0,
+  tiles: Array.isArray(m.tiles) ? m.tiles.map(mapTile) : [],
+});
 
 export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<string, unknown> {
   if (!state) return emptyOkeyView(seat);
@@ -47,6 +54,11 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     // gider — stratejik bilgi, listede gösterilir).
     bankoDealer: state.elNumber >= 1 ? (state.dealerSeat + 1) % 4 : state.dealerSeat,
     sheetBankoFlat: ([] as number[]).concat(...(state.bankoRows ?? [])),
+    openingMin: state.rules.variant === 'yuzbir' ? yuzbirOpeningMin(state) : 0,
+    pairsMin: state.rules.variant === 'yuzbir' ? yuzbirPairOpeningMin(state) : 0,
+    myHasOpened: !!(me && me.hasOpened),
+    myOpenMode: me?.openMode ?? '',
+    openMelds: (state.openMelds ?? []).map(mapMeld),
     myHand: seat >= 0 && me ? me.hand.map(mapTile) : [],
     // GÖSTERGE butonu koşulu (kullanıcı: ilk taş atıldıktan sonra buton GÖRÜNMESİN):
     myShowedGosterge: !!(me && me.showedGosterge),
@@ -59,6 +71,8 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     players: state.players.map((p) => ({
       seat: p.seat, name: p.name, isBot: p.isBot,
       tileCount: p.hand.length, showedGosterge: p.showedGosterge,
+      hasOpened: p.hasOpened ?? false, openMode: p.openMode ?? '',
+      openingPoints: p.openingPoints ?? 0, openingPairs: p.openingPairs ?? 0,
     })),
     // El bitti → kazananın eli HERKESE açık (bitiş gösterimi).
     winnerHand: state.elEnded && state.elWinner != null && state.elWinner >= 0
@@ -79,6 +93,7 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
     variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], bankoPhase: false, bankoChoice: [-1, -1, -1, -1], bankoDealer: 0, sheetBankoFlat: [],
+    openingMin: 0, pairsMin: 0, myHasOpened: false, myOpenMode: '', openMelds: [],
     myHand: [], myShowedGosterge: false, myDiscardCount: 0,
     disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,

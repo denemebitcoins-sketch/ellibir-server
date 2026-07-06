@@ -4,7 +4,7 @@ import type { OkeyRuleConfig } from './rules';
 import { DEFAULT_OKEY_RULES } from './rules';
 import { dealOkey, isOkeyTile, identityOf } from './deck';
 import { createRng } from '../deck';
-import { canFinishMelds, canFinishPairs, bestGrouping } from './melds';
+import { canFinishMelds, canFinishPairs, bestGrouping, isValidPair, isValidRun, isValidSet } from './melds';
 
 /**
  * DÜZ OKEY oyun makinesi (otoriter). 51 motoruyla aynı ilkeler:
@@ -23,6 +23,20 @@ export interface OkeyPlayer {
   hand: OkeyTile[];
   showedGosterge: boolean; // bu el gösterge tekini gösterdi mi
   discardCount: number;    // bu el kaç taş attı (gösterge yalnız ilk atıştan önce)
+  hasOpened: boolean;      // 101: orta alana açtı mı
+  openMode: 'melds' | 'pairs' | null; // 101: seri/küt mü, çift mi açtı
+  openingPoints: number;   // 101: açtığı seri/küt toplamı
+  openingPairs: number;    // 101: açtığı çift sayısı
+}
+
+export type OkeyPublicMeldKind = 'run' | 'set' | 'pair';
+
+export interface OkeyPublicMeld {
+  id: string;
+  ownerSeat: number;
+  kind: OkeyPublicMeldKind;
+  tiles: OkeyTile[];
+  points: number;
 }
 
 export interface OkeyGameState {
@@ -53,6 +67,10 @@ export interface OkeyGameState {
   bankoChoice: number[];     // faz içi canlı seçim: -1 kararsız, 0 pas, 1 BANKO
   bankoThisEl: boolean[];    // bu el banko OLAN koltuklar (çarpan 2^adet)
   bankoRows: number[][];     // YAZBOZ: el başına koltuk sonucu — 0 yok, 1 TAMAMLADI, 2 PATLADI
+  openMelds: OkeyPublicMeld[]; // 101: orta alanda açılmış per/çiftler
+  nextMeldId: number;
+  yuzbirMaxOpenPoints: number; // 101 katlamalı: masadaki en yüksek seri açış
+  yuzbirMaxOpenPairs: number;  // 101 katlamalı: masadaki en yüksek çift açışı
   matchLog: string[];
 }
 
@@ -73,7 +91,10 @@ export interface OkeyCreateOptions {
 
 export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
   const rules: OkeyRuleConfig = { ...DEFAULT_OKEY_RULES, ...(opts.rules ?? {}),
-    scoring: { ...DEFAULT_OKEY_RULES.scoring, ...(opts.rules?.scoring ?? {}) } };
+    scoring: { ...DEFAULT_OKEY_RULES.scoring, ...(opts.rules?.scoring ?? {}) },
+    yuzbir: { ...DEFAULT_OKEY_RULES.yuzbir, ...(opts.rules?.yuzbir ?? {}) } };
+  if (rules.variant === 'yuzbir' && opts.rules?.scoring?.startScore == null)
+    rules.scoring.startScore = 0;
   const dealerSeat = opts.dealerSeat ?? 0;
   const names = opts.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
   const bots = new Set(opts.botSeats ?? []);
@@ -85,6 +106,7 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     players: [0, 1, 2, 3].map((s) => ({
       seat: s, name: names[s] ?? `Oyuncu ${s + 1}`, isBot: bots.has(s),
       hand: [], showedGosterge: false, discardCount: 0,
+      hasOpened: false, openMode: null, openingPoints: 0, openingPairs: 0,
     })),
     stock: [], discards: [[], [], [], []],
     gosterge: null as unknown as NormalOkeyTile, okeyColor: 'R', okeyRank: 1,
@@ -100,6 +122,10 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     bankoChoice: [-1, -1, -1, -1],
     bankoThisEl: [false, false, false, false],
     bankoRows: [],
+    openMelds: [],
+    nextMeldId: 1,
+    yuzbirMaxOpenPoints: 0,
+    yuzbirMaxOpenPairs: 0,
   };
   if (opts.dealFirst !== false) startNextEl(state);
   return state;
@@ -183,6 +209,10 @@ export function startNextEl(state: OkeyGameState): void {
     p.hand = deal.hands[s]!;
     p.showedGosterge = false;
     p.discardCount = 0;
+    p.hasOpened = false;
+    p.openMode = null;
+    p.openingPoints = 0;
+    p.openingPairs = 0;
   }
   state.stock = deal.stock;
   state.discards = [[], [], [], []];
@@ -194,6 +224,10 @@ export function startNextEl(state: OkeyGameState): void {
   state.elEnded = false;
   state.elWinner = null;
   state.finishKind = null;
+  state.openMelds = [];
+  state.nextMeldId = 1;
+  state.yuzbirMaxOpenPoints = 0;
+  state.yuzbirMaxOpenPairs = 0;
   state.elStartScores = [...state.scores]; // yazboz delta tabanı
   // Taahhütler bu elde devreye girer (el DAĞITILMADAN söylenmişti).
   state.bankoThisEl = [...(state.bankoPending ?? [false, false, false, false])];
@@ -204,8 +238,211 @@ export function startNextEl(state: OkeyGameState): void {
 
 const tileById = (p: OkeyPlayer, id: string) => p.hand.findIndex((t) => t.id === id);
 
+const rankAtPos = (pos: number): number => (pos === 14 ? 1 : pos);
+
+function tilePenaltyValue(t: OkeyTile, state: OkeyGameState): number {
+  const id = identityOf(t, state.okeyColor, state.okeyRank);
+  return id.wild ? state.okeyRank : id.rank;
+}
+
+function runPoints(tiles: readonly OkeyTile[], state: OkeyGameState): number | null {
+  if (!isValidRun(tiles, state.okeyColor, state.okeyRank)) return null;
+  const ids = tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank));
+  const reals = ids.filter((i) => !i.wild);
+  if (reals.length === 0) return null;
+  const color = reals[0]!.color;
+  if (!reals.every((r) => r.color === color)) return null;
+  const wilds = ids.length - reals.length;
+  const ones = reals.filter((r) => r.rank === 1).length;
+  const rest = reals.filter((r) => r.rank !== 1).map((r) => r.rank as number);
+  const oneChoices: number[][] = ones === 0 ? [[]] : ones === 1 ? [[1], [14]] : [[1, 14]];
+  let best: number | null = null;
+  for (const oc of oneChoices) {
+    const pos = [...rest, ...oc].sort((a, b) => a - b);
+    if (new Set(pos).size !== pos.length) continue;
+    const span = pos[pos.length - 1]! - pos[0]! + 1;
+    if (span > tiles.length) continue;
+    const gapWilds = span - pos.length;
+    const extWilds = tiles.length - span;
+    if (gapWilds > wilds) continue;
+    for (let left = 0; left <= extWilds; left++) {
+      const start = pos[0]! - left;
+      const end = pos[pos.length - 1]! + (extWilds - left);
+      if (start < 1 || end > 14 || gapWilds + extWilds !== wilds) continue;
+      let sum = 0;
+      for (let p = start; p <= end; p++) sum += rankAtPos(p);
+      if (best == null || sum > best) best = sum;
+    }
+  }
+  return best;
+}
+
+function setPoints(tiles: readonly OkeyTile[], state: OkeyGameState): number | null {
+  if (!isValidSet(tiles, state.okeyColor, state.okeyRank)) return null;
+  const real = tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank)).find((i) => !i.wild);
+  return real ? real.rank * tiles.length : null;
+}
+
+function classifyMeld(tiles: readonly OkeyTile[], state: OkeyGameState): { kind: OkeyPublicMeldKind; points: number } | null {
+  const rp = runPoints(tiles, state);
+  if (rp != null) return { kind: 'run', points: rp };
+  const sp = setPoints(tiles, state);
+  if (sp != null) return { kind: 'set', points: sp };
+  if (isValidPair(tiles, state.okeyColor, state.okeyRank))
+    return { kind: 'pair', points: tiles.reduce((a, t) => a + tilePenaltyValue(t, state), 0) };
+  return null;
+}
+
+export function yuzbirOpeningMin(state: OkeyGameState): number {
+  const cfg = state.rules.yuzbir;
+  if (!cfg.katlamali || state.yuzbirMaxOpenPoints < cfg.openingMin) return cfg.openingMin;
+  return state.yuzbirMaxOpenPoints + 1;
+}
+
+export function yuzbirPairOpeningMin(state: OkeyGameState): number {
+  const cfg = state.rules.yuzbir;
+  if (!cfg.katlamali || state.yuzbirMaxOpenPairs < cfg.pairOpeningMin) return cfg.pairOpeningMin;
+  return state.yuzbirMaxOpenPairs + 1;
+}
+
+function pickGroupsFromHand(p: OkeyPlayer, groups: string[][]): OkeyTile[][] | string {
+  const used = new Set<string>();
+  const out: OkeyTile[][] = [];
+  for (const g of groups ?? []) {
+    if (!Array.isArray(g) || g.length === 0) return 'geçersiz grup';
+    const tiles: OkeyTile[] = [];
+    for (const id of g) {
+      if (used.has(id)) return 'aynı taş iki kez seçilemez';
+      const idx = tileById(p, id);
+      if (idx < 0) return 'taş elinde değil';
+      used.add(id);
+      tiles.push(p.hand[idx]!);
+    }
+    out.push(tiles);
+  }
+  return out;
+}
+
+function removeTiles(p: OkeyPlayer, ids: Iterable<string>): void {
+  const rm = new Set(ids);
+  p.hand = p.hand.filter((t) => !rm.has(t.id));
+}
+
+function bestMeldCoverage(tiles: OkeyTile[], state: OkeyGameState): number {
+  return bestGrouping([...tiles], state.okeyColor, state.okeyRank).reduce((n, g) => n + g.length, 0);
+}
+
+function canLayAllRemaining(tiles: OkeyTile[], state: OkeyGameState, mode: 'melds' | 'pairs' | null): boolean {
+  if (tiles.length === 0) return true;
+  if (mode === 'pairs') {
+    if (tiles.length % 2 !== 0) return false;
+    const groups = pairGroupsFor(tiles, state);
+    return groups.reduce((n, g) => n + g.length, 0) === tiles.length;
+  }
+  return bestMeldCoverage(tiles, state) === tiles.length;
+}
+
+export function pairGroupsFor(tiles: readonly OkeyTile[], state: OkeyGameState): OkeyTile[][] {
+  const pool = [...tiles];
+  const groups: OkeyTile[][] = [];
+  const wilds = pool.filter((t) => isOkeyTile(t, state.okeyColor, state.okeyRank));
+  for (const w of wilds) pool.splice(pool.indexOf(w), 1);
+  const byKey = new Map<string, OkeyTile[]>();
+  for (const t of pool) {
+    const id = identityOf(t, state.okeyColor, state.okeyRank);
+    const k = `${id.color}:${id.rank}`;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(t);
+  }
+  const singles: OkeyTile[] = [];
+  for (const list of [...byKey.values()].sort((a, b) => a[0]!.id.localeCompare(b[0]!.id))) {
+    let i = 0;
+    for (; i + 1 < list.length; i += 2) groups.push([list[i]!, list[i + 1]!]);
+    if (i < list.length) singles.push(list[i]!);
+  }
+  while (wilds.length > 0 && singles.length > 0) groups.push([singles.shift()!, wilds.shift()!]);
+  while (wilds.length >= 2) groups.push([wilds.shift()!, wilds.shift()!]);
+  return groups;
+}
+
+export function bestYuzbirMeldOpening(state: OkeyGameState, seat: number): { groups: string[][]; points: number } {
+  const groups = bestGrouping([...state.players[seat]!.hand], state.okeyColor, state.okeyRank);
+  let points = 0;
+  const picked: string[][] = [];
+  for (const g of groups) {
+    const c = classifyMeld(g, state);
+    if (!c || c.kind === 'pair') continue;
+    points += c.points;
+    picked.push(g.map((t) => t.id));
+  }
+  return { groups: picked, points };
+}
+
+export function bestYuzbirPairOpening(state: OkeyGameState, seat: number): { pairs: string[][]; count: number } {
+  const pairs = pairGroupsFor(state.players[seat]!.hand, state);
+  return { pairs: pairs.map((g) => g.map((t) => t.id)), count: pairs.length };
+}
+
+function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][]): OkeyMoveResult {
+  if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
+  if (state.phase !== 'discard') return { ok: false, error: 'açmak için önce taş çekmelisin' };
+  const p = state.players[seat]!;
+  if (p.hasOpened) return { ok: false, error: 'zaten açtın' };
+  const picked = pickGroupsFromHand(p, groups);
+  if (typeof picked === 'string') return { ok: false, error: picked };
+  if (picked.length === 0) return { ok: false, error: 'açmak için per seç' };
+  let total = 0;
+  const melds: OkeyPublicMeld[] = [];
+  for (const g of picked) {
+    const c = classifyMeld(g, state);
+    if (!c || c.kind === 'pair') return { ok: false, error: 'seri açışı yalnız geçerli seri/küt gruplarıyla olur' };
+    total += c.points;
+    melds.push({ id: `m${state.nextMeldId++}`, ownerSeat: seat, kind: c.kind, tiles: g, points: c.points });
+  }
+  const min = yuzbirOpeningMin(state);
+  if (total < min) return { ok: false, error: `açmak için en az ${min} gerek` };
+  removeTiles(p, melds.flatMap((m) => m.tiles.map((t) => t.id)));
+  p.hasOpened = true;
+  p.openMode = 'melds';
+  p.openingPoints = total;
+  p.openingPairs = 0;
+  state.yuzbirMaxOpenPoints = Math.max(state.yuzbirMaxOpenPoints, total);
+  state.openMelds.push(...melds);
+  state.matchLog.push(`${p.name} ${total} ile seri açtı`);
+  return { ok: true };
+}
+
+function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]): OkeyMoveResult {
+  if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
+  if (state.phase !== 'discard') return { ok: false, error: 'açmak için önce taş çekmelisin' };
+  const p = state.players[seat]!;
+  if (p.hasOpened) return { ok: false, error: 'zaten açtın' };
+  const picked = pickGroupsFromHand(p, pairs);
+  if (typeof picked === 'string') return { ok: false, error: picked };
+  const min = yuzbirPairOpeningMin(state);
+  if (picked.length < min) return { ok: false, error: `çift açmak için en az ${min} çift gerek` };
+  const melds: OkeyPublicMeld[] = [];
+  for (const g of picked) {
+    if (g.length !== 2 || !isValidPair(g, state.okeyColor, state.okeyRank))
+      return { ok: false, error: 'çift açışı yalnız geçerli çiftlerle olur' };
+    const c = classifyMeld(g, state)!;
+    melds.push({ id: `m${state.nextMeldId++}`, ownerSeat: seat, kind: 'pair', tiles: g, points: c.points });
+  }
+  removeTiles(p, melds.flatMap((m) => m.tiles.map((t) => t.id)));
+  p.hasOpened = true;
+  p.openMode = 'pairs';
+  p.openingPoints = 0;
+  p.openingPairs = melds.length;
+  state.yuzbirMaxOpenPairs = Math.max(state.yuzbirMaxOpenPairs, melds.length);
+  state.openMelds.push(...melds);
+  state.matchLog.push(`${p.name} ${melds.length} çift ile açtı`);
+  return { ok: true };
+}
+
 export type OkeyMove =
   | { t: 'draw'; from: 'pile' | 'left' }
+  | { t: 'open'; groups: string[][] }
+  | { t: 'openPairs'; pairs: string[][] }
   | { t: 'discard'; tileId: string }
   | { t: 'finish'; tileId: string }
   | { t: 'gosterge' }
@@ -248,6 +485,10 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       state.phase = 'discard';
       return { ok: true };
     }
+    case 'open':
+      return openYuzbirMelds(state, seat, move.groups);
+    case 'openPairs':
+      return openYuzbirPairs(state, seat, move.pairs);
     case 'discard': {
       if (state.phase !== 'discard') return { ok: false, error: 'önce taş çekmelisin' };
       const idx = tileById(p, move.tileId);
@@ -267,8 +508,18 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       if (idx < 0) return { ok: false, error: 'taş elinde değil' };
       const thrown = p.hand[idx]!;
       const remaining = p.hand.filter((_, i) => i !== idx);
-      const melds = canFinishMelds(remaining, state.okeyColor, state.okeyRank);
-      const pairs = !melds && canFinishPairs(remaining, state.okeyColor, state.okeyRank);
+      let melds = canFinishMelds(remaining, state.okeyColor, state.okeyRank);
+      let pairs = !melds && canFinishPairs(remaining, state.okeyColor, state.okeyRank);
+      if (state.rules.variant === 'yuzbir') {
+        if (p.hasOpened) {
+          melds = p.openMode !== 'pairs' && canLayAllRemaining(remaining, state, 'melds');
+          pairs = !melds && p.openMode === 'pairs' && canLayAllRemaining(remaining, state, 'pairs');
+        } else {
+          // Elden bitiş: kapalı eldeki 14 taş tamamen per/çift olmalı; açma eşiğini pratikte zaten aşar.
+          melds = canFinishMelds(remaining, state.okeyColor, state.okeyRank);
+          pairs = !melds && canFinishPairs(remaining, state.okeyColor, state.okeyRank);
+        }
+      }
       if (!melds && !pairs) return { ok: false, error: 'el bitmiyor — taşlar geçerli perlere dizilemiyor' };
       p.hand.splice(idx, 1);
       const okeyThrown = isOkeyTile(thrown, state.okeyColor, state.okeyRank);
@@ -303,6 +554,38 @@ function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number)
     }
     state.scores[s] = state.scores[s]! + points;
   }
+}
+
+function yuzbirFinishMultiplier(state: OkeyGameState, kind: OkeyFinishKind): number {
+  const cfg = state.rules.yuzbir;
+  return (kind === 'pairs' || kind === 'pairsOkey' ? cfg.pairPenaltyX : 1)
+    * (kind === 'okey' || kind === 'pairsOkey' ? cfg.okeyFinishX : 1);
+}
+
+function yuzbirLeftPenalty(state: OkeyGameState, seat: number): number {
+  const p = state.players[seat]!;
+  const cfg = state.rules.yuzbir;
+  if (!p.hasOpened) return cfg.unopenedPenalty;
+  const sum = p.hand.reduce((a, t) => a + tilePenaltyValue(t, state), 0);
+  return sum * (p.openMode === 'pairs' ? cfg.pairPenaltyX : 1);
+}
+
+function endElWinYuzbir(state: OkeyGameState, seat: number, kind: OkeyFinishKind): void {
+  const cfg = state.rules.yuzbir;
+  const mult = yuzbirFinishMultiplier(state, kind);
+  for (let s = 0; s < 4; s++) {
+    if (s === seat) {
+      state.scores[s] = state.scores[s]! + cfg.winnerBonus * mult;
+      continue;
+    }
+    if (state.rules.teamMode && s % 2 === seat % 2) {
+      state.scores[s] = state.scores[s]! + cfg.winnerBonus * mult;
+      continue;
+    }
+    state.scores[s] = state.scores[s]! + yuzbirLeftPenalty(state, s) * mult;
+  }
+  const kindTxt = kind === 'pairsOkey' ? 'çift + okey' : kind === 'pairs' ? 'çiften' : kind === 'okey' ? 'okey atarak' : 'seri';
+  state.matchLog.push(`${state.players[seat]!.name} 101 elini ${kindTxt} bitirdi (çarpan ×${mult})`);
 }
 
 /** El kapanırken YAZBOZ satırı: bu eldeki toplam puan değişimi (gösterge dahil). */
@@ -408,6 +691,15 @@ function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): voi
     maybeEndMatchBanko(state);
     return;
   }
+  if (state.rules.variant === 'yuzbir') {
+    endElWinYuzbir(state, seat, kind);
+    state.elEnded = true;
+    state.elWinner = seat;
+    state.finishKind = kind;
+    pushElDelta(state);
+    maybeEndMatchYuzbir(state);
+    return;
+  }
   const points = sc.base
     * (kind === 'pairs' || kind === 'pairsOkey' ? sc.pairsX : 1)
     * (kind === 'okey' || kind === 'pairsOkey' ? sc.okeyX : 1);
@@ -425,6 +717,13 @@ function endElDraw(state: OkeyGameState): void {
   state.elEnded = true;
   state.elWinner = -1;
   state.finishKind = null;
+  if (state.rules.variant === 'yuzbir') {
+    for (let s2 = 0; s2 < 4; s2++) state.scores[s2] = state.scores[s2]! + yuzbirLeftPenalty(state, s2);
+    state.matchLog.push('Taşlar bitti — 101 yazbozda herkes elde kalanını ödedi');
+    pushElDelta(state);
+    maybeEndMatchYuzbir(state);
+    return;
+  }
   if (state.rules.variant === 'banko') {
     const mult = elMultOf(state);
     for (let s2 = 0; s2 < 4; s2++) {
@@ -453,6 +752,15 @@ function maybeEndMatchBanko(state: OkeyGameState): void {
   state.matchLog.push(`MAÇ BİTTİ — kazanan: ${names} (${best} puan)`);
 }
 
+function maybeEndMatchYuzbir(state: OkeyGameState): void {
+  if (state.elNumber < state.rules.totalEls) return;
+  state.matchEnded = true;
+  const best = Math.min(...state.scores);
+  const winners = [0, 1, 2, 3].filter((s2) => state.scores[s2] === best);
+  const names = winners.map((s2) => state.players[s2]!.name).join(' & ');
+  state.matchLog.push(`101 MAÇ BİTTİ — kazanan: ${names} (${best} puan)`);
+}
+
 function maybeEndMatch(state: OkeyGameState): void {
   // DÜŞME modeli: 0'a (veya altına) İNEN maçı kazanır ve maç HEMEN biter.
   const reachedZero = state.scores.some((s) => s <= 0);
@@ -465,12 +773,27 @@ function maybeEndMatch(state: OkeyGameState): void {
 }
 
 /** Süre dolunca odanın çağıracağı otomatik hamle: çek → son çekileni/rastgele olmayanı at. */
+function tryAutoOpenYuzbir(state: OkeyGameState, seat: number): void {
+  if (state.rules.variant !== 'yuzbir') return;
+  const p = state.players[seat]!;
+  if (p.hasOpened || state.phase !== 'discard') return;
+  const pair = bestYuzbirPairOpening(state, seat);
+  if (pair.count >= yuzbirPairOpeningMin(state)) {
+    applyOkeyMove(state, seat, { t: 'openPairs', pairs: pair.pairs });
+    return;
+  }
+  const meld = bestYuzbirMeldOpening(state, seat);
+  if (meld.points >= yuzbirOpeningMin(state))
+    applyOkeyMove(state, seat, { t: 'open', groups: meld.groups });
+}
+
 export function autoOkeyMove(state: OkeyGameState, seat: number): void {
   if (state.elEnded || state.matchEnded || state.turn !== seat) return;
   if (state.phase === 'draw') {
     applyOkeyMove(state, seat, { t: 'draw', from: 'pile' });
     if (state.elEnded) return;
   }
+  tryAutoOpenYuzbir(state, seat);
   const p = state.players[seat]!;
   // Okey atma: asla otomatik atılmaz; en son ele gelen (dizilim bozmaz) okey-dışı taş atılır.
   for (let i = p.hand.length - 1; i >= 0; i--) {

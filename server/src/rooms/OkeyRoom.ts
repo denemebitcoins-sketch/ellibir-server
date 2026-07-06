@@ -102,16 +102,20 @@ export class OkeyRoom extends Room {
     let parsed: any = null;
     try { parsed = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
     catch { parsed = null; }
+    const requestedVariant = options?.variant === 'banko' ? 'banko' : options?.variant === 'yuzbir' ? 'yuzbir' : 'duz';
     const rules: OkeyRuleConfig = {
       ...DEFAULT_OKEY_RULES,
       ...(parsed && typeof parsed === 'object' ? parsed : {}),
       scoring: { ...DEFAULT_OKEY_RULES.scoring, ...(parsed?.scoring ?? {}) },
+      yuzbir: { ...DEFAULT_OKEY_RULES.yuzbir, ...(parsed?.yuzbir ?? {}) },
     };
+    rules.variant = requestedVariant;
+    if (rules.variant === 'yuzbir' && parsed?.scoring?.startScore == null) rules.scoring.startScore = 0;
     if (mode === 'duo') rules.teamMode = true;
 
     this.bet = Number(options?.bet) || 0;
     this.cfg = { seed, names, botSeats, rules };
-    this.setMetadata({ game: 'okey', mode, table: Number(options?.table) || 1, humans: this.humanSeats.length });
+    this.setMetadata({ game: 'okey', mode, table: Number(options?.table) || 1, variant: rules.variant, humans: this.humanSeats.length });
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
 
     // Oyun komutları: {t:'draw',from} | {t:'discard',tileId} | {t:'finish',tileId} | {t:'gosterge'}
@@ -302,8 +306,8 @@ export class OkeyRoom extends Room {
     const tableNo = Number((this.metadata as any)?.table) || 1;
     let presenceTimer: NodeJS.Timeout | null = null;
     if (uid) {
-      keepSeatPresence(uid, tableNo, mode);
-      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, mode), 50000);
+      keepSeatPresence(uid, tableNo, 'okey-' + mode);
+      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, 'okey-' + mode), 50000);
     }
     const stop = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
     try {

@@ -109,7 +109,9 @@ export async function keepSeatPresence(
     const body = JSON.stringify({
       status: 'masada',
       table_no: tableNo,
-      table_mode: mode === 'duo' ? 'duo' : 'solo',
+      table_mode: mode.startsWith('okey-') || mode.startsWith('tavla-')
+        ? mode
+        : mode === 'duo' ? 'duo' : 'solo',
       table_started: true,   // REZERVE = oyun DEVAM → salon koltuğu BOT (düşen oyuncunun kendisi dahil
                              //   kimse OTUR görüp oturamaz; sadece İZLE).
       last_seen: new Date().toISOString(),

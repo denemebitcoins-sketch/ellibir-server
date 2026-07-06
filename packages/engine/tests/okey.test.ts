@@ -3,6 +3,7 @@ import {
   buildOkeyDeck, dealOkey, nextRank, identityOf, isOkeyTile,
   canFinishMelds, canFinishPairs, isValidRun, isValidSet, isValidPair,
   createOkeyGame, applyOkeyMove, elMultOf, beginBankoPhase, resolveBankoPhase, botBankoDecide, startNextEl, autoOkeyMove, playOkeyBotTurn,
+  yuzbirOpeningMin, yuzbirPairOpeningMin,
 } from '../src/okey';
 import type { NormalOkeyTile, OkeyColor, OkeyRank, OkeyTile } from '../src/okey';
 
@@ -374,5 +375,86 @@ describe('BANKO v3: açık SEÇİM FAZI (el dağıtılmadan, herkes görür)', (
     beginBankoPhase(st);
     expect(st.bankoUsed.every(Boolean)).toBe(true); // bot dahil herkes
     expect(st.bankoChoice.every((c) => c === 1)).toBe(true);
+  });
+});
+
+describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
+  function g101() {
+    const st = createOkeyGame({ seed: 101, dealerSeat: 0, rules: { variant: 'yuzbir', totalEls: 1 } as any });
+    st.phase = 'discard';
+    st.turn = 0;
+    return st;
+  }
+
+  it('seri/küt açışı 101 eşiğini ister ve katlamalıda bir üstüne çıkar', () => {
+    const st = g101();
+    const groups = [
+      [t('R', 10), t('R', 11), t('R', 12), t('R', 13)],
+      [t('Y', 10), t('Y', 11), t('Y', 12), t('Y', 13)],
+      [t('B', 10), t('B', 11), t('B', 12)],
+    ];
+    st.players[0]!.hand = groups.flat().concat([t('K', 2), t('K', 3), t('K', 4), t('Y', 1)]);
+    const r = applyOkeyMove(st, 0, { t: 'open', groups: groups.map((x) => x.map((z) => z.id)) } as any);
+    expect(r.ok).toBe(true);
+    expect(st.players[0]!.hasOpened).toBe(true);
+    expect(st.players[0]!.openingPoints).toBe(125);
+    expect(st.openMelds.length).toBe(3);
+    expect(yuzbirOpeningMin(st)).toBe(126);
+
+    st.turn = 1;
+    st.phase = 'discard';
+    const low = [[t('R', 1), t('R', 2), t('R', 3)], [t('Y', 9), t('B', 9), t('K', 9)]];
+    st.players[1]!.hand = low.flat();
+    expect(applyOkeyMove(st, 1, { t: 'open', groups: low.map((x) => x.map((z) => z.id)) } as any).ok).toBe(false);
+  });
+
+  it('5 çift açar; katlamalıda sonraki çift açışı 6 çift ister', () => {
+    const st = g101();
+    const pairs = [
+      [t('R', 1), t('R', 1)],
+      [t('Y', 2), t('Y', 2)],
+      [t('B', 3), t('B', 3)],
+      [t('K', 4), t('K', 4)],
+      [t('R', 5), t('R', 5)],
+    ];
+    st.players[0]!.hand = pairs.flat().concat([t('Y', 6), t('B', 7), t('K', 8), t('R', 9), t('Y', 10)]);
+    const r = applyOkeyMove(st, 0, { t: 'openPairs', pairs: pairs.map((x) => x.map((z) => z.id)) } as any);
+    expect(r.ok).toBe(true);
+    expect(st.players[0]!.openMode).toBe('pairs');
+    expect(st.players[0]!.openingPairs).toBe(5);
+    expect(yuzbirPairOpeningMin(st)).toBe(6);
+
+    st.turn = 1;
+    st.phase = 'discard';
+    const p5 = [
+      [t('R', 6), t('R', 6)],
+      [t('Y', 7), t('Y', 7)],
+      [t('B', 8), t('B', 8)],
+      [t('K', 9), t('K', 9)],
+      [t('R', 10), t('R', 10)],
+    ];
+    st.players[1]!.hand = p5.flat();
+    expect(applyOkeyMove(st, 1, { t: 'openPairs', pairs: p5.map((x) => x.map((z) => z.id)) } as any).ok).toBe(false);
+  });
+
+  it('101 bitişte açmayan oyuncuya 202 yazar, bitiren -101 alır', () => {
+    const st = g101();
+    const open = [
+      [t('R', 10), t('R', 11), t('R', 12), t('R', 13)],
+      [t('Y', 10), t('Y', 11), t('Y', 12), t('Y', 13)],
+      [t('B', 10), t('B', 11), t('B', 12)],
+    ];
+    const rest = [t('K', 1), t('K', 2), t('K', 3), t('R', 4)];
+    st.players[0]!.hand = open.flat().concat(rest);
+    expect(applyOkeyMove(st, 0, { t: 'open', groups: open.map((x) => x.map((z) => z.id)) } as any).ok).toBe(true);
+    expect(st.players[0]!.hand.length).toBe(4);
+    const throwaway = rest[3]!;
+    expect(applyOkeyMove(st, 0, { t: 'finish', tileId: throwaway.id }).ok).toBe(true);
+    expect(st.elEnded).toBe(true);
+    expect(st.scores[0]).toBe(-101);
+    expect(st.scores[1]).toBe(202);
+    expect(st.scores[2]).toBe(202);
+    expect(st.scores[3]).toBe(202);
+    expect(st.matchEnded).toBe(true);
   });
 });

@@ -30,8 +30,8 @@ const gameServer = new Server({
 // "ellibir" odası — masa. Matchmaking: joinOrCreate("ellibir", { mode, table }).
 // filterBy(mode,table): aynı mod + aynı masa no → AYNI odada buluşur ("Masa 3'te buluşalım").
 gameServer.define('ellibir', EllibirRoom).filterBy(['mode', 'table']);
-// "okey" odası — aynı matchmaking modeli: joinOrCreate("okey", { mode, table }).
-gameServer.define('okey', OkeyRoom).filterBy(['mode', 'table']);
+// "okey" odası — aynı matchmaking modeli: joinOrCreate("okey", { mode, table, variant }).
+gameServer.define('okey', OkeyRoom).filterBy(['mode', 'table', 'variant']);
 // "tavla" odası — 2 kişilik: joinOrCreate("tavla", { mode, table }).
 gameServer.define('tavla', TavlaRoom).filterBy(['mode', 'table']);
 

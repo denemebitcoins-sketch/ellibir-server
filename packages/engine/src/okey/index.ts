@@ -9,6 +9,7 @@ export {
 export {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, elMultOf,
   beginBankoPhase, chooseBanko, choosePas, resolveBankoPhase, botBankoDecide,
+  yuzbirOpeningMin, yuzbirPairOpeningMin, bestYuzbirMeldOpening, bestYuzbirPairOpening, pairGroupsFor,
 } from './game';
-export type { OkeyGameState, OkeyPlayer, OkeyMove, OkeyMoveResult, OkeyCreateOptions } from './game';
+export type { OkeyGameState, OkeyPlayer, OkeyMove, OkeyMoveResult, OkeyCreateOptions, OkeyPublicMeld } from './game';
 export { playOkeyBotTurn } from './bot';

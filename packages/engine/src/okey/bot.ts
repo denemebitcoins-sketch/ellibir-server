@@ -1,5 +1,11 @@
 import type { OkeyGameState } from './game';
-import { applyOkeyMove } from './game';
+import {
+  applyOkeyMove,
+  bestYuzbirMeldOpening,
+  bestYuzbirPairOpening,
+  yuzbirOpeningMin,
+  yuzbirPairOpeningMin,
+} from './game';
 import type { OkeyTile } from './types';
 import { identityOf, isOkeyTile } from './deck';
 import { canFinishMelds, canFinishPairs } from './melds';
@@ -61,6 +67,17 @@ export function playOkeyBotTurn(state: OkeyGameState, seat: number): void {
     }
     applyOkeyMove(state, seat, { t: 'draw', from });
     if (state.elEnded) return;
+  }
+
+  if (state.rules.variant === 'yuzbir' && !p.hasOpened && state.phase === 'discard') {
+    const pair = bestYuzbirPairOpening(state, seat);
+    if (pair.count >= yuzbirPairOpeningMin(state))
+      applyOkeyMove(state, seat, { t: 'openPairs', pairs: pair.pairs });
+    else {
+      const meld = bestYuzbirMeldOpening(state, seat);
+      if (meld.points >= yuzbirOpeningMin(state))
+        applyOkeyMove(state, seat, { t: 'open', groups: meld.groups });
+    }
   }
 
   const finishId = findFinishTile(state, seat);
