@@ -442,10 +442,47 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
   return { ok: true };
 }
 
+function preferPrependRun(tiles: readonly OkeyTile[], tile: OkeyTile, state: OkeyGameState): boolean {
+  const id = identityOf(tile, state.okeyColor, state.okeyRank);
+  if (id.wild) return false;
+  const real = tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank)).filter((i) => !i.wild);
+  if (real.length === 0) return false;
+  const pos = (rank: number) => rank === 1 && real.some((x) => x.rank >= 10) ? 14 : rank;
+  return pos(id.rank) < Math.min(...real.map((x) => pos(x.rank)));
+}
+
+function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, tileId: string): OkeyMoveResult {
+  if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
+  if (state.phase !== 'discard') return { ok: false, error: 'işlemek için önce taş çekmelisin' };
+  const p = state.players[seat]!;
+  if (!p.hasOpened) return { ok: false, error: 'işlemek için önce açmalısın' };
+  const meld = state.openMelds.find((m) => m.id === meldId);
+  if (!meld) return { ok: false, error: 'per bulunamadı' };
+  if (meld.kind === 'pair') return { ok: false, error: 'çift perine tek taş işlenmez' };
+  const idx = tileById(p, tileId);
+  if (idx < 0) return { ok: false, error: 'taş elinde değil' };
+  const tile = p.hand[idx]!;
+  const test = [...meld.tiles, tile];
+  if (meld.kind === 'set') {
+    if (!isValidSet(test, state.okeyColor, state.okeyRank)) return { ok: false, error: 'taş bu küte işlenemez' };
+    meld.tiles.push(tile);
+  } else {
+    if (!isValidRun(test, state.okeyColor, state.okeyRank)) return { ok: false, error: 'taş bu seriye işlenemez' };
+    if (preferPrependRun(meld.tiles, tile, state)) meld.tiles.unshift(tile);
+    else meld.tiles.push(tile);
+  }
+  const c = classifyMeld(meld.tiles, state);
+  if (c) meld.points = c.points;
+  p.hand.splice(idx, 1);
+  state.matchLog.push(`${p.name} taş işledi`);
+  return { ok: true };
+}
+
 export type OkeyMove =
   | { t: 'draw'; from: 'pile' | 'left' }
   | { t: 'open'; groups: string[][] }
   | { t: 'openPairs'; pairs: string[][] }
+  | { t: 'extend'; meldId: string; tileId: string }
   | { t: 'discard'; tileId: string }
   | { t: 'finish'; tileId: string }
   | { t: 'gosterge' }
@@ -492,6 +529,8 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       return openYuzbirMelds(state, seat, move.groups);
     case 'openPairs':
       return openYuzbirPairs(state, seat, move.pairs);
+    case 'extend':
+      return extendYuzbirMeld(state, seat, move.meldId, move.tileId);
     case 'discard': {
       if (state.phase !== 'discard') return { ok: false, error: 'önce taş çekmelisin' };
       const idx = tileById(p, move.tileId);
