@@ -704,6 +704,7 @@ alter table public.profiles add column if not exists vip_until timestamptz;
 alter table public.profiles add column if not exists last_daily date;
 alter table public.profiles add column if not exists daily_day integer not null default 0;
 alter table public.profiles add column if not exists vip_daily_day integer not null default 0;
+alter table public.profiles add column if not exists vip_last_daily date;
 alter table public.profiles add column if not exists role text not null default 'normal';
 alter table public.profiles add column if not exists banned boolean not null default false;
 alter table public.profiles add column if not exists chat_banned_until timestamptz;
@@ -747,6 +748,7 @@ begin
     new.last_daily := null;
     new.daily_day := 0;
     new.vip_daily_day := 0;
+    new.vip_last_daily := null;
     new.role := 'normal';
     new.banned := false;
     new.chat_banned_until := null;
@@ -764,6 +766,7 @@ begin
     new.last_daily := old.last_daily;
     new.daily_day := old.daily_day;
     new.vip_daily_day := old.vip_daily_day;
+    new.vip_last_daily := old.vip_last_daily;
     new.role := old.role;
     new.banned := old.banned;
     new.chat_banned_until := old.chat_banned_until;
@@ -784,3 +787,189 @@ for each row execute function public.profiles_guard_client_sensitive();
 --   select tgname from pg_trigger where tgname='trg_profiles_guard_client_sensitive';
 --   authenticated client update chips/diamonds denemesi eski değerde kalmalı;
 --   service_role RPC add_chips/deduct_chips çalışmaya devam etmeli.
+
+-- ─────────────────────────────────────────────────────────────────────
+-- BÖLÜM 41) GÜNLÜK ÖDÜL + VIP SONRADAN AÇILMA ONARIMI
+--   Normal günlük ödül ile VIP günlük bonusu ayrı takip edilir. Oyuncu aynı gün
+--   normal ödülü aldıktan sonra VIP alırsa claim_daily aynı gün yalnız VIP bonusunu
+--   (+10.000 çip, +5 elmas) tekrar açar. Mock VIP RPC production IAP/receipt
+--   doğrulaması gelene kadar client mağaza akışıyla aynı prototip davranışı sağlar.
+-- ─────────────────────────────────────────────────────────────────────
+alter table public.profiles add column if not exists vip_last_daily date;
+
+create or replace function public.buy_vip_mock(p_months int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid text := auth.uid()::text;
+  v_months int := greatest(1, least(coalesce(p_months, 1), 12));
+  r record;
+  v_base timestamptz;
+  v_until timestamptz;
+begin
+  if auth.uid() is null then
+    return jsonb_build_object('ok', false);
+  end if;
+
+  select * into r from public.profiles where id::text = v_uid for update;
+  if not found then
+    return jsonb_build_object('ok', false);
+  end if;
+
+  v_base := case when r.vip_until is not null and r.vip_until > now() then r.vip_until else now() end;
+  v_until := v_base + make_interval(months => v_months);
+
+  update public.profiles
+     set vip_until = v_until
+   where id::text = v_uid
+   returning chips, diamonds, vip_until into r;
+
+  return jsonb_build_object(
+    'ok', true,
+    'vip_until', r.vip_until,
+    'chips', coalesce(r.chips, 0),
+    'diamonds', coalesce(r.diamonds, 0)
+  );
+end;
+$$;
+
+create or replace function public.get_daily_state()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid text := auth.uid()::text;
+  r record;
+  v_today date := (now() at time zone 'Europe/Istanbul')::date;
+  v_dow int := extract(isodow from (now() at time zone 'Europe/Istanbul'))::int;
+  v_week text := to_char((now() at time zone 'Europe/Istanbul')::date, 'IYYY-IW');
+  v_mask int := 0;
+  v_vip_active boolean := false;
+  v_vip_claimed boolean := false;
+  v_vip_claimable boolean := false;
+begin
+  if auth.uid() is null then
+    return jsonb_build_object('dow', v_dow, 'week', v_week, 'mask', 0, 'chips', 0, 'diamonds', 0,
+      'vip_until', null, 'vip_claimed_today', false, 'vip_claimable_today', false);
+  end if;
+
+  select * into r from public.profiles where id::text = v_uid;
+  if not found then
+    return jsonb_build_object('dow', v_dow, 'week', v_week, 'mask', 0, 'chips', 0, 'diamonds', 0,
+      'vip_until', null, 'vip_claimed_today', false, 'vip_claimable_today', false);
+  end if;
+
+  if r.last_daily is not null
+     and to_char(r.last_daily, 'IYYY-IW') = v_week
+     and coalesce(r.daily_day, 0) between 1 and 7 then
+    v_mask := power(2, r.daily_day - 1)::int;
+  end if;
+
+  v_vip_active := coalesce(r.role, 'normal') = 'admin' or (r.vip_until is not null and r.vip_until > now());
+  v_vip_claimed := r.vip_last_daily = v_today and coalesce(r.vip_daily_day, 0) = v_dow;
+  v_vip_claimable := v_vip_active
+    and r.last_daily = v_today
+    and coalesce(r.daily_day, 0) = v_dow
+    and not v_vip_claimed;
+
+  return jsonb_build_object(
+    'dow', v_dow,
+    'week', v_week,
+    'mask', v_mask,
+    'chips', coalesce(r.chips, 0),
+    'diamonds', coalesce(r.diamonds, 0),
+    'vip_until', r.vip_until,
+    'vip_claimed_today', v_vip_claimed,
+    'vip_claimable_today', v_vip_claimable
+  );
+end;
+$$;
+
+create or replace function public.claim_daily(p_day int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid text := auth.uid()::text;
+  r record;
+  v_today date := (now() at time zone 'Europe/Istanbul')::date;
+  v_dow int := extract(isodow from (now() at time zone 'Europe/Istanbul'))::int;
+  v_normal_chips bigint[] := array[250, 400, 600, 900, 1300, 1800, 2500];
+  v_chips_delta bigint := 0;
+  v_diamonds_delta int := 0;
+  v_vip_active boolean := false;
+  v_normal_claimed boolean := false;
+  v_vip_claimed boolean := false;
+  v_vip_only boolean := false;
+begin
+  if auth.uid() is null or p_day is null or p_day <> v_dow then
+    return jsonb_build_object('ok', false);
+  end if;
+
+  select * into r from public.profiles where id::text = v_uid for update;
+  if not found then
+    return jsonb_build_object('ok', false);
+  end if;
+
+  v_vip_active := coalesce(r.role, 'normal') = 'admin' or (r.vip_until is not null and r.vip_until > now());
+  v_normal_claimed := r.last_daily = v_today and coalesce(r.daily_day, 0) = v_dow;
+  v_vip_claimed := r.vip_last_daily = v_today and coalesce(r.vip_daily_day, 0) = v_dow;
+
+  if v_normal_claimed then
+    if v_vip_active and not v_vip_claimed then
+      v_chips_delta := 10000;
+      v_diamonds_delta := 5;
+      v_vip_only := true;
+      update public.profiles
+         set chips = coalesce(chips, 0) + v_chips_delta,
+             diamonds = coalesce(diamonds, 0) + v_diamonds_delta,
+             vip_daily_day = v_dow,
+             vip_last_daily = v_today
+       where id::text = v_uid
+       returning chips, diamonds into r;
+    else
+      return jsonb_build_object('ok', false, 'chips', coalesce(r.chips, 0), 'diamonds', coalesce(r.diamonds, 0));
+    end if;
+  else
+    v_chips_delta := v_normal_chips[v_dow];
+    v_diamonds_delta := case when v_dow = 7 then 2 else 0 end;
+    if v_vip_active and not v_vip_claimed then
+      v_chips_delta := v_chips_delta + 10000;
+      v_diamonds_delta := v_diamonds_delta + 5;
+    end if;
+
+    update public.profiles
+       set chips = coalesce(chips, 0) + v_chips_delta,
+           diamonds = coalesce(diamonds, 0) + v_diamonds_delta,
+           last_daily = v_today,
+           daily_day = v_dow,
+           vip_daily_day = case when v_vip_active and not v_vip_claimed then v_dow else vip_daily_day end,
+           vip_last_daily = case when v_vip_active and not v_vip_claimed then v_today else vip_last_daily end
+     where id::text = v_uid
+     returning chips, diamonds into r;
+  end if;
+
+  return jsonb_build_object(
+    'ok', true,
+    'chips_delta', v_chips_delta,
+    'diamonds_delta', v_diamonds_delta,
+    'chips', coalesce(r.chips, 0),
+    'diamonds', coalesce(r.diamonds, 0),
+    'vip_only', v_vip_only
+  );
+end;
+$$;
+
+grant execute on function public.buy_vip_mock(int) to authenticated;
+grant execute on function public.get_daily_state() to authenticated;
+grant execute on function public.claim_daily(int) to authenticated;
+
+-- BÖLÜM 41 doğrulama:
+--   select proname from pg_proc where proname in ('buy_vip_mock','get_daily_state','claim_daily');
