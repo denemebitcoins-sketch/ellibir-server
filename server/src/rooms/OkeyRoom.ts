@@ -12,6 +12,31 @@ const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5,
 const GIFT_DIAMONDS: Record<number, number> = { 1: 5, 2: 8, 3: 6, 4: 25, 5: 15, 6: 18, 7: 12, 8: 10, 9: 14, 10: 16, 11: 35, 12: 60 };
 const GIFT_NAMES: Record<number, string> = { 1: 'Çay', 2: 'Türk Kahvesi', 3: 'Limonata', 4: 'Semaver', 5: 'Pasta', 6: 'Baklava', 7: 'Lokum', 8: 'Dondurma', 9: 'Çikolata', 10: 'Meyve Tabağı', 11: 'Çiçek Buketi', 12: 'Altın Hediye Kesesi' };
 
+type OkeyVariant = OkeyRuleConfig['variant'];
+
+function parseOkeyRulesOption(options: any): any {
+  try {
+    const raw = options?.rules;
+    if (typeof raw === 'string' && raw.trim().length > 0) return JSON.parse(raw);
+    if (raw && typeof raw === 'object') return raw;
+  } catch {
+    // Eski client bozuk/eksik JSON yollarsa varsayılan düz masaya düşer.
+  }
+  return null;
+}
+
+function normalizeOkeyVariant(raw: any): OkeyVariant {
+  return raw === 'banko' ? 'banko' : raw === 'yuzbir' ? 'yuzbir' : 'duz';
+}
+
+export function normalizeOkeyJoinOptions(options: any): { parsed: any; variant: OkeyVariant } {
+  const parsed = parseOkeyRulesOption(options);
+  // Geriye uyumluluk: eski build'ler varyantı sadece rules.variant içinde gönderiyordu.
+  const variant = normalizeOkeyVariant(options?.variant ?? parsed?.variant);
+  if (options && typeof options === 'object') options.variant = variant;
+  return { parsed, variant };
+}
+
 /**
  * OKEY masası — EllibirRoom ile AYNI sosyal/reconnect altyapısı (chat/hediye/quickChat/olaylar,
  * onDrop→allowReconnection(180)→onReconnect, izleyici, sit), motor olarak okey engine.
@@ -50,6 +75,13 @@ export class OkeyRoom extends Room {
   private lastReconnectAt = new Map<string, number>();
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkani (wifi->mobil gecisi)
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar (izleyici katıldı vb.)
+
+  static async onAuth(_token: string, options: any): Promise<any> {
+    normalizeOkeyJoinOptions(options);
+    const uid = await verifyToken(options?.token);
+    if (uid && (await isGameBanned(uid))) throw new Error('banned');
+    return uid ?? true;
+  }
 
   onCreate(options: any) {
     // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
@@ -99,10 +131,7 @@ export class OkeyRoom extends Room {
     this.humanSeats = mode === 'duo' ? [0, 2] : mode === 'quad' ? [0, 1, 2, 3] : [0];
     const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
 
-    let parsed: any = null;
-    try { parsed = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
-    catch { parsed = null; }
-    const requestedVariant = options?.variant === 'banko' ? 'banko' : options?.variant === 'yuzbir' ? 'yuzbir' : 'duz';
+    const { parsed, variant: requestedVariant } = normalizeOkeyJoinOptions(options);
     const rules: OkeyRuleConfig = {
       ...DEFAULT_OKEY_RULES,
       ...(parsed && typeof parsed === 'object' ? parsed : {}),
