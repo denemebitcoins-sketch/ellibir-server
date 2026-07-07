@@ -3,6 +3,7 @@ import {
   applyOkeyMove,
   bestYuzbirMeldOpening,
   bestYuzbirPairOpening,
+  canTakeYuzbirLeft,
   yuzbirOpeningMin,
   yuzbirPairOpeningMin,
 } from './game';
@@ -63,7 +64,8 @@ export function playOkeyBotTurn(state: OkeyGameState, seat: number): void {
     let from: 'pile' | 'left' = 'pile';
     if (leftTop) {
       const gain = synergy(p.hand, leftTop, state);
-      if (gain >= 6 || isOkeyTile(leftTop, state.okeyColor, state.okeyRank)) from = 'left';
+      const usefulLeft = state.rules.variant !== 'yuzbir' || (!p.hasOpened && canTakeYuzbirLeft(state, seat, leftTop));
+      if (usefulLeft && (gain >= 6 || isOkeyTile(leftTop, state.okeyColor, state.okeyRank))) from = 'left';
     }
     const draw = applyOkeyMove(state, seat, { t: 'draw', from });
     if (!draw.ok && from === 'left' && state.phase === 'draw')

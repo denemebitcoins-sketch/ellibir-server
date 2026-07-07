@@ -58,6 +58,7 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     pairsMin: state.rules.variant === 'yuzbir' ? yuzbirPairOpeningMin(state) : 0,
     myHasOpened: !!(me && me.hasOpened),
     myOpenMode: me?.openMode ?? '',
+    myPendingLeft: !!me?.yuzbirPendingLeftTileId,
     openMelds: (state.openMelds ?? []).map(mapMeld),
     myHand: seat >= 0 && me ? me.hand.map(mapTile) : [],
     // GÖSTERGE butonu koşulu (kullanıcı: ilk taş atıldıktan sonra buton GÖRÜNMESİN):
@@ -93,7 +94,7 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     scores: [0, 0, 0, 0], startScore: 0, turnTimerSeconds: 30,
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
     variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], bankoPhase: false, bankoChoice: [-1, -1, -1, -1], bankoDealer: 0, sheetBankoFlat: [],
-    openingMin: 0, pairsMin: 0, myHasOpened: false, myOpenMode: '', openMelds: [],
+    openingMin: 0, pairsMin: 0, myHasOpened: false, myOpenMode: '', myPendingLeft: false, openMelds: [],
     myHand: [], myShowedGosterge: false, myDiscardCount: 0,
     disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,

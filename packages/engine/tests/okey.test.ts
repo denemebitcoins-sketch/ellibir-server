@@ -417,7 +417,7 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(r.error).toContain('101');
   });
 
-  it('101de soldan taş yalnız elde tutulacaksa alınamaz', () => {
+  it('101de soldan taş elde tutulmak için alınabilir ve geri bırakılabilir', () => {
     const st = g101();
     st.phase = 'draw';
     st.turn = 0;
@@ -429,9 +429,18 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     st.discards[3]!.push(left);
 
     const r = applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any);
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBe(left.id);
+    expect(st.discards[3]!.length).toBe(0);
+    expect(st.players[0]!.hand.some((x) => x.id === left.id)).toBe(true);
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: st.players[0]!.hand[0]!.id } as any).ok).toBe(false);
+
+    const ret = applyOkeyMove(st, 0, { t: 'returnLeft' } as any);
+    expect(ret.ok).toBe(true);
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
     expect(st.discards[3]![st.discards[3]!.length - 1]?.id).toBe(left.id);
     expect(st.players[0]!.hand.some((x) => x.id === left.id)).toBe(false);
+    expect(st.phase).toBe('draw');
   });
 
   it('101de soldan alınan taş aynı turda açılmadan atış yapılamaz, açınca kilit kalkar', () => {

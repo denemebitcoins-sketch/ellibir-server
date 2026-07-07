@@ -457,11 +457,30 @@ function canOpenInitialWithTile(state: OkeyGameState, seat: number, tile: OkeyTi
   }
 }
 
-function canTakeYuzbirLeft(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
+export function canTakeYuzbirLeft(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
   const p = state.players[seat]!;
   if (!p.hasOpened) return canOpenInitialWithTile(state, seat, tile);
   if (state.openMelds.some((m) => canExtendYuzbirMeldWithTile(state, m, tile))) return true;
   return canOpenAdditionalWithTile(state, seat, tile);
+}
+
+function returnYuzbirLeft(state: OkeyGameState, seat: number): OkeyMoveResult {
+  if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu hamle yalnız 101 masasında kullanılır' };
+  if (state.phase !== 'discard') return { ok: false, error: 'geri bırakmak için soldan taş almış olmalısın' };
+  const p = state.players[seat]!;
+  const pendingId = p.yuzbirPendingLeftTileId;
+  if (!pendingId) return { ok: false, error: 'geri bırakılacak soldan taş yok' };
+  const idx = tileById(p, pendingId);
+  if (idx < 0) {
+    p.yuzbirPendingLeftTileId = undefined;
+    return { ok: false, error: 'soldan alınan taş elde bulunamadı' };
+  }
+  const tile = p.hand.splice(idx, 1)[0]!;
+  state.discards[(seat + 3) % 4]!.push(tile);
+  p.yuzbirPendingLeftTileId = undefined;
+  state.phase = 'draw';
+  state.matchLog.push(`${p.name} soldan aldığı taşı geri bıraktı`);
+  return { ok: true };
 }
 
 function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][]): OkeyMoveResult {
@@ -586,6 +605,7 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
 
 export type OkeyMove =
   | { t: 'draw'; from: 'pile' | 'left' }
+  | { t: 'returnLeft' }
   | { t: 'open'; groups: string[][] }
   | { t: 'openPairs'; pairs: string[][] }
   | { t: 'extend'; meldId: string; tileId: string }
@@ -622,8 +642,6 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
         const leftPile = state.discards[(seat + 3) % 4]!;
         const top = leftPile[leftPile.length - 1];
         if (!top) return { ok: false, error: 'solda atılmış taş yok' };
-        if (state.rules.variant === 'yuzbir' && !canTakeYuzbirLeft(state, seat, top))
-          return { ok: false, error: 'soldan taşı ancak hemen açacak veya işleyeceksen alabilirsin' };
         leftPile.pop();
         p.hand.push(top);
         if (state.rules.variant === 'yuzbir') p.yuzbirPendingLeftTileId = top.id;
@@ -636,6 +654,8 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       state.phase = 'discard';
       return { ok: true };
     }
+    case 'returnLeft':
+      return returnYuzbirLeft(state, seat);
     case 'open':
       return openYuzbirMelds(state, seat, move.groups);
     case 'openPairs':
