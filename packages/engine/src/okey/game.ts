@@ -417,18 +417,71 @@ export function bestYuzbirPairOpening(state: OkeyGameState, seat: number): { pai
 }
 
 function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
-  if (meld.kind === 'pair') return canExtendYuzbirPairWithTile(state, meld, tile);
+  if (buildYuzbirJokerReplacement(state, meld, tile)) return true;
+  if (meld.kind === 'pair') return false;
   const test = [...meld.tiles, tile];
   if (meld.kind === 'set') return isValidSet(test, state.okeyColor, state.okeyRank);
   return isValidRun(test, state.okeyColor, state.okeyRank, false);
 }
 
-function canExtendYuzbirPairWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
-  const incoming = identityOf(tile, state.okeyColor, state.okeyRank);
-  if (incoming.wild) return true;
-  const locked = meld.tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank)).filter((i) => !i.wild);
-  if (locked.length === 0) return true;
-  return locked.some((i) => i.color === incoming.color && i.rank === incoming.rank);
+function isYuzbirIslekDiscard(state: OkeyGameState, tile: OkeyTile): boolean {
+  return (state.openMelds ?? []).some((m) => canExtendYuzbirMeldWithTile(state, m, tile));
+}
+
+function buildYuzbirJokerReplacement(
+  state: OkeyGameState,
+  meld: OkeyPublicMeld,
+  tile: OkeyTile,
+): { rescued: OkeyTile; tiles: OkeyTile[] } | null {
+  if (!meld?.tiles?.length) return null;
+  if (identityOf(tile, state.okeyColor, state.okeyRank).wild) return null;
+  for (let i = 0; i < meld.tiles.length; i++) {
+    const rescued = meld.tiles[i]!;
+    if (!identityOf(rescued, state.okeyColor, state.okeyRank).wild) continue;
+    if (meld.kind === 'run' && !yuzbirRunJokerSlotMatchesTile(state, meld.tiles, i, tile)) continue;
+    const candidate = meld.tiles.filter((_, idx) => idx !== i).concat(tile);
+    const ok = meld.kind === 'pair'
+      ? isValidPair(candidate, state.okeyColor, state.okeyRank)
+      : meld.kind === 'set'
+        ? isValidSet(candidate, state.okeyColor, state.okeyRank)
+        : isValidRun(candidate, state.okeyColor, state.okeyRank, false);
+    if (!ok) continue;
+    return { rescued, tiles: sortYuzbirMeldTiles(state, meld.kind, candidate) };
+  }
+  return null;
+}
+
+function yuzbirRunJokerSlotMatchesTile(state: OkeyGameState, tiles: readonly OkeyTile[], wildIndex: number, incomingTile: OkeyTile): boolean {
+  const incoming = identityOf(incomingTile, state.okeyColor, state.okeyRank);
+  if (incoming.wild) return false;
+  let prev: ReturnType<typeof identityOf> | null = null;
+  let next: ReturnType<typeof identityOf> | null = null;
+  for (let i = wildIndex - 1; i >= 0; i--) {
+    const id = identityOf(tiles[i]!, state.okeyColor, state.okeyRank);
+    if (!id.wild) { prev = id; break; }
+  }
+  for (let i = wildIndex + 1; i < tiles.length; i++) {
+    const id = identityOf(tiles[i]!, state.okeyColor, state.okeyRank);
+    if (!id.wild) { next = id; break; }
+  }
+  if (prev && prev.color !== incoming.color) return false;
+  if (next && next.color !== incoming.color) return false;
+  if (prev && next) {
+    const expected = prev.rank + 1;
+    return expected <= 13 && expected === next.rank - 1 && incoming.rank === expected;
+  }
+  if (prev) return prev.rank < 13 && incoming.rank === prev.rank + 1;
+  if (next) return next.rank > 1 && incoming.rank === next.rank - 1;
+  return false;
+}
+
+function sortYuzbirMeldTiles(state: OkeyGameState, kind: OkeyPublicMeldKind, tiles: OkeyTile[]): OkeyTile[] {
+  if (tiles.some((t) => identityOf(t, state.okeyColor, state.okeyRank).wild)) return tiles;
+  if (kind === 'run')
+    return [...tiles].sort((a, b) => identityOf(a, state.okeyColor, state.okeyRank).rank - identityOf(b, state.okeyColor, state.okeyRank).rank);
+  if (kind === 'set')
+    return [...tiles].sort((a, b) => identityOf(a, state.okeyColor, state.okeyRank).color.localeCompare(identityOf(b, state.okeyColor, state.okeyRank).color));
+  return tiles;
 }
 
 function canOpenAdditionalWithTile(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
@@ -582,25 +635,30 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   const processCount = state.yuzbirMeldProcessCounts[processKey] ?? 0;
   if (processCount >= 2) return { ok: false, error: 'bu pere aynı sırada en fazla 2 taş işleyebilirsin' };
   const tile = p.hand[idx]!;
-  if (meld.kind === 'pair') {
-    if (!canExtendYuzbirMeldWithTile(state, meld, tile)) return { ok: false, error: 'taş bu çifte işlenemez' };
-    meld.tiles.push(tile);
+  const replacement = buildYuzbirJokerReplacement(state, meld, tile);
+  if (replacement) {
+    meld.tiles = replacement.tiles;
+  } else if (meld.kind === 'pair') {
+    return { ok: false, error: 'taş bu çifte işlenemez' };
   } else if (meld.kind === 'set') {
     const test = [...meld.tiles, tile];
     if (!isValidSet(test, state.okeyColor, state.okeyRank)) return { ok: false, error: 'taş bu küte işlenemez' };
     meld.tiles.push(tile);
+    meld.tiles = sortYuzbirMeldTiles(state, meld.kind, meld.tiles);
   } else {
     const test = [...meld.tiles, tile];
     if (!isValidRun(test, state.okeyColor, state.okeyRank, false)) return { ok: false, error: 'taş bu seriye işlenemez' };
     if (preferPrependRun(meld.tiles, tile, state)) meld.tiles.unshift(tile);
     else meld.tiles.push(tile);
+    meld.tiles = sortYuzbirMeldTiles(state, meld.kind, meld.tiles);
   }
   const c = classifyMeld(meld.tiles, state);
   if (c) meld.points = c.points;
   p.hand.splice(idx, 1);
+  if (replacement) p.hand.push(replacement.rescued);
   state.yuzbirMeldProcessCounts[processKey] = processCount + 1;
   clearPendingLeftIfUsed(p, [tileId]);
-  state.matchLog.push(`${p.name} taş işledi`);
+  state.matchLog.push(replacement ? `${p.name} OKEY'i alarak taş işledi` : `${p.name} taş işledi`);
   return { ok: true };
 }
 
@@ -672,7 +730,15 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       const tile = p.hand.splice(idx, 1)[0]!;
       state.discards[seat]!.push(tile);
       p.discardCount++;
-      if (state.rules.variant === 'yuzbir') state.yuzbirMeldProcessCounts = {};
+      if (state.rules.variant === 'yuzbir') {
+        const islekDiscard = isYuzbirIslekDiscard(state, tile);
+        state.yuzbirMeldProcessCounts = {};
+        const penalty = state.rules.yuzbir.islekDiscardPenalty ?? 101;
+        if (islekDiscard && penalty > 0) {
+          state.scores[seat] = state.scores[seat]! + penalty;
+          state.matchLog.push(`${p.name} işlek taş attı (+${penalty} ceza)`);
+        }
+      }
       state.turn = (seat + 1) % 4;
       state.phase = 'draw';
       // KLASİK KURAL: ortadaki taşlar bitti ve atan da bitiremedi → el berabere.

@@ -28,6 +28,7 @@ export interface TavlaGameState {
   seed: number;
   rollCount: number;         // deterministik zar sayacı
   gameNumber: number;        // 1'den başlar
+  checkerLightSeat: number;  // bu oyunda krem/beyaz pul koltuğu
   players: TavlaPlayer[];    // 2 oyuncu (seat 0/1)
   points: number[];          // 24 hane, işaretli pul sayısı
   bar: number[];             // [seat0, seat1] kırık pullar
@@ -81,7 +82,7 @@ export function createTavlaGame(opts: {
   const bots = new Set(opts.botSeats ?? []);
   const names = opts.names ?? ['Oyuncu 1', 'Oyuncu 2'];
   const st: TavlaGameState = {
-    rules, seed: opts.seed, rollCount: 0, gameNumber: 0,
+    rules, seed: opts.seed, rollCount: 0, gameNumber: 0, checkerLightSeat: 0,
     players: [0, 1].map((s) => ({ seat: s, name: names[s] ?? `Oyuncu ${s + 1}`, isBot: bots.has(s) })),
     points: new Array(24).fill(0), bar: [0, 0], off: [0, 0],
     turn: 0, phase: 'roll', dice: [0, 0], movesLeft: [], openRoll: [0, 0],
@@ -98,6 +99,7 @@ export function createTavlaGame(opts: {
 export function startNextGame(st: TavlaGameState): void {
   if (st.matchEnded) return;
   st.gameNumber += 1;
+  st.checkerLightSeat = createRng(st.seed + st.gameNumber * 26699 + 4049)() < 0.5 ? 0 : 1;
   st.points = new Array(24).fill(0);
   // seat0 (+): 23:2, 12:5, 7:3, 5:5 · seat1 (−) aynanın simetriği.
   st.points[23] = 2; st.points[12] = 5; st.points[7] = 3; st.points[5] = 5;

@@ -436,6 +436,52 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.players[0]!.hasOpened).toBe(false);
   });
 
+  it('101de işlek taş atmak 101 ceza yazar ve olaylara düşer', () => {
+    const st = g101();
+    const r8 = t('R', 8), r9 = t('R', 9), r10 = t('R', 10), r11 = t('R', 11);
+    st.openMelds = [{ id: 'm1', ownerSeat: 1, kind: 'run', points: 27, tiles: [r8, r9, r10] }];
+    st.players[0]!.hand = [r11, t('B', 2)];
+    const before = st.scores[0]!;
+
+    const r = applyOkeyMove(st, 0, { t: 'discard', tileId: r11.id } as any);
+
+    expect(r.ok).toBe(true);
+    expect(st.scores[0]).toBe(before + 101);
+    expect(st.matchLog[st.matchLog.length - 1]).toContain('işlek taş attı');
+  });
+
+  it('101de jokerin yerine gerçek taş işlenince okey ele geri döner', () => {
+    const st = g101();
+    const r8 = t('R', 8), r9 = t('R', 9), okey = t('K', 13), r10 = t('R', 10), r11 = t('R', 11);
+    st.openMelds = [{ id: 'm1', ownerSeat: 1, kind: 'run', points: 38, tiles: [r8, r9, okey, r11] }];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [r10, t('B', 2)];
+
+    const r = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: r10.id } as any);
+
+    expect(r.ok).toBe(true);
+    expect(st.openMelds[0]!.tiles.map((x) => x.id)).toEqual([r8.id, r9.id, r10.id, r11.id]);
+    expect(st.players[0]!.hand.some((x) => x.id === okey.id)).toBe(true);
+    expect(st.players[0]!.hand.some((x) => x.id === r10.id)).toBe(false);
+    expect(st.matchLog[st.matchLog.length - 1]).toContain("OKEY'i alarak");
+  });
+
+  it('101de sıradaki joker slotu doldurulmuyorsa okey geri dönmez', () => {
+    const st = g101();
+    const okey = t('K', 13), r8 = t('R', 8), r9 = t('R', 9), r10 = t('R', 10);
+    st.openMelds = [{ id: 'm1', ownerSeat: 1, kind: 'run', points: 24, tiles: [okey, r8, r9] }];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [r10, t('B', 2)];
+
+    const r = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: r10.id } as any);
+
+    expect(r.ok).toBe(true);
+    expect(st.openMelds[0]!.tiles.map((x) => x.id)).toEqual([okey.id, r8.id, r9.id, r10.id]);
+    expect(st.players[0]!.hand.some((x) => x.id === okey.id)).toBe(false);
+  });
+
   it('101de soldan taş elde tutulmak için alınabilir ve geri bırakılabilir', () => {
     const st = g101();
     st.phase = 'draw';

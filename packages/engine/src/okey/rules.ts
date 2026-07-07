@@ -10,6 +10,7 @@ export interface OkeyYuzbirConfig {
   winnerBonus: number;      // bitiren oyuncu delta'sı (klasik: -101)
   pairPenaltyX: number;     // çift bitiş/çift açmış oyuncu ceza çarpanı
   okeyFinishX: number;      // okey atarak bitiş çarpanı
+  islekDiscardPenalty: number; // açık taşlara işleyebilen taş atma cezası
 }
 
 export interface OkeyRuleConfig {
@@ -41,5 +42,6 @@ export const DEFAULT_OKEY_RULES: OkeyRuleConfig = {
     winnerBonus: -101,
     pairPenaltyX: 2,
     okeyFinishX: 2,
+    islekDiscardPenalty: 101,
   },
 };

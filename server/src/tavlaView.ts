@@ -15,6 +15,7 @@ export function tavlaViewFor(state: TavlaGameState | null, seat: number): Record
     seat,
     spectator: seat < 0,
     gameNumber: state.gameNumber,
+    checkerLightSeat: state.checkerLightSeat ?? 0,
     targetScore: state.rules.targetScore,
     turnTimerSeconds: state.rules.turnTimerSeconds,
     turn: state.turn,
@@ -49,7 +50,7 @@ export function emptyTavlaView(seat: number): Record<string, unknown> {
   return {
     viewVersion: VIEW_VERSION,
     game: 'tavla', seat, spectator: seat < 0,
-    gameNumber: 0, targetScore: 5, turnTimerSeconds: 45,
+    gameNumber: 0, checkerLightSeat: 0, targetScore: 5, turnTimerSeconds: 45,
     turn: -1, phase: 'roll',
     points: new Array(24).fill(0), bar0: 0, bar1: 0, off0: 0, off1: 0,
     dice: [0, 0], movesLeft: [], openRoll: [0, 0],
