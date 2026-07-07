@@ -65,8 +65,11 @@ export function playOkeyBotTurn(state: OkeyGameState, seat: number): void {
       const gain = synergy(p.hand, leftTop, state);
       if (gain >= 6 || isOkeyTile(leftTop, state.okeyColor, state.okeyRank)) from = 'left';
     }
-    applyOkeyMove(state, seat, { t: 'draw', from });
+    const draw = applyOkeyMove(state, seat, { t: 'draw', from });
+    if (!draw.ok && from === 'left' && state.phase === 'draw')
+      applyOkeyMove(state, seat, { t: 'draw', from: 'pile' });
     if (state.elEnded) return;
+    if ((state.phase as string) !== 'discard') return;
   }
 
   if (state.rules.variant === 'yuzbir' && !p.hasOpened && state.phase === 'discard') {

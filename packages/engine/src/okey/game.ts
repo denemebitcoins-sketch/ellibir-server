@@ -72,7 +72,7 @@ export interface OkeyGameState {
   nextMeldId: number;
   yuzbirMaxOpenPoints: number; // 101 katlamalı: masadaki en yüksek seri açış
   yuzbirMaxOpenPairs: number;  // 101 katlamalı: masadaki en yüksek çift açışı
-  yuzbirMeldProcessCounts: Record<string, number>; // 101: aynı elde oyuncu+per başına işlenen taş sayısı
+  yuzbirMeldProcessCounts: Record<string, number>; // 101: aynı sırada oyuncu+per başına işlenen taş sayısı
   matchLog: string[];
 }
 
@@ -560,7 +560,7 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   if (pendingErr) return { ok: false, error: pendingErr };
   const processKey = yuzbirProcessKey(seat, meldId);
   const processCount = state.yuzbirMeldProcessCounts[processKey] ?? 0;
-  if (processCount >= 2) return { ok: false, error: 'bu pere aynı elde en fazla 2 taş işleyebilirsin' };
+  if (processCount >= 2) return { ok: false, error: 'bu pere aynı sırada en fazla 2 taş işleyebilirsin' };
   const tile = p.hand[idx]!;
   if (meld.kind === 'pair') {
     if (!canExtendYuzbirMeldWithTile(state, meld, tile)) return { ok: false, error: 'taş bu çifte işlenemez' };
@@ -651,6 +651,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       const tile = p.hand.splice(idx, 1)[0]!;
       state.discards[seat]!.push(tile);
       p.discardCount++;
+      if (state.rules.variant === 'yuzbir') state.yuzbirMeldProcessCounts = {};
       state.turn = (seat + 1) % 4;
       state.phase = 'draw';
       // KLASİK KURAL: ortadaki taşlar bitti ve atan da bitiremedi → el berabere.

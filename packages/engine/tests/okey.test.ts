@@ -478,15 +478,16 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
   });
 
-  it('101de aynı oyuncu aynı pere aynı elde en fazla 2 taş işler', () => {
+  it('101de aynı oyuncu aynı pere aynı sırada en fazla 2 taş işler', () => {
     const st = g101();
     const publicRun = [t('R', 10), t('R', 11), t('R', 12)];
     const a = t('R', 13);
     const b = t('R', 9);
     const c = t('R', 8);
+    const loose = t('Y', 1);
     st.players[0]!.hasOpened = true;
     st.players[0]!.openMode = 'melds';
-    st.players[0]!.hand = [a, b, c];
+    st.players[0]!.hand = [a, b, c, loose];
     st.openMelds = [{ id: 'm-limit', ownerSeat: 1, kind: 'run', tiles: publicRun, points: 33 }];
     st.phase = 'discard';
     st.turn = 0;
@@ -498,6 +499,32 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(third.error).toContain('en fazla 2');
     expect(st.players[0]!.hand.some((x) => x.id === c.id)).toBe(true);
     expect((st as any).yuzbirMeldProcessCounts['0:m-limit']).toBe(2);
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
+    expect((st as any).yuzbirMeldProcessCounts['0:m-limit']).toBeUndefined();
+
+    st.turn = 0;
+    st.phase = 'discard';
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-limit', tileId: c.id } as any).ok).toBe(true);
+  });
+
+  it('101 bot soldan alamadığı taşı zorlamaz, desteden çekip sırayı ilerletir', () => {
+    const st = g101();
+    const left = t('R', 5);
+    st.players[1]!.hand = [t('R', 5), t('Y', 1), t('B', 2), t('K', 3), t('R', 7), t('Y', 9)];
+    st.players[1]!.hasOpened = false;
+    st.players[1]!.openMode = null;
+    st.discards[0] = [left];
+    st.discards[1] = [];
+    st.stock = [t('K', 10)];
+    st.phase = 'draw';
+    st.turn = 1;
+
+    playOkeyBotTurn(st, 1);
+
+    expect(st.discards[0]![st.discards[0]!.length - 1]!.id).toBe(left.id);
+    expect(st.discards[1]!.length).toBe(1);
+    expect(st.turn).toBe(2);
+    expect(st.phase).toBe('draw');
   });
 
   it('seri/küt açışı 101 eşiğini ister ve katlamalıda bir üstüne çıkar', () => {
