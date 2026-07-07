@@ -478,6 +478,28 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
   });
 
+  it('101de aynı oyuncu aynı pere aynı elde en fazla 2 taş işler', () => {
+    const st = g101();
+    const publicRun = [t('R', 10), t('R', 11), t('R', 12)];
+    const a = t('R', 13);
+    const b = t('R', 9);
+    const c = t('R', 8);
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [a, b, c];
+    st.openMelds = [{ id: 'm-limit', ownerSeat: 1, kind: 'run', tiles: publicRun, points: 33 }];
+    st.phase = 'discard';
+    st.turn = 0;
+
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-limit', tileId: a.id } as any).ok).toBe(true);
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-limit', tileId: b.id } as any).ok).toBe(true);
+    const third = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-limit', tileId: c.id } as any);
+    expect(third.ok).toBe(false);
+    expect(third.error).toContain('en fazla 2');
+    expect(st.players[0]!.hand.some((x) => x.id === c.id)).toBe(true);
+    expect((st as any).yuzbirMeldProcessCounts['0:m-limit']).toBe(2);
+  });
+
   it('seri/küt açışı 101 eşiğini ister ve katlamalıda bir üstüne çıkar', () => {
     const st = g101();
     const groups = [

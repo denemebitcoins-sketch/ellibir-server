@@ -72,6 +72,7 @@ export interface OkeyGameState {
   nextMeldId: number;
   yuzbirMaxOpenPoints: number; // 101 katlamalı: masadaki en yüksek seri açış
   yuzbirMaxOpenPairs: number;  // 101 katlamalı: masadaki en yüksek çift açışı
+  yuzbirMeldProcessCounts: Record<string, number>; // 101: aynı elde oyuncu+per başına işlenen taş sayısı
   matchLog: string[];
 }
 
@@ -128,6 +129,7 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     nextMeldId: 1,
     yuzbirMaxOpenPoints: 0,
     yuzbirMaxOpenPairs: 0,
+    yuzbirMeldProcessCounts: {},
   };
   if (opts.dealFirst !== false) startNextEl(state);
   return state;
@@ -234,6 +236,7 @@ export function startNextEl(state: OkeyGameState): void {
   state.nextMeldId = 1;
   state.yuzbirMaxOpenPoints = 0;
   state.yuzbirMaxOpenPairs = 0;
+  state.yuzbirMeldProcessCounts = {};
   state.elStartScores = [...state.scores]; // yazboz delta tabanı
   // Taahhütler bu elde devreye girer (el DAĞITILMADAN söylenmişti).
   state.bankoThisEl = [...(state.bankoPending ?? [false, false, false, false])];
@@ -352,6 +355,10 @@ function clearPendingLeftIfUsed(p: OkeyPlayer, usedIds: Iterable<string>): void 
       return;
     }
   }
+}
+
+function yuzbirProcessKey(seat: number, meldId: string): string {
+  return `${seat}:${meldId}`;
 }
 
 function bestMeldCoverage(tiles: OkeyTile[], state: OkeyGameState): number {
@@ -551,6 +558,9 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   if (idx < 0) return { ok: false, error: 'taş elinde değil' };
   const pendingErr = pendingLeftError(p, [tileId]);
   if (pendingErr) return { ok: false, error: pendingErr };
+  const processKey = yuzbirProcessKey(seat, meldId);
+  const processCount = state.yuzbirMeldProcessCounts[processKey] ?? 0;
+  if (processCount >= 2) return { ok: false, error: 'bu pere aynı elde en fazla 2 taş işleyebilirsin' };
   const tile = p.hand[idx]!;
   if (meld.kind === 'pair') {
     if (!canExtendYuzbirMeldWithTile(state, meld, tile)) return { ok: false, error: 'taş bu çifte işlenemez' };
@@ -568,6 +578,7 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   const c = classifyMeld(meld.tiles, state);
   if (c) meld.points = c.points;
   p.hand.splice(idx, 1);
+  state.yuzbirMeldProcessCounts[processKey] = processCount + 1;
   clearPendingLeftIfUsed(p, [tileId]);
   state.matchLog.push(`${p.name} taş işledi`);
   return { ok: true };
