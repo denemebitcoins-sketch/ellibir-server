@@ -2,6 +2,7 @@
 // "seat reservation expired" oluyor. Rezervasyon penceresini genişlet (import'tan ÖNCE).
 process.env.COLYSEUS_SEAT_RESERVATION_TIME = '60';
 
+import './nodeGlobals';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
