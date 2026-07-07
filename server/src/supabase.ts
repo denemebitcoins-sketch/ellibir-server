@@ -290,6 +290,62 @@ export async function deductDiamonds(userId: string, amount: number): Promise<bo
   }
 }
 
+export interface YuzbirSoloPayoutPlan {
+  payouts: Map<number, number>;
+  winners: Set<number>;
+  eligibleSeats: number[];
+  house: number;
+  prizePool: number;
+}
+
+function addSplitPayout(payouts: Map<number, number>, seats: number[], amount: number): void {
+  if (seats.length === 0 || amount <= 0) return;
+  const ordered = [...seats].sort((a, b) => a - b);
+  const base = Math.floor(amount / ordered.length);
+  let rem = amount - base * ordered.length;
+  for (const seat of ordered) {
+    payouts.set(seat, (payouts.get(seat) ?? 0) + base + (rem-- > 0 ? 1 : 0));
+  }
+}
+
+export function planYuzbirSoloPayout(opts: {
+  scores: Map<number, number>;
+  openedSeats: Iterable<number>;
+  bet: number;
+  totalSeats?: number;
+}): YuzbirSoloPayoutPlan {
+  const totalSeats = Math.max(1, opts.totalSeats ?? 4);
+  const pot = totalSeats * Math.max(0, opts.bet);
+  // 51 tekli kademeli model ile aynı ev payı: 4E havuzda 0.1E ev payı, kalanı oyunculara.
+  const house = Math.min(pot, Math.floor(Math.max(0, opts.bet) * 0.1));
+  const prizePool = Math.max(0, pot - house);
+  const seen = new Set<number>();
+  const eligibleSeats = [...opts.openedSeats]
+    .filter((seat) => Number.isInteger(seat) && seat >= 0 && seat < totalSeats && !seen.has(seat) && seen.add(seat))
+    .filter((seat) => Number.isFinite(opts.scores.get(seat)))
+    .sort((a, b) => (opts.scores.get(a) ?? 0) - (opts.scores.get(b) ?? 0) || a - b);
+  const payouts = new Map<number, number>();
+  const winners = new Set<number>();
+  if (eligibleSeats.length === 0 || prizePool <= 0) return { payouts, winners, eligibleSeats, house, prizePool };
+
+  const firstScore = opts.scores.get(eligibleSeats[0]!) ?? 0;
+  const firstGroup = eligibleSeats.filter((seat) => (opts.scores.get(seat) ?? 0) === firstScore);
+  for (const seat of firstGroup) winners.add(seat);
+
+  const secondStart = eligibleSeats.find((seat) => (opts.scores.get(seat) ?? 0) !== firstScore);
+  if (secondStart == null) {
+    addSplitPayout(payouts, firstGroup, prizePool);
+    return { payouts, winners, eligibleSeats, house, prizePool };
+  }
+
+  const secondScore = opts.scores.get(secondStart) ?? 0;
+  const secondGroup = eligibleSeats.filter((seat) => (opts.scores.get(seat) ?? 0) === secondScore);
+  const firstPool = Math.floor(prizePool * 0.75);
+  addSplitPayout(payouts, firstGroup, firstPool);
+  addSplitPayout(payouts, secondGroup, prizePool - firstPool);
+  return { payouts, winners, eligibleSeats, house, prizePool };
+}
+
 /**
  * Maç sonu çip dağıtımı. seatUsers: koltuk→userId (yalnız gerçek oyuncular; bot koltuğu yok).
  * winnerSeat: motorun belirlediği kazanan koltuk. bet: masa bahsi.
@@ -304,9 +360,32 @@ export async function settleMatch(opts: {
   scores?: Map<number, number>; // koltuk → maç toplam skoru (51: DÜŞÜK kazanır) — kademeli tekli için
   totalSeats?: number;          // masa koltuk sayısı (tavla 2, diğerleri 4) — bot bahisleri SANAL pota girer
   game?: string;                // çanak hedefi: '51' | 'okey' | 'tavla' (komisyonun %50'si birikir)
+  gameVariant?: string;          // okey: 'duz' | 'banko' | 'yuzbir'
+  openedSeats?: Iterable<number>; // 101: ödül sıralamasına yalnız el açan koltuklar girer
 }): Promise<void> {
   const { seatUsers, winnerSeat, bet, teamMode, scores } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
+
+  if (!teamMode && opts.gameVariant === 'yuzbir' && scores && opts.openedSeats) {
+    const plan = planYuzbirSoloPayout({
+      scores,
+      openedSeats: opts.openedSeats,
+      bet,
+      totalSeats: opts.totalSeats ?? 4,
+    });
+    for (const [seat, uid] of seatUsers) {
+      const amount = plan.payouts.get(seat) ?? 0;
+      if (amount > 0) await rpc('add_chips', { p_user_id: uid, p_amount: amount });
+      await rpc('record_match_stats', {
+        p_user_id: uid,
+        p_won: plan.winners.has(seat),
+        p_winnings: Math.max(0, amount - bet),
+      });
+    }
+    if (opts.game) await canakAdd(opts.game, Math.floor(plan.house * 0.5));
+    console.log(`[settle] 101 TEKLI E=${bet} opened=${plan.eligibleSeats.join(',')} payouts=${[...plan.payouts.entries()].map(([s, a]) => `${s}:${a}`).join(',')}`);
+    return;
+  }
 
   // KADEMELİ TEKLİ (kararlaştırılan model): 4 gerçek oyuncu + skorlar → sıralamaya göre dağıt.
   //   Havuz 4E. 1.→3.20E, 2.→0.70E, 3-4→0, ev→0.10E. Net: 1.+2.20E, 2.−0.30E, 3-4 −E.

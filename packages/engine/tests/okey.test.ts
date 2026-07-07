@@ -391,6 +391,9 @@ describe('BANKO v3: açık SEÇİM FAZI (el dağıtılmadan, herkes görür)', (
 describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
   function g101() {
     const st = createOkeyGame({ seed: 101, dealerSeat: 0, rules: { variant: 'yuzbir', totalEls: 1 } as any });
+    st.gosterge = t('K', 12);
+    st.okeyColor = 'K';
+    st.okeyRank = 13 as OkeyRank;
     st.phase = 'discard';
     st.turn = 0;
     return st;
@@ -405,6 +408,74 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.stock.length).toBe(20);
     expect(yuzbirOpeningMin(st)).toBe(101);
     expect(yuzbirPairOpeningMin(st)).toBe(5);
+  });
+
+  it('101 masasında gösterge gösterme hamlesi reddedilir', () => {
+    const st = g101();
+    const r = applyOkeyMove(st, 0, { t: 'gosterge' } as any);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('101');
+  });
+
+  it('101de soldan taş yalnız elde tutulacaksa alınamaz', () => {
+    const st = g101();
+    st.phase = 'draw';
+    st.turn = 0;
+    st.players[0]!.hand = [
+      t('R', 1), t('Y', 3), t('B', 5), t('K', 7), t('R', 9),
+      t('Y', 11), t('B', 2), t('K', 4), t('R', 6), t('Y', 8),
+    ];
+    const left = t('R', 13);
+    st.discards[3]!.push(left);
+
+    const r = applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any);
+    expect(r.ok).toBe(false);
+    expect(st.discards[3]![st.discards[3]!.length - 1]?.id).toBe(left.id);
+    expect(st.players[0]!.hand.some((x) => x.id === left.id)).toBe(false);
+  });
+
+  it('101de soldan alınan taş aynı turda açılmadan atış yapılamaz, açınca kilit kalkar', () => {
+    const st = g101();
+    const g1 = [t('R', 10), t('R', 11), t('R', 12)];
+    const left = t('R', 13);
+    const g2 = [t('Y', 10), t('Y', 11), t('Y', 12), t('Y', 13)];
+    const g3 = [t('B', 10), t('B', 11), t('B', 12)];
+    const loose = t('K', 2);
+    st.players[0]!.hand = [...g1, ...g2, ...g3, loose];
+    st.discards[3]!.push(left);
+    st.phase = 'draw';
+    st.turn = 0;
+
+    expect(applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any).ok).toBe(true);
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBe(left.id);
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(false);
+
+    const open = [[...g1, left], g2, g3];
+    const r = applyOkeyMove(st, 0, { t: 'open', groups: open.map((x) => x.map((z) => z.id)) } as any);
+    expect(r.ok).toBe(true);
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
+  });
+
+  it('101de soldan alınan taş aynı turda yere işlenirse atış serbest kalır', () => {
+    const st = g101();
+    const publicRun = [t('R', 10), t('R', 11), t('R', 12)];
+    const left = t('R', 13);
+    const loose = t('Y', 1);
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [loose];
+    st.openMelds = [{ id: 'm-left', ownerSeat: 1, kind: 'run', tiles: publicRun, points: 33 }];
+    st.discards[3]!.push(left);
+    st.phase = 'draw';
+    st.turn = 0;
+
+    expect(applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any).ok).toBe(true);
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(false);
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-left', tileId: left.id } as any).ok).toBe(true);
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
+    expect(st.openMelds[0]!.tiles.map((x) => x.id)).toContain(left.id);
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
   });
 
   it('seri/küt açışı 101 eşiğini ister ve katlamalıda bir üstüne çıkar', () => {

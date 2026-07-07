@@ -27,6 +27,7 @@ export interface OkeyPlayer {
   openMode: 'melds' | 'pairs' | null; // 101: seri/küt mü, çift mi açtı
   openingPoints: number;   // 101: açtığı seri/küt toplamı
   openingPairs: number;    // 101: açtığı çift sayısı
+  yuzbirPendingLeftTileId?: string; // 101: soldan alınan taş bu tur açma/işlemede kullanılmalı
 }
 
 export type OkeyPublicMeldKind = 'run' | 'set' | 'pair';
@@ -107,6 +108,7 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
       seat: s, name: names[s] ?? `Oyuncu ${s + 1}`, isBot: bots.has(s),
       hand: [], showedGosterge: false, discardCount: 0,
       hasOpened: false, openMode: null, openingPoints: 0, openingPairs: 0,
+      yuzbirPendingLeftTileId: undefined,
     })),
     stock: [], discards: [[], [], [], []],
     gosterge: null as unknown as NormalOkeyTile, okeyColor: 'R', okeyRank: 1,
@@ -216,6 +218,7 @@ export function startNextEl(state: OkeyGameState): void {
     p.openMode = null;
     p.openingPoints = 0;
     p.openingPairs = 0;
+    p.yuzbirPendingLeftTileId = undefined;
   }
   state.stock = deal.stock;
   state.discards = [[], [], [], []];
@@ -236,7 +239,9 @@ export function startNextEl(state: OkeyGameState): void {
   state.bankoThisEl = [...(state.bankoPending ?? [false, false, false, false])];
   state.bankoPending = [false, false, false, false];
   // (otomatik-banko mecburiyeti beginBankoPhase'te uygulanır — seçim listesi herkes görsün diye)
-  state.matchLog.push(`El ${state.elNumber} başladı — gösterge: ${state.gosterge.color}${state.gosterge.rank}, dağıtan: ${state.players[state.dealerSeat]!.name}`);
+  state.matchLog.push(state.rules.variant === 'yuzbir'
+    ? `El ${state.elNumber} başladı — 101, dağıtan: ${state.players[state.dealerSeat]!.name}`
+    : `El ${state.elNumber} başladı — gösterge: ${state.gosterge.color}${state.gosterge.rank}, dağıtan: ${state.players[state.dealerSeat]!.name}`);
 }
 
 const tileById = (p: OkeyPlayer, id: string) => p.hand.findIndex((t) => t.id === id);
@@ -331,6 +336,24 @@ function removeTiles(p: OkeyPlayer, ids: Iterable<string>): void {
   p.hand = p.hand.filter((t) => !rm.has(t.id));
 }
 
+function pendingLeftError(p: OkeyPlayer, usedIds: Iterable<string>): string | null {
+  const id = p.yuzbirPendingLeftTileId;
+  if (!id) return null;
+  for (const used of usedIds) if (used === id) return null;
+  return 'soldan aldığın taşı aynı turda açmalı veya işlemelisin';
+}
+
+function clearPendingLeftIfUsed(p: OkeyPlayer, usedIds: Iterable<string>): void {
+  const id = p.yuzbirPendingLeftTileId;
+  if (!id) return;
+  for (const used of usedIds) {
+    if (used === id) {
+      p.yuzbirPendingLeftTileId = undefined;
+      return;
+    }
+  }
+}
+
 function bestMeldCoverage(tiles: OkeyTile[], state: OkeyGameState): number {
   return bestGrouping([...tiles], state.okeyColor, state.okeyRank).reduce((n, g) => n + g.length, 0);
 }
@@ -386,6 +409,54 @@ export function bestYuzbirPairOpening(state: OkeyGameState, seat: number): { pai
   return { pairs: pairs.map((g) => g.map((t) => t.id)), count: pairs.length };
 }
 
+function sameTileIdentity(a: OkeyTile, b: OkeyTile, state: OkeyGameState): boolean {
+  const ia = identityOf(a, state.okeyColor, state.okeyRank);
+  const ib = identityOf(b, state.okeyColor, state.okeyRank);
+  if (ia.wild || ib.wild) return true;
+  return ia.color === ib.color && ia.rank === ib.rank;
+}
+
+function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
+  if (meld.kind === 'pair') return meld.tiles.some((t) => sameTileIdentity(t, tile, state));
+  const test = [...meld.tiles, tile];
+  if (meld.kind === 'set') return isValidSet(test, state.okeyColor, state.okeyRank);
+  return isValidRun(test, state.okeyColor, state.okeyRank);
+}
+
+function canOpenAdditionalWithTile(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
+  const p = state.players[seat]!;
+  const groups = bestGrouping([...p.hand, tile], state.okeyColor, state.okeyRank);
+  if (p.openMode === 'pairs') {
+    return pairGroupsFor([...p.hand, tile], state).some((g) => g.some((t) => t.id === tile.id));
+  }
+  return groups.some((g) => {
+    const c = classifyMeld(g, state);
+    return g.some((t) => t.id === tile.id) && !!c && c.kind !== 'pair';
+  });
+}
+
+function canOpenInitialWithTile(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
+  const p = state.players[seat]!;
+  const old = p.hand;
+  p.hand = [...p.hand, tile];
+  try {
+    const meld = bestYuzbirMeldOpening(state, seat);
+    if (meld.points >= yuzbirOpeningMin(state) && meld.groups.some((g) => g.includes(tile.id))) return true;
+    const pair = bestYuzbirPairOpening(state, seat);
+    if (pair.count >= yuzbirPairOpeningMin(state) && pair.pairs.some((g) => g.includes(tile.id))) return true;
+    return false;
+  } finally {
+    p.hand = old;
+  }
+}
+
+function canTakeYuzbirLeft(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
+  const p = state.players[seat]!;
+  if (!p.hasOpened) return canOpenInitialWithTile(state, seat, tile);
+  if (state.openMelds.some((m) => canExtendYuzbirMeldWithTile(state, m, tile))) return true;
+  return canOpenAdditionalWithTile(state, seat, tile);
+}
+
 function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][]): OkeyMoveResult {
   if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
   if (state.phase !== 'discard') return { ok: false, error: 'açmak için önce taş çekmelisin' };
@@ -395,6 +466,9 @@ function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][])
   const picked = pickGroupsFromHand(p, groups);
   if (typeof picked === 'string') return { ok: false, error: picked };
   if (picked.length === 0) return { ok: false, error: 'açmak için per seç' };
+  const pickedIds = picked.flatMap((g) => g.map((t) => t.id));
+  const pendingErr = pendingLeftError(p, pickedIds);
+  if (pendingErr) return { ok: false, error: pendingErr };
   let total = 0;
   const melds: OkeyPublicMeld[] = [];
   for (const g of picked) {
@@ -407,7 +481,8 @@ function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][])
     const min = yuzbirOpeningMin(state);
     if (total < min) return { ok: false, error: `açmak için en az ${min} gerek` };
   }
-  removeTiles(p, melds.flatMap((m) => m.tiles.map((t) => t.id)));
+  removeTiles(p, pickedIds);
+  clearPendingLeftIfUsed(p, pickedIds);
   if (!p.hasOpened) {
     p.hasOpened = true;
     p.openMode = 'melds';
@@ -428,6 +503,9 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
   if (p.hasOpened && p.openMode !== 'pairs') return { ok: false, error: 'seri açan çift açamaz' };
   const picked = pickGroupsFromHand(p, pairs);
   if (typeof picked === 'string') return { ok: false, error: picked };
+  const pickedIds = picked.flatMap((g) => g.map((t) => t.id));
+  const pendingErr = pendingLeftError(p, pickedIds);
+  if (pendingErr) return { ok: false, error: pendingErr };
   if (!p.hasOpened) {
     const min = yuzbirPairOpeningMin(state);
     if (picked.length < min) return { ok: false, error: `çift açmak için en az ${min} çift gerek` };
@@ -439,7 +517,8 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
     const c = classifyMeld(g, state)!;
     melds.push({ id: `m${state.nextMeldId++}`, ownerSeat: seat, kind: 'pair', tiles: g, points: c.points });
   }
-  removeTiles(p, melds.flatMap((m) => m.tiles.map((t) => t.id)));
+  removeTiles(p, pickedIds);
+  clearPendingLeftIfUsed(p, pickedIds);
   if (!p.hasOpened) {
     p.hasOpened = true;
     p.openMode = 'pairs';
@@ -468,15 +547,20 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   if (!p.hasOpened) return { ok: false, error: 'işlemek için önce açmalısın' };
   const meld = state.openMelds.find((m) => m.id === meldId);
   if (!meld) return { ok: false, error: 'per bulunamadı' };
-  if (meld.kind === 'pair') return { ok: false, error: 'çift perine tek taş işlenmez' };
   const idx = tileById(p, tileId);
   if (idx < 0) return { ok: false, error: 'taş elinde değil' };
+  const pendingErr = pendingLeftError(p, [tileId]);
+  if (pendingErr) return { ok: false, error: pendingErr };
   const tile = p.hand[idx]!;
-  const test = [...meld.tiles, tile];
-  if (meld.kind === 'set') {
+  if (meld.kind === 'pair') {
+    if (!canExtendYuzbirMeldWithTile(state, meld, tile)) return { ok: false, error: 'taş bu çifte işlenemez' };
+    meld.tiles.push(tile);
+  } else if (meld.kind === 'set') {
+    const test = [...meld.tiles, tile];
     if (!isValidSet(test, state.okeyColor, state.okeyRank)) return { ok: false, error: 'taş bu küte işlenemez' };
     meld.tiles.push(tile);
   } else {
+    const test = [...meld.tiles, tile];
     if (!isValidRun(test, state.okeyColor, state.okeyRank)) return { ok: false, error: 'taş bu seriye işlenemez' };
     if (preferPrependRun(meld.tiles, tile, state)) meld.tiles.unshift(tile);
     else meld.tiles.push(tile);
@@ -484,6 +568,7 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   const c = classifyMeld(meld.tiles, state);
   if (c) meld.points = c.points;
   p.hand.splice(idx, 1);
+  clearPendingLeftIfUsed(p, [tileId]);
   state.matchLog.push(`${p.name} taş işledi`);
   return { ok: true };
 }
@@ -524,13 +609,18 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       if (state.phase !== 'draw') return { ok: false, error: 'önce taş atmalısın' };
       if (move.from === 'left') {
         const leftPile = state.discards[(seat + 3) % 4]!;
-        const top = leftPile.pop();
+        const top = leftPile[leftPile.length - 1];
         if (!top) return { ok: false, error: 'solda atılmış taş yok' };
+        if (state.rules.variant === 'yuzbir' && !canTakeYuzbirLeft(state, seat, top))
+          return { ok: false, error: 'soldan taşı ancak hemen açacak veya işleyeceksen alabilirsin' };
+        leftPile.pop();
         p.hand.push(top);
+        if (state.rules.variant === 'yuzbir') p.yuzbirPendingLeftTileId = top.id;
       } else {
         const top = state.stock.pop();
         if (!top) { endElDraw(state); return { ok: true }; } // deste bitti → berabere
         p.hand.push(top);
+        p.yuzbirPendingLeftTileId = undefined;
       }
       state.phase = 'discard';
       return { ok: true };
@@ -543,6 +633,8 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       return extendYuzbirMeld(state, seat, move.meldId, move.tileId);
     case 'discard': {
       if (state.phase !== 'discard') return { ok: false, error: 'önce taş çekmelisin' };
+      if (state.rules.variant === 'yuzbir' && p.yuzbirPendingLeftTileId)
+        return { ok: false, error: 'soldan aldığın taşı açmadan/işlemeden taş atamazsın' };
       const idx = tileById(p, move.tileId);
       if (idx < 0) return { ok: false, error: 'taş elinde değil' };
       const tile = p.hand.splice(idx, 1)[0]!;
@@ -556,6 +648,8 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
     }
     case 'finish': {
       if (state.phase !== 'discard') return { ok: false, error: 'önce taş çekmelisin' };
+      if (state.rules.variant === 'yuzbir' && p.yuzbirPendingLeftTileId)
+        return { ok: false, error: 'soldan aldığın taşı açmadan/işlemeden bitemezsin' };
       const idx = tileById(p, move.tileId);
       if (idx < 0) return { ok: false, error: 'taş elinde değil' };
       const thrown = p.hand[idx]!;
@@ -584,6 +678,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
 }
 
 function showGosterge(state: OkeyGameState, p: OkeyPlayer): OkeyMoveResult {
+  if (state.rules.variant === 'yuzbir') return { ok: false, error: '101 masasında gösterge yok' };
   if (p.showedGosterge) return { ok: false, error: 'zaten gösterdin' };
   if (p.discardCount > 0) return { ok: false, error: 'gösterge yalnız ilk taşını atmadan önce gösterilir' };
   const has = p.hand.some((t) => isNormalOkeyTile(t) && t.color === state.gosterge.color && t.rank === state.gosterge.rank);

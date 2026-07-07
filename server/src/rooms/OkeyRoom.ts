@@ -576,6 +576,9 @@ export class OkeyRoom extends Room {
     this.settled = true;
     const scores = new Map<number, number>();
     for (let s = 0; s < 4; s++) scores.set(s, this.game.scores[s]!);
+    const openedSeats = new Set<number>();
+    if (this.game.rules.variant === 'yuzbir')
+      for (let s = 0; s < 4; s++) if (this.game.players[s]!.hasOpened) openedSeats.add(s);
     let winnerSeat = 0;
     for (let s = 1; s < 4; s++) if (this.game.scores[s]! < this.game.scores[winnerSeat]!) winnerSeat = s;
     settleMatch({
@@ -584,6 +587,9 @@ export class OkeyRoom extends Room {
       bet: this.bet,
       teamMode: this.game.rules.teamMode,
       scores,
+      totalSeats: 4,
+      gameVariant: this.game.rules.variant,
+      openedSeats,
       game: 'okey', // çanak hedefi (düz + banko ortak çanak)
     }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
