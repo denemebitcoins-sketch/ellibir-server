@@ -38,9 +38,15 @@ export function countIdentities(hand: readonly OkeyTile[], okeyColor: OkeyColor,
 const rankAtPos = (pos: number): number => (pos === 14 ? 1 : pos);
 
 /** 14 taş, seri/küt karışımına TAM bölünebiliyor mu (geri-izleme). */
-export function canFinishMelds(hand: readonly OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank): boolean {
+export function canFinishMelds(
+  hand: readonly OkeyTile[],
+  okeyColor: OkeyColor,
+  okeyRank: OkeyRank,
+  allowHighOne = true,
+): boolean {
   if (hand.length !== 14) return false;
   const h = countIdentities(hand, okeyColor, okeyRank);
+  const maxRunPos = allowHighOne ? 14 : 13;
 
   const solve = (wilds: number, remaining: number): boolean => {
     if (remaining === 0) return wilds === 0; // açıkta joker kaldıysa el bitmemiştir
@@ -73,12 +79,12 @@ export function canFinishMelds(hand: readonly OkeyTile[], okeyColor: OkeyColor, 
     }
 
     // ── SERİ adayları: çapanın renginde, çapa pozisyonunu içeren pencereler ──
-    const anchorPositions = anchorRank === 1 ? [1, 14] : [anchorRank];
+    const anchorPositions = allowHighOne && anchorRank === 1 ? [1, 14] : [anchorRank];
     for (const ap of anchorPositions) {
-      for (let len = 3; len <= 14; len++) {
+      for (let len = 3; len <= maxRunPos; len++) {
         for (let start = Math.max(1, ap - len + 1); start <= ap; start++) {
           const end = start + len - 1;
-          if (end > 14) continue;
+          if (end > maxRunPos) continue;
           // Pencereyi doldur: pozisyondaki gerçek taş varsa kullan, yoksa joker.
           const used: string[] = [];
           let jokerNeed = 0, ok = true;
@@ -136,8 +142,13 @@ export function isValidSet(tiles: readonly OkeyTile[], okeyColor: OkeyColor, oke
   return colors.size === reals.length; // renk tekrarı yasak; jokerler kalan renkleri tutar (≤4 zaten)
 }
 
-export function isValidRun(tiles: readonly OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank): boolean {
-  if (tiles.length < 3 || tiles.length > 14) return false;
+export function isValidRun(
+  tiles: readonly OkeyTile[],
+  okeyColor: OkeyColor,
+  okeyRank: OkeyRank,
+  allowHighOne = true,
+): boolean {
+  if (tiles.length < 3 || tiles.length > (allowHighOne ? 14 : 13)) return false;
   const ids = tiles.map((t) => identityOf(t, okeyColor, okeyRank));
   const reals = ids.filter((i) => !i.wild);
   if (reals.length === 0) return false;
@@ -147,7 +158,10 @@ export function isValidRun(tiles: readonly OkeyTile[], okeyColor: OkeyColor, oke
   // Rank 1'ler pos1/pos14 seçimli → tüm kombinasyonları dene (adet ≤2).
   const ones = reals.filter((r) => r.rank === 1).length;
   const rest = reals.filter((r) => r.rank !== 1).map((r) => r.rank as number);
-  const oneChoices: number[][] = ones === 0 ? [[]] : ones === 1 ? [[1], [14]] : [[1, 14]];
+  const oneChoices: number[][] = allowHighOne
+    ? (ones === 0 ? [[]] : ones === 1 ? [[1], [14]] : [[1, 14]])
+    : (ones === 0 ? [[]] : ones === 1 ? [[1]] : [[1, 1]]);
+  const maxRunPos = allowHighOne ? 14 : 13;
   for (const oc of oneChoices) {
     const pos = [...rest, ...oc].sort((a, b) => a - b);
     if (new Set(pos).size !== pos.length) continue;   // aynı pozisyon iki kez
@@ -160,7 +174,7 @@ export function isValidRun(tiles: readonly OkeyTile[], okeyColor: OkeyColor, oke
     let fit = false;
     for (let left = 0; left <= extWilds; left++) {
       const start = pos[0]! - left, end = pos[pos.length - 1]! + (extWilds - left);
-      if (start >= 1 && end <= 14) { fit = true; break; }
+      if (start >= 1 && end <= maxRunPos) { fit = true; break; }
     }
     if (fit && gapWilds + extWilds === wilds) return true;
   }
@@ -179,7 +193,7 @@ export function isValidPair(tiles: readonly OkeyTile[], okeyColor: OkeyColor, ok
    SIRALA/skorlama için: eldeki taşlardan en çok taşı kapsayan geçerli seri/küt
    kümesini bulur (skip-anchor + memo; okey boşluğa ORTAYA girer, pos ekseni 1..14). */
 
-export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank): OkeyTile[][] {
+export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank, allowHighOne = true): OkeyTile[][] {
   const counts = new Map<string, number>();
   const pools = new Map<string, OkeyTile[]>();
   const wildPool: OkeyTile[] = [];
@@ -195,6 +209,7 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
   const get = (k: string) => counts.get(k) ?? 0;
   const take = (k: string) => counts.set(k, get(k) - 1);
   const give = (k: string) => counts.set(k, get(k) + 1);
+  const maxRunPos = allowHighOne ? 14 : 13;
 
   const memo = new Map<string, { cov: number; groups: string[][] }>();
   const stateKey = (w: number): string => {
@@ -246,12 +261,12 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
     }
 
     // 3) SERİ adayları (çapa pozisyonunu içeren pencereler).
-    const apos = ar === 1 ? [1, 14] : [ar];
+    const apos = allowHighOne && ar === 1 ? [1, 14] : [ar];
     for (const ap of apos) {
-      for (let len = 3; len <= 14; len++) {
+      for (let len = 3; len <= maxRunPos; len++) {
         for (let start = Math.max(1, ap - len + 1); start <= ap; start++) {
           const end = start + len - 1;
-          if (end > 14) continue;
+          if (end > maxRunPos) continue;
           const used: string[] = [];
           const grpDesc: string[] = [];
           let need = 0;

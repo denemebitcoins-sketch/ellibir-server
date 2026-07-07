@@ -76,6 +76,12 @@ describe('per doğrulama', () => {
     expect(isValidRun([t('R', 13), t('R', 1), t('R', 2)], OC, OR)).toBe(false);
   });
 
+  it('101 seri kuralı döngü yapmaz: 12-13-1 geçersiz, 1-2-3 geçerlidir', () => {
+    expect(isValidRun([t('R', 12), t('R', 13), t('R', 1)], OC, OR, false)).toBe(false);
+    expect(isValidRun([t('R', 1), t('R', 2), t('R', 3)], OC, OR, false)).toBe(true);
+    expect(isValidRun([t('R', 11), t('R', 12), t('R', 13)], OC, OR, false)).toBe(true);
+  });
+
   it('seri: renk karışamaz; okey boşluğu doldurur', () => {
     expect(isValidRun([t('R', 5), t('Y', 6), t('R', 7)], OC, OR)).toBe(false);
     expect(isValidRun([t('R', 5), t('K', 13), t('R', 7)], OC, OR)).toBe(true); // K13 = okey → 6 yerine
@@ -415,6 +421,19 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     const r = applyOkeyMove(st, 0, { t: 'gosterge' } as any);
     expect(r.ok).toBe(false);
     expect(r.error).toContain('101');
+  });
+
+  it('101de 12-13-1 seri açışı sayılmaz', () => {
+    const st = g101();
+    const bad = [t('R', 12), t('R', 13), t('R', 1)];
+    const g1 = [t('Y', 10), t('Y', 11), t('Y', 12), t('Y', 13)];
+    const g2 = [t('B', 10), t('B', 11), t('B', 12), t('B', 13)];
+    const g3 = [t('R', 5), t('R', 6), t('R', 7)];
+    st.players[0]!.hand = [...bad, ...g1, ...g2, ...g3, t('Y', 2)];
+    const r = applyOkeyMove(st, 0, { t: 'open', groups: [bad, g1, g2, g3].map((g) => g.map((x) => x.id)) } as any);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('geçerli seri');
+    expect(st.players[0]!.hasOpened).toBe(false);
   });
 
   it('101de soldan taş elde tutulmak için alınabilir ve geri bırakılabilir', () => {

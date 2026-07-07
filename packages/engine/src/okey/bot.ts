@@ -31,8 +31,8 @@ function synergy(hand: readonly OkeyTile[], tile: OkeyTile, state: OkeyGameState
     else if (o.color === id.color && Math.abs(o.rank - id.rank) === 1) score += 4; // bitişik seri
     else if (o.color === id.color && Math.abs(o.rank - id.rank) === 2) score += 2; // atlamalı seri
     else if (o.rank === id.rank) score += 3;                               // küt adayı
-    // 1-13 komşuluğu (12-13-1): 1 ile 13 bitişik sayılır.
-    else if (o.color === id.color && ((o.rank === 13 && id.rank === 1) || (o.rank === 1 && id.rank === 13))) score += 4;
+    // 1-13 komşuluğu düz/banko okey sezgisidir; 101'de 12-13-1 per değildir.
+    else if (state.rules.variant !== 'yuzbir' && o.color === id.color && ((o.rank === 13 && id.rank === 1) || (o.rank === 1 && id.rank === 13))) score += 4;
   }
   return score;
 }
@@ -47,7 +47,7 @@ function findFinishTile(state: OkeyGameState, seat: number): string | null {
     (isOkeyTile(b, state.okeyColor, state.okeyRank) ? 1 : 0) - (isOkeyTile(a, state.okeyColor, state.okeyRank) ? 1 : 0));
   for (const t of tryOrder) {
     const remaining = p.hand.filter((x) => x.id !== t.id);
-    if (canFinishMelds(remaining, state.okeyColor, state.okeyRank) ||
+    if (canFinishMelds(remaining, state.okeyColor, state.okeyRank, state.rules.variant !== 'yuzbir') ||
         canFinishPairs(remaining, state.okeyColor, state.okeyRank)) return t.id;
   }
   return null;

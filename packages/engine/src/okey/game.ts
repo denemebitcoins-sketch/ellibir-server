@@ -257,7 +257,7 @@ function tilePenaltyValue(t: OkeyTile, state: OkeyGameState): number {
 }
 
 function runPoints(tiles: readonly OkeyTile[], state: OkeyGameState): number | null {
-  if (!isValidRun(tiles, state.okeyColor, state.okeyRank)) return null;
+  if (!isValidRun(tiles, state.okeyColor, state.okeyRank, false)) return null;
   const ids = tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank));
   const reals = ids.filter((i) => !i.wild);
   if (reals.length === 0) return null;
@@ -266,7 +266,7 @@ function runPoints(tiles: readonly OkeyTile[], state: OkeyGameState): number | n
   const wilds = ids.length - reals.length;
   const ones = reals.filter((r) => r.rank === 1).length;
   const rest = reals.filter((r) => r.rank !== 1).map((r) => r.rank as number);
-  const oneChoices: number[][] = ones === 0 ? [[]] : ones === 1 ? [[1], [14]] : [[1, 14]];
+  const oneChoices: number[][] = ones === 0 ? [[]] : ones === 1 ? [[1]] : [[1, 1]];
   let best: number | null = null;
   for (const oc of oneChoices) {
     const pos = [...rest, ...oc].sort((a, b) => a - b);
@@ -279,7 +279,7 @@ function runPoints(tiles: readonly OkeyTile[], state: OkeyGameState): number | n
     for (let left = 0; left <= extWilds; left++) {
       const start = pos[0]! - left;
       const end = pos[pos.length - 1]! + (extWilds - left);
-      if (start < 1 || end > 14 || gapWilds + extWilds !== wilds) continue;
+      if (start < 1 || end > 13 || gapWilds + extWilds !== wilds) continue;
       let sum = 0;
       for (let p = start; p <= end; p++) sum += rankAtPos(p);
       if (best == null || sum > best) best = sum;
@@ -362,7 +362,7 @@ function yuzbirProcessKey(seat: number, meldId: string): string {
 }
 
 function bestMeldCoverage(tiles: OkeyTile[], state: OkeyGameState): number {
-  return bestGrouping([...tiles], state.okeyColor, state.okeyRank).reduce((n, g) => n + g.length, 0);
+  return bestGrouping([...tiles], state.okeyColor, state.okeyRank, false).reduce((n, g) => n + g.length, 0);
 }
 
 function canLayAllRemaining(tiles: OkeyTile[], state: OkeyGameState, mode: 'melds' | 'pairs' | null): boolean {
@@ -399,7 +399,7 @@ export function pairGroupsFor(tiles: readonly OkeyTile[], state: OkeyGameState):
 }
 
 export function bestYuzbirMeldOpening(state: OkeyGameState, seat: number): { groups: string[][]; points: number } {
-  const groups = bestGrouping([...state.players[seat]!.hand], state.okeyColor, state.okeyRank);
+  const groups = bestGrouping([...state.players[seat]!.hand], state.okeyColor, state.okeyRank, false);
   let points = 0;
   const picked: string[][] = [];
   for (const g of groups) {
@@ -420,7 +420,7 @@ function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld,
   if (meld.kind === 'pair') return canExtendYuzbirPairWithTile(state, meld, tile);
   const test = [...meld.tiles, tile];
   if (meld.kind === 'set') return isValidSet(test, state.okeyColor, state.okeyRank);
-  return isValidRun(test, state.okeyColor, state.okeyRank);
+  return isValidRun(test, state.okeyColor, state.okeyRank, false);
 }
 
 function canExtendYuzbirPairWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
@@ -433,7 +433,7 @@ function canExtendYuzbirPairWithTile(state: OkeyGameState, meld: OkeyPublicMeld,
 
 function canOpenAdditionalWithTile(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
   const p = state.players[seat]!;
-  const groups = bestGrouping([...p.hand, tile], state.okeyColor, state.okeyRank);
+  const groups = bestGrouping([...p.hand, tile], state.okeyColor, state.okeyRank, false);
   if (p.openMode === 'pairs') {
     return pairGroupsFor([...p.hand, tile], state).some((g) => g.some((t) => t.id === tile.id));
   }
@@ -591,7 +591,7 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
     meld.tiles.push(tile);
   } else {
     const test = [...meld.tiles, tile];
-    if (!isValidRun(test, state.okeyColor, state.okeyRank)) return { ok: false, error: 'taş bu seriye işlenemez' };
+    if (!isValidRun(test, state.okeyColor, state.okeyRank, false)) return { ok: false, error: 'taş bu seriye işlenemez' };
     if (preferPrependRun(meld.tiles, tile, state)) meld.tiles.unshift(tile);
     else meld.tiles.push(tile);
   }
