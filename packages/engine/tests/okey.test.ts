@@ -516,6 +516,28 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-limit', tileId: c.id } as any).ok).toBe(true);
   });
 
+  it('101de okeyle açılmış çift temsil ettiği kimliğe kilitlenir', () => {
+    const st = g101();
+    const locked = t('R', 13);
+    const joker = t('K', 13); // test kurgusunda gerçek okey
+    const bad = t('R', 3);
+    const good = t('R', 13);
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'pairs';
+    st.players[0]!.hand = [bad, good];
+    st.openMelds = [{ id: 'm-pair-lock', ownerSeat: 1, kind: 'pair', tiles: [locked, joker], points: 26 }];
+    st.phase = 'discard';
+    st.turn = 0;
+
+    const rejected = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-pair-lock', tileId: bad.id } as any);
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error).toContain('çifte işlenemez');
+    expect(st.players[0]!.hand.some((x) => x.id === bad.id)).toBe(true);
+
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-pair-lock', tileId: good.id } as any).ok).toBe(true);
+    expect(st.openMelds[0]!.tiles.map((x) => x.id)).toContain(good.id);
+  });
+
   it('101 bot soldan alamadığı taşı zorlamaz, desteden çekip sırayı ilerletir', () => {
     const st = g101();
     const left = t('R', 5);

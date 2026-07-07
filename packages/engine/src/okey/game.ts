@@ -416,18 +416,19 @@ export function bestYuzbirPairOpening(state: OkeyGameState, seat: number): { pai
   return { pairs: pairs.map((g) => g.map((t) => t.id)), count: pairs.length };
 }
 
-function sameTileIdentity(a: OkeyTile, b: OkeyTile, state: OkeyGameState): boolean {
-  const ia = identityOf(a, state.okeyColor, state.okeyRank);
-  const ib = identityOf(b, state.okeyColor, state.okeyRank);
-  if (ia.wild || ib.wild) return true;
-  return ia.color === ib.color && ia.rank === ib.rank;
-}
-
 function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
-  if (meld.kind === 'pair') return meld.tiles.some((t) => sameTileIdentity(t, tile, state));
+  if (meld.kind === 'pair') return canExtendYuzbirPairWithTile(state, meld, tile);
   const test = [...meld.tiles, tile];
   if (meld.kind === 'set') return isValidSet(test, state.okeyColor, state.okeyRank);
   return isValidRun(test, state.okeyColor, state.okeyRank);
+}
+
+function canExtendYuzbirPairWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
+  const incoming = identityOf(tile, state.okeyColor, state.okeyRank);
+  if (incoming.wild) return true;
+  const locked = meld.tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank)).filter((i) => !i.wild);
+  if (locked.length === 0) return true;
+  return locked.some((i) => i.color === incoming.color && i.rank === incoming.rank);
 }
 
 function canOpenAdditionalWithTile(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
