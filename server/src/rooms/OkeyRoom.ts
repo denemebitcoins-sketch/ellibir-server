@@ -128,7 +128,11 @@ export class OkeyRoom extends Room {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
     const mode = options?.mode === 'duo' ? 'duo' : options?.mode === 'quad' ? 'quad' : 'solo';
-    this.humanSeats = mode === 'duo' ? [0, 2] : mode === 'quad' ? [0, 1, 2, 3] : [0];
+    const tableNo = Number(options?.table) || 1;
+    const botTestTable = tableNo === 1 && mode !== 'quad';
+    this.humanSeats = botTestTable
+      ? (mode === 'duo' ? [0, 2] : [0])
+      : [0, 1, 2, 3];
     const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
 
     const { parsed, variant: requestedVariant } = normalizeOkeyJoinOptions(options);
@@ -140,11 +144,11 @@ export class OkeyRoom extends Room {
     };
     rules.variant = requestedVariant;
     if (rules.variant === 'yuzbir' && parsed?.scoring?.startScore == null) rules.scoring.startScore = 0;
-    if (mode === 'duo') rules.teamMode = true;
+    rules.teamMode = mode === 'duo';
 
     this.bet = Number(options?.bet) || 0;
     this.cfg = { seed, names, botSeats, rules };
-    this.setMetadata({ game: 'okey', mode, table: Number(options?.table) || 1, variant: rules.variant, humans: this.humanSeats.length });
+    this.setMetadata({ game: 'okey', mode, table: tableNo, variant: rules.variant, humans: this.humanSeats.length });
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
 
     // Oyun komutları: {t:'draw',from} | {t:'discard',tileId} | {t:'finish',tileId} | {t:'gosterge'}
@@ -205,6 +209,21 @@ export class OkeyRoom extends Room {
       this.pushViews();
     });
 
+    // Client arka plana düştü / koltuğu koruyarak menüye döndü: bağlantı fiziksel olarak
+    // açık kalsa bile masa donmasın; reconnect/geri dönüşte kontrol tekrar insana geçer.
+    this.onMessage('away', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      const away = raw?.away !== false;
+      if (away) {
+        if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} masadan uzaklaştı — bot devraldı`);
+        this.abandoned.add(seat);
+      } else if (this.abandoned.delete(seat)) {
+        this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
+      }
+      this.afterChange();
+    });
+
     // ORTAK quick-chat (yalnız eşli): sadece ortağa + gönderene.
     this.onMessage('quickChat', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
@@ -212,6 +231,7 @@ export class OkeyRoom extends Room {
       let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
       text = String(text).slice(0, 120).trim();
       if (!text) return;
+      if (!this.cfg?.rules?.teamMode) return;
       const hs = this.humanSeats;
       const partner = (hs.length >= 2 && hs.includes(seat)) ? (seat + 2) % 4 : null;
       if (partner == null) return;
@@ -355,7 +375,8 @@ export class OkeyRoom extends Room {
         console.log(`[OkeyRoom.onDrop-EXPIRED] client CANLI -> koltuk korunuyor (stale)`);
         return;
       }
-      this.cleanupSeat(client.sessionId, seat); // kalıcı bot (abandoned SET'te kalır)
+      this.cleanupSeat(client.sessionId, seat); // oyun başladıysa kalıcı bot; beklemede koltuk boşalır
+      if (!this.game) this.abandoned.delete(seat);
       this.pushViews();
     }
   }
@@ -383,6 +404,12 @@ export class OkeyRoom extends Room {
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) this.pushViews();
+      return;
+    }
+    if (!this.game) {
+      this.abandoned.delete(seat);
+      this.cleanupSeat(client.sessionId, seat);
+      this.pushViews();
       return;
     }
     this.abandoned.add(seat); // kalıcı

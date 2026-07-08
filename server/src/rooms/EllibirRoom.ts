@@ -100,10 +100,14 @@ export class EllibirRoom extends Room {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
     const mode = options?.mode === 'duo' ? 'duo' : options?.mode === 'duo3' ? 'duo3' : 'solo';
+    const tableNo = Number(options?.table) || 1;
 
-    // solo: 1 insan (seat 0) + 3 bot. duo (eşli): 2 insan (seat 0,2) + 2 bot (1,3).
-    //   duo3 (TEST): 3 insan (seat 0,1,2) + 1 bot (seat 3) — takımlar 0&2 / 1&3; takım-mesaj testi için.
-    this.humanSeats = mode === 'duo' ? [0, 2] : mode === 'duo3' ? [0, 1, 2] : [0];
+    // Masa 1 kontrollü botlu test masasıdır. Masa 2-10 gerçek online test/çıkış içindir:
+    // tekli de eşli de 4 insan bekler, oyun başladıktan sonra düşen koltuğu bot devralır.
+    const botTestTable = tableNo === 1;
+    this.humanSeats = botTestTable
+      ? (mode === 'duo' ? [0, 2] : mode === 'duo3' ? [0, 1, 2] : [0])
+      : [0, 1, 2, 3];
     // İnsan koltukları + izleyici kapasitesi (toplam 8: ör. 4 koltuk + birkaç izleyici).
     // humanSeats sayımına DOKUNMAZ — startGameIfReady yalnız gerçek koltukları sayar.
     this.maxClients = 8;
@@ -115,7 +119,7 @@ export class EllibirRoom extends Room {
     try { parsed = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }
     catch { parsed = null; }
     const rules: any = { ...DEFAULT_RULES, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
-    if (mode === 'duo' || mode === 'duo3') rules.teamMode = true; // duo3 de takım (0&2 / 1&3) — takım-mesaj testi
+    rules.teamMode = mode === 'duo' || mode === 'duo3'; // takım: 0&2 / 1&3
 
     this.bet = Number(options?.bet) || 0;
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
@@ -123,7 +127,7 @@ export class EllibirRoom extends Room {
     // bot'larla oynanmış bir el görür). Şimdilik sadece config sakla.
     this.cfg = { seed, playerNames: names, botSeats, rules };
     this.game = null;
-    this.setMetadata({ mode, table: Number(options?.table) || 1, humans: this.humanSeats.length });
+    this.setMetadata({ mode, table: tableNo, humans: this.humanSeats.length });
 
     // Tek mesaj kanalı: client'ın tüm komutları "cmd" (JSON string) olarak gelir.
     this.onMessage('cmd', (client, raw) => {
@@ -197,6 +201,24 @@ export class EllibirRoom extends Room {
       this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
     });
 
+    // Client arka plana düştü / koltuğu koruyarak menüye döndü: bağlantı fiziksel olarak
+    // açık kalsa bile masa donmasın; reconnect/geri dönüşte kontrol tekrar insana geçer.
+    this.onMessage('away', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      const away = raw?.away !== false;
+      const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
+      if (away) {
+        if (!ab.includes(seat)) this.logEvent(`${this.nameOfSeat(seat)} masadan uzaklaştı — bot devraldı`);
+        this.setAbandoned(seat, true);
+      } else if (ab.includes(seat)) {
+        this.setAbandoned(seat, false);
+        this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
+      }
+      this.runEngine();
+      this.pushViews();
+    });
+
     // ORTAK quick-chat (yalnız eşli): {text}. Sadece ORTAĞA (+ gönderene echo) — masaya DEĞİL.
     this.onMessage('quickChat', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
@@ -204,6 +226,7 @@ export class EllibirRoom extends Room {
       let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
       text = String(text).slice(0, 120).trim();
       if (!text) return;
+      if (!this.game?.rules?.teamMode) return;
       const hs = this.humanSeats;
       // Ortak = takım arkadaşı (seat+2)%4 → duo (0↔2, 1↔3) ve duo3 için de doğru. Yalnız EŞLİ (≥2 insan).
       const partner = (hs.length >= 2 && hs.includes(seat)) ? (seat + 2) % 4 : null;

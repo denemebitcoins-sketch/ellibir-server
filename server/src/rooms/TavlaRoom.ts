@@ -94,7 +94,9 @@ export class TavlaRoom extends Room {
     const seed = options?.seed ?? Math.floor(Math.random() * 1_000_000_000);
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2'];
     const mode = options?.mode === 'duo' ? 'duo' : 'solo';
-    this.humanSeats = mode === 'duo' ? [0, 1] : [0];
+    const tableNo = Number(options?.table) || 1;
+    const botTestTable = tableNo === 1 && mode === 'solo';
+    this.humanSeats = botTestTable ? [0] : [0, 1];
     const botSeats = [0, 1].filter((s) => !this.humanSeats.includes(s));
 
     let parsed: any = null;
@@ -108,7 +110,7 @@ export class TavlaRoom extends Room {
     this.bet = Number(options?.bet) || 0;
     this.cfg = { seed, names, botSeats, rules };
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
-    this.setMetadata({ game: 'tavla', mode, table: Number(options?.table) || 1, humans: this.humanSeats.length });
+    this.setMetadata({ game: 'tavla', mode, table: tableNo, humans: this.humanSeats.length });
 
     // Oyun komutları: {t:'roll'} | {t:'move', from, die}  (from: 0-23, -1 = kırık)
     this.onMessage('cmd', (client, raw) => {
@@ -188,6 +190,21 @@ export class TavlaRoom extends Room {
       });
       this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
       this.pushViews();
+    });
+
+    // Client arka plana düştü / koltuğu koruyarak menüye döndü: bağlantı fiziksel olarak
+    // açık kalsa bile masa donmasın; reconnect/geri dönüşte kontrol tekrar insana geçer.
+    this.onMessage('away', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      const away = raw?.away !== false;
+      if (away) {
+        if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} masadan uzaklaştı — bot devraldı`);
+        this.abandoned.add(seat);
+      } else if (this.abandoned.delete(seat)) {
+        this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
+      }
+      this.afterChange();
     });
 
     this.onMessage('sit', (client, raw) => {
@@ -320,7 +337,8 @@ export class TavlaRoom extends Room {
         console.log(`[TavlaRoom.onDrop-EXPIRED] client CANLI -> koltuk korunuyor (stale)`);
         return;
       }
-      this.cleanupSeat(client.sessionId, seat); // kalıcı bot (abandoned SET'te kalır)
+      this.cleanupSeat(client.sessionId, seat); // oyun başladıysa kalıcı bot; beklemede koltuk boşalır
+      if (!this.game) this.abandoned.delete(seat);
       this.pushViews();
     }
   }
@@ -348,6 +366,12 @@ export class TavlaRoom extends Room {
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) this.pushViews();
+      return;
+    }
+    if (!this.game) {
+      this.abandoned.delete(seat);
+      this.cleanupSeat(client.sessionId, seat);
+      this.pushViews();
       return;
     }
     this.abandoned.add(seat); // kalıcı
