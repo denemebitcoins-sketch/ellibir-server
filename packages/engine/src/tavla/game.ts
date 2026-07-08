@@ -23,6 +23,13 @@ export const DEFAULT_TAVLA_RULES: TavlaRuleConfig = { targetScore: 5, turnTimerS
 
 export interface TavlaPlayer { seat: number; name: string; isBot: boolean; }
 
+interface TavlaTurnSnapshot {
+  points: number[];
+  bar: number[];
+  off: number[];
+  movesLeft: number[];
+}
+
 export interface TavlaGameState {
   rules: TavlaRuleConfig;
   seed: number;
@@ -51,9 +58,9 @@ export interface TavlaGameState {
   cubeOwner: number;         // -1 ortada (ikisi de katlayabilir), 0/1 sahibi
   pendingDouble: number;     // teklifi bekleyen değil TEKLİF EDEN koltuk (-1 yok); rakip cevaplamalı
   pendingResign: number;     // teslim teklif eden koltuk (-1 yok); rakip kabul/red cevaplamalı
-  // GERİ AL: zar atıldığı andaki tahta fotoğrafı — tur içinde 'undo' TÜMÜNÜ (kırık dahil)
-  // bu fotoğrafa döndürür. Sıra rakibe geçince işlevsiz kalır (yeni roll üzerine yazar).
-  turnSnap?: { points: number[]; bar: number[]; off: number[]; movesLeft: number[] } | null;
+  // GERİ AL: her hamleden önce snapshot tutulur; tek undo yalnız son hamleyi geri alır.
+  turnSnap?: TavlaTurnSnapshot | null; // eski view/test uyumluluğu için ilk zar snapshot'ı
+  turnHistory?: TavlaTurnSnapshot[];
 }
 
 export interface TavlaMoveResult { ok: boolean; error?: string; }
@@ -90,6 +97,7 @@ export function createTavlaGame(opts: {
     matchScore: [0, 0], gameDeltas: [], matchLog: [],
     cubeValue: 1, cubeOwner: -1, pendingDouble: -1, pendingResign: -1,
     turnSnap: null,
+    turnHistory: [],
   };
   startNextGame(st);
   return st;
@@ -98,8 +106,10 @@ export function createTavlaGame(opts: {
 /** Yeni oyun: standart diziliş + TEK ZARLA başlama atışı (büyük atan başlar). */
 export function startNextGame(st: TavlaGameState): void {
   if (st.matchEnded) return;
+  if (st.gameNumber === 0) {
+    st.checkerLightSeat = createRng(st.seed + 26699 + 4049)() < 0.5 ? 0 : 1;
+  }
   st.gameNumber += 1;
-  st.checkerLightSeat = createRng(st.seed + st.gameNumber * 26699 + 4049)() < 0.5 ? 0 : 1;
   st.points = new Array(24).fill(0);
   // seat0 (+): 23:2, 12:5, 7:3, 5:5 · seat1 (−) aynanın simetriği.
   st.points[23] = 2; st.points[12] = 5; st.points[7] = 3; st.points[5] = 5;
@@ -109,6 +119,7 @@ export function startNextGame(st: TavlaGameState): void {
   st.gameEnded = false; st.gameWinner = -1; st.mars = false; st.endReason = '';
   st.cubeValue = 1; st.cubeOwner = -1; st.pendingDouble = -1; st.pendingResign = -1;
   st.turnSnap = null;
+  st.turnHistory = [];
   // Başlama atışı: eşitse yeniden.
   let a = 0, b = 0;
   do { a = nextDie(st); b = nextDie(st); } while (a === b);
@@ -278,12 +289,14 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
   // GERİ AL: yalnız kendi turunda, zar atılmış ve en az bir adım oynanmışken.
   // Fotoğraf geri yüklenir → kırılan rakip pulu da yerine döner.
   if (move.t === 'undo') {
-    if (st.phase !== 'move' || !st.turnSnap) return { ok: false, error: 'geri alınacak hamle yok' };
-    if (st.movesLeft.length >= st.turnSnap.movesLeft.length) return { ok: false, error: 'geri alınacak hamle yok' };
-    st.points = [...st.turnSnap.points];
-    st.bar = [...st.turnSnap.bar];
-    st.off = [...st.turnSnap.off];
-    st.movesLeft = [...st.turnSnap.movesLeft];
+    const history = st.turnHistory ?? [];
+    if (st.phase !== 'move' || history.length === 0) return { ok: false, error: 'geri alınacak hamle yok' };
+    const snap = history.pop()!;
+    st.turnHistory = history;
+    st.points = [...snap.points];
+    st.bar = [...snap.bar];
+    st.off = [...snap.off];
+    st.movesLeft = [...snap.movesLeft];
     st.matchLog.push(`${st.players[seat]!.name} hamlesini geri aldı`);
     return { ok: true };
   }
@@ -294,8 +307,9 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
     st.dice = [d1, d2];
     st.movesLeft = d1 === d2 ? [d1, d1, d1, d1] : [d1, d2];
     st.phase = 'move';
-    // GERİ AL fotoğrafı: adımlar bu tahtaya göre geri sarılır.
+    // GERİ AL başlangıcı: ilk fotoğraf debug/view uyumluluğu için saklanır, adım stack'i boş başlar.
     st.turnSnap = { points: [...st.points], bar: [...st.bar], off: [...st.off], movesLeft: [...st.movesLeft] };
+    st.turnHistory = [];
     if (legalSteps(st, seat).length === 0) {
       st.matchLog.push(`${st.players[seat]!.name} ${d1}-${d2} attı — oynayacak hamle yok`);
       endTurn(st);
@@ -308,6 +322,8 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
   if (!st.movesLeft.includes(move.die)) return { ok: false, error: 'bu zar elinde yok' };
   const s = stepFor(st, seat, move.from, move.die);
   if (!s) return { ok: false, error: 'geçersiz hamle' };
+  st.turnHistory ??= [];
+  st.turnHistory.push({ points: [...st.points], bar: [...st.bar], off: [...st.off], movesLeft: [...st.movesLeft] });
   applyStep(st, seat, s);
   st.movesLeft.splice(st.movesLeft.indexOf(move.die), 1);
 

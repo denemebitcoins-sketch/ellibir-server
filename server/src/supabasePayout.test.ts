@@ -57,4 +57,19 @@ describe('101 Okey tekli payout planı', () => {
     expect(plan.winners.has(0)).toBe(true);
     expect(plan.winners.has(1)).toBe(true);
   });
+
+  it('maç sonu ödeme final elde açanlara değil toplam skor sıralamasına göre yapılır', () => {
+    const plan = planYuzbirSoloPayout({
+      bet: 1000,
+      totalSeats: 4,
+      scores: scoresOf([[0, 20], [1, 120], [2, 70], [3, 202]]),
+      openedSeats: [1, 3],
+      eligibleSeats: [0, 1, 2, 3],
+    });
+    expect(plan.eligibleSeats).toEqual([0, 2, 1, 3]);
+    expect(plan.payouts.get(0)).toBe(2925);
+    expect(plan.payouts.get(2)).toBe(975);
+    expect(plan.payouts.has(1)).toBe(false);
+    expect(plan.winners.has(0)).toBe(true);
+  });
 });

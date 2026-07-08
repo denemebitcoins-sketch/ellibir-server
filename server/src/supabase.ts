@@ -310,7 +310,8 @@ function addSplitPayout(payouts: Map<number, number>, seats: number[], amount: n
 
 export function planYuzbirSoloPayout(opts: {
   scores: Map<number, number>;
-  openedSeats: Iterable<number>;
+  openedSeats?: Iterable<number>;
+  eligibleSeats?: Iterable<number>;
   bet: number;
   totalSeats?: number;
 }): YuzbirSoloPayoutPlan {
@@ -320,7 +321,8 @@ export function planYuzbirSoloPayout(opts: {
   const house = Math.min(pot, Math.floor(Math.max(0, opts.bet) * 0.1));
   const prizePool = Math.max(0, pot - house);
   const seen = new Set<number>();
-  const eligibleSeats = [...opts.openedSeats]
+  const sourceSeats = opts.eligibleSeats ?? opts.openedSeats ?? Array.from({ length: totalSeats }, (_, seat) => seat);
+  const eligibleSeats = [...sourceSeats]
     .filter((seat) => Number.isInteger(seat) && seat >= 0 && seat < totalSeats && !seen.has(seat) && seen.add(seat))
     .filter((seat) => Number.isFinite(opts.scores.get(seat)))
     .sort((a, b) => (opts.scores.get(a) ?? 0) - (opts.scores.get(b) ?? 0) || a - b);
@@ -361,17 +363,18 @@ export async function settleMatch(opts: {
   totalSeats?: number;          // masa koltuk sayısı (tavla 2, diğerleri 4) — bot bahisleri SANAL pota girer
   game?: string;                // çanak hedefi: '51' | 'okey' | 'tavla' (komisyonun %50'si birikir)
   gameVariant?: string;          // okey: 'duz' | 'banko' | 'yuzbir'
-  openedSeats?: Iterable<number>; // 101: ödül sıralamasına yalnız el açan koltuklar girer
+  openedSeats?: Iterable<number>; // legacy: eski final-el açan filtresi; 101 payout artık toplam maç sıralamasını esas alır
 }): Promise<void> {
   const { seatUsers, winnerSeat, bet, teamMode, scores } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
 
-  if (!teamMode && opts.gameVariant === 'yuzbir' && scores && opts.openedSeats) {
+  if (!teamMode && opts.gameVariant === 'yuzbir' && scores) {
+    const totalSeats = opts.totalSeats ?? 4;
     const plan = planYuzbirSoloPayout({
       scores,
-      openedSeats: opts.openedSeats,
+      eligibleSeats: Array.from({ length: totalSeats }, (_, seat) => seat),
       bet,
-      totalSeats: opts.totalSeats ?? 4,
+      totalSeats,
     });
     for (const [seat, uid] of seatUsers) {
       const amount = plan.payouts.get(seat) ?? 0;
@@ -383,7 +386,7 @@ export async function settleMatch(opts: {
       });
     }
     if (opts.game) await canakAdd(opts.game, Math.floor(plan.house * 0.5));
-    console.log(`[settle] 101 TEKLI E=${bet} opened=${plan.eligibleSeats.join(',')} payouts=${[...plan.payouts.entries()].map(([s, a]) => `${s}:${a}`).join(',')}`);
+    console.log(`[settle] 101 TEKLI E=${bet} toplamSira=${plan.eligibleSeats.join(',')} payouts=${[...plan.payouts.entries()].map(([s, a]) => `${s}:${a}`).join(',')}`);
     return;
   }
 

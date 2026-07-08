@@ -40,6 +40,17 @@ describe('tavla kurulum', () => {
       expect(st.phase).toBe('roll');
     }
   });
+
+  it('pul rengi maç bitene kadar yeni oyunlarda değişmez', () => {
+    const st = fresh(77);
+    const lightSeat = st.checkerLightSeat;
+    st.gameEnded = true;
+    startNextGame(st);
+    expect(st.checkerLightSeat).toBe(lightSeat);
+    st.gameEnded = true;
+    startNextGame(st);
+    expect(st.checkerLightSeat).toBe(lightSeat);
+  });
 });
 
 describe('zar ve hamle', () => {
@@ -79,6 +90,31 @@ describe('zar ve hamle', () => {
     expect(r.ok).toBe(true);
     expect(st.bar[1]).toBe(1);
     expect(st.points[20]).toBe(1);
+  });
+
+  it('geri al tek basışta yalnız son hamleyi geri alır', () => {
+    const st = fresh();
+    st.turn = 0; st.phase = 'move'; st.dice = [1, 1]; st.movesLeft = [1, 1, 1, 1];
+    clearBoard(st);
+    st.points[23] = 1;
+    expect(applyTavlaMove(st, 0, { t: 'move', from: 23, die: 1 }).ok).toBe(true);
+    expect(applyTavlaMove(st, 0, { t: 'move', from: 22, die: 1 }).ok).toBe(true);
+    expect(st.points[23]).toBe(0);
+    expect(st.points[22]).toBe(0);
+    expect(st.points[21]).toBe(1);
+    expect(st.movesLeft).toEqual([1, 1]);
+
+    expect(applyTavlaMove(st, 0, { t: 'undo' }).ok).toBe(true);
+    expect(st.points[23]).toBe(0);
+    expect(st.points[22]).toBe(1);
+    expect(st.points[21]).toBe(0);
+    expect(st.movesLeft).toEqual([1, 1, 1]);
+
+    expect(applyTavlaMove(st, 0, { t: 'undo' }).ok).toBe(true);
+    expect(st.points[23]).toBe(1);
+    expect(st.points[22]).toBe(0);
+    expect(st.points[21]).toBe(0);
+    expect(st.movesLeft).toEqual([1, 1, 1, 1]);
   });
 
   it('kırık varken önce giriş zorunlu; giriş rakip evinden', () => {
