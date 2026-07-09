@@ -252,12 +252,6 @@ export class OkeyRoom extends Room {
     console.log(`[OkeyRoom] oluştu seed=${seed} mode=${mode} humans=${this.humanSeats}`);
   }
 
-  async onAuth(_client: Client, options: any): Promise<any> {
-    const uid = await requireVerifiedUser(options?.token);
-    if (uid && (await isGameBanned(uid))) throw new Error('banned');
-    return uid ?? true;
-  }
-
   onJoin(client: Client, options: any) {
     const taken = new Set(this.seats.values());
     const spectate = options?.spectate === true || options?.spectate === 'true';
