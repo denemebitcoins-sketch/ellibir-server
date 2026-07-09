@@ -996,7 +996,9 @@ begin
 end;
 $$;
 
-grant execute on function public.buy_vip_mock(int) to authenticated;
+-- Production guvenligi: gercek Play Billing receipt dogrulayan RPC gelene kadar
+-- mock VIP satin alma client tarafindan dogrudan cagrilamaz.
+revoke execute on function public.buy_vip_mock(int) from public, anon, authenticated;
 grant execute on function public.get_daily_state() to authenticated;
 grant execute on function public.claim_daily(int) to authenticated;
 
