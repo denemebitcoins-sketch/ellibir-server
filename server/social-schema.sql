@@ -334,6 +334,7 @@ create or replace function public.record_match_stats(
 returns void
 language plpgsql
 security definer
+set search_path = public
 as $$
 begin
   update public.profiles
@@ -350,6 +351,9 @@ begin
   -- profil yoksa NOT FOUND → sessiz geç (anon kullanıcı kaydı eksikse maç akışını bozma).
 end;
 $$;
+
+revoke execute on function public.record_match_stats(text, boolean, bigint) from public, anon, authenticated;
+grant  execute on function public.record_match_stats(text, boolean, bigint) to service_role;
 
 -- =====================================================================
 -- BİTTİ. presence + direct_messages + lobby_chat + reports + friendships
@@ -424,6 +428,7 @@ create or replace function public.canak_add(p_game text, p_amount bigint)
 returns bigint
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare v bigint;
 begin
@@ -440,6 +445,7 @@ create or replace function public.canak_take(p_game text)
 returns bigint
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare v bigint;
 begin
@@ -453,6 +459,8 @@ $$;
 -- GÜVENLİK: security definer RPC'ler varsayılan PUBLIC execute alır → client çağıramasın.
 revoke execute on function public.canak_add(text, bigint) from public, anon, authenticated;
 revoke execute on function public.canak_take(text) from public, anon, authenticated;
+grant  execute on function public.canak_add(text, bigint) to service_role;
+grant  execute on function public.canak_take(text) to service_role;
 
 -- BÖLÜM 33 doğrulama:
 --   select * from public.canak;
@@ -520,6 +528,7 @@ create or replace function public.claim_admin_reward(p_id bigint)
 returns bigint
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare r record;
 begin
@@ -535,6 +544,8 @@ begin
   return r.chips;
 end;
 $$;
+revoke execute on function public.claim_admin_reward(bigint) from public, anon;
+grant  execute on function public.claim_admin_reward(bigint) to authenticated;
 
 -- Arkadaş sayısı (profil rozeti) — herkes herkesinkini SAYI olarak görebilir.
 -- NOT: friendships.requester/addressee UUID, p_user TEXT → ::uuid cast ŞART
@@ -543,11 +554,14 @@ create or replace function public.friend_count(p_user text)
 returns integer
 language sql
 security definer
+set search_path = public
 as $$
   select count(*)::int from public.friendships
    where status = 'accepted'
      and (requester = p_user::uuid or addressee = p_user::uuid);
 $$;
+revoke execute on function public.friend_count(text) from public, anon;
+grant  execute on function public.friend_count(text) to authenticated;
 
 -- ─────────────────────────────────────────────────────────────────────
 -- BÖLÜM 36) FOTOĞRAF ONAY SİSTEMİ — yeni yüklenen profil fotoğrafı admin
@@ -562,6 +576,7 @@ create or replace function public.admin_set_avatar_status(p_user text, p_status 
 returns boolean
 language plpgsql
 security definer
+set search_path = public
 as $$
 begin
   if not exists (select 1 from public.profiles pr where pr.id = auth.uid()::text and pr.role = 'admin') then
@@ -572,6 +587,8 @@ begin
   return true;
 end;
 $$;
+revoke execute on function public.admin_set_avatar_status(text, text) from public, anon;
+grant  execute on function public.admin_set_avatar_status(text, text) to authenticated;
 
 -- BÖLÜM 35/36 doğrulama:
 --   select proname from pg_proc where proname in ('claim_admin_reward','friend_count','admin_set_avatar_status');
@@ -595,11 +612,14 @@ create or replace function public.my_report_count(p_minutes int)
 returns integer
 language sql
 security definer
+set search_path = public
 as $$
   select count(*)::int from public.reports
    where from_user = auth.uid()
      and created_at > now() - make_interval(mins => p_minutes);
 $$;
+revoke execute on function public.my_report_count(int) from public, anon;
+grant  execute on function public.my_report_count(int) to authenticated;
 
 drop policy if exists reports_insert on public.reports;
 create policy reports_insert on public.reports
@@ -626,6 +646,7 @@ create or replace function public.deduct_diamonds(p_user_id text, p_amount int)
 returns boolean
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare cur int;
 begin
@@ -667,6 +688,7 @@ create function public.deduct_diamonds(p_user_id text, p_amount int)
 returns boolean
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare cur int;
 begin
@@ -678,7 +700,7 @@ begin
   return true;
 end;
 $$;
-revoke execute on function public.deduct_diamonds(text, int) from anon, authenticated;
+revoke execute on function public.deduct_diamonds(text, int) from public, anon, authenticated;
 grant  execute on function public.deduct_diamonds(text, int) to service_role;
 
 -- Doğrulama (TEK satır dönmeli):
