@@ -111,23 +111,31 @@ function countErrorKind(session, code, message) {
 function scenarioFor(i) {
   const baseTable = 900000 + Math.floor(Date.now() % 10000) * 100 + i;
   const cycle = i % 12;
-  if (cycle === 0) return { room: 'ellibir', game: '51', mode: 'duo', humans: 2, table: baseTable };
-  if (cycle === 1) return { room: 'ellibir', game: '51', mode: 'solo', humans: 1, table: baseTable };
-  if (cycle === 2) return { room: 'okey', game: 'okey-duz', mode: 'solo', humans: 1, table: baseTable, variant: 'duz' };
-  if (cycle === 3) return { room: 'okey', game: 'okey-101', mode: 'solo', humans: 1, table: baseTable, variant: 'yuzbir' };
-  if (cycle === 4) return { room: 'tavla', game: 'tavla', mode: 'duo', humans: 2, table: baseTable };
-  if (cycle === 5) return { room: 'okey', game: 'okey-banko', mode: 'solo', humans: 1, table: baseTable, variant: 'banko' };
-  if (cycle === 6) return { room: 'tavla', game: 'tavla', mode: 'solo', humans: 1, table: baseTable };
-  if (cycle === 7) return { room: 'ellibir', game: '51', mode: 'solo', humans: 1, table: baseTable };
-  if (cycle === 8) return { room: 'okey', game: 'okey-101', mode: 'duo', humans: 2, table: baseTable, variant: 'yuzbir' };
-  if (cycle === 9) return { room: 'okey', game: 'okey-duz', mode: 'duo', humans: 2, table: baseTable, variant: 'duz' };
-  if (cycle === 10 && ROOMS >= 24) return { room: 'okey', game: 'okey-quad', mode: 'quad', humans: 4, table: baseTable, variant: 'duz' };
-  return { room: 'tavla', game: 'tavla', mode: 'solo', humans: 1, table: baseTable };
+  // Current production policy:
+  // - table 1 keeps the bot-assisted test flow.
+  // - numbered/real tables wait for all human seats before starting.
+  // The load profile must mirror that, otherwise Okey/51 rooms sit idle and only Tavla is stressed.
+  if (cycle === 0 && i < 12) return { room: 'ellibir', game: '51-bot-table1', mode: 'solo', humans: 1, table: 1, bet: 100 };
+  if (cycle === 0) return { room: 'ellibir', game: '51-solo-4p', mode: 'solo', humans: 4, table: baseTable, bet: 100 };
+  if (cycle === 1) return { room: 'ellibir', game: '51-solo-4p', mode: 'solo', humans: 4, table: baseTable, bet: 100 };
+  if (cycle === 2) return { room: 'ellibir', game: '51-duo-4p', mode: 'duo', humans: 4, table: baseTable, bet: 100 };
+  if (cycle === 3 && i < 12) return { room: 'okey', game: 'okey-duz-bot-table1', mode: 'solo', humans: 1, table: 1, variant: 'duz', bet: 500 };
+  if (cycle === 3) return { room: 'okey', game: 'okey-duz-4p', mode: 'solo', humans: 4, table: baseTable, variant: 'duz', bet: 500 };
+  if (cycle === 4) return { room: 'okey', game: 'okey-101-4p', mode: 'solo', humans: 4, table: baseTable, variant: 'yuzbir', bet: 500 };
+  if (cycle === 5) return { room: 'tavla', game: 'tavla-duo', mode: 'duo', humans: 2, table: baseTable, bet: 500 };
+  if (cycle === 6 && i < 12) return { room: 'okey', game: 'okey-banko-bot-table1', mode: 'solo', humans: 1, table: 1, variant: 'banko', bet: 500 };
+  if (cycle === 6) return { room: 'okey', game: 'okey-banko-4p', mode: 'solo', humans: 4, table: baseTable, variant: 'banko', bet: 500 };
+  if (cycle === 7 && i < 12) return { room: 'tavla', game: 'tavla-bot-table1', mode: 'solo', humans: 1, table: 1, bet: 500 };
+  if (cycle === 7) return { room: 'tavla', game: 'tavla-duo', mode: 'duo', humans: 2, table: baseTable, bet: 500 };
+  if (cycle === 8) return { room: 'okey', game: 'okey-duz-duo-4p', mode: 'duo', humans: 4, table: baseTable, variant: 'duz', bet: 500 };
+  if (cycle === 9) return { room: 'okey', game: 'okey-101-duo-4p', mode: 'duo', humans: 4, table: baseTable, variant: 'yuzbir', bet: 500 };
+  if (cycle === 10) return { room: 'okey', game: 'okey-quad-4p', mode: 'quad', humans: 4, table: baseTable, variant: 'duz', bet: 500 };
+  return { room: 'tavla', game: 'tavla-duo', mode: 'duo', humans: 2, table: baseTable, bet: 500 };
 }
 
 function optionsFor(sc, seatIndex) {
   const name = `LT_${sc.game}_${sc.table}_${seatIndex}`;
-  const common = { mode: sc.mode, table: sc.table, playerName: name, gender: seatIndex % 2 ? 'female' : 'male', role: 'normal', bet: 0 };
+  const common = { mode: sc.mode, table: sc.table, playerName: name, gender: seatIndex % 2 ? 'female' : 'male', role: 'normal', bet: sc.bet || 0 };
   if (sc.room === 'ellibir') {
     return { ...common, rules: { totalHands: 2, turnTimerSeconds: 8 } };
   }
@@ -173,6 +181,11 @@ async function joinOne(sc, seatIndex) {
       stats.commandErrors++;
       incGame(sc.game, 'errors');
       countErrorKind(session, m?.code, m?.message);
+      if (session.lastCommandAt) {
+        stats.latencies.push(performance.now() - session.lastCommandAt);
+        if (stats.latencies.length > 5000) stats.latencies.splice(0, stats.latencies.length - 5000);
+        session.lastCommandAt = 0;
+      }
       session.pending = false;
       if (session.game.startsWith('okey') && m?.message && String(m.message).includes('soldan')) send(session, { t: 'returnLeft' });
     });
@@ -223,9 +236,9 @@ function maybeScheduleDrop(session) {
 
 function drive(session, v) {
   if (session.closed || session.pending || session.seat < 0 || v.spectator) return;
-  if (session.game === '51') return drive51(session, v);
+  if (session.game.startsWith('51')) return drive51(session, v);
   if (session.game.startsWith('okey')) return driveOkey(session, v);
-  if (session.game === 'tavla') return driveTavla(session, v);
+  if (session.game.startsWith('tavla')) return driveTavla(session, v);
 }
 
 function delayed(session, fn) {

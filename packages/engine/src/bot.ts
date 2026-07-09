@@ -208,11 +208,11 @@ export class HeuristicBot implements MoveProvider {
     if (!view.hasOpened) {
       // Aldıktan sonra GERÇEKTEN açacağından emin ol (tryOpen ile aynı plan
       // ve aynı hedef) — yoksa al-at döngüsünde deste hiç erimez.
-      const plan = bestOpening([...view.hand, top], view.rules);
       const pairPlan = bestPairOpening([...view.hand, top], view.rules);
-      const willOpen =
-        plan.points >= this.openTarget(view) ||
-        (this.difficulty === 'zor' && pairPlan.count >= view.currentPairsMin);
+      const willOpen = view.isCift
+        ? pairPlan.count >= view.currentPairsMin
+        : bestOpening([...view.hand, top], view.rules).points >= this.openTarget(view) ||
+          (this.difficulty === 'zor' && pairPlan.count >= view.currentPairsMin);
       if (!willOpen) return { type: 'drawStock' };
     } else {
       // AÇIK oyuncu: kartı SOMUT kullanamayacaksa alma (al→kullanamadan→geri
@@ -271,6 +271,11 @@ export class HeuristicBot implements MoveProvider {
     if (pickupMove) return pickupMove;
 
     if (!view.hasOpened) {
+      if (view.isCift) {
+        const pairOpen = this.tryOpenPairs(view);
+        if (pairOpen) return pairOpen;
+        return this.chooseDiscard(view);
+      }
       if (this.difficulty === 'zor') {
         const pairOpen = this.tryOpenPairs(view);
         if (pairOpen) return pairOpen;
@@ -337,10 +342,11 @@ export class HeuristicBot implements MoveProvider {
 
     if (!view.hasOpened) {
       // Açış planı hâlâ geçerli mi? (chooseDraw ile aynı ölçüler.)
-      const willOpen =
-        bestOpening(view.hand, view.rules).points >= this.openTarget(view) ||
-        (this.difficulty === 'zor' &&
-          bestPairOpening(view.hand, view.rules).count >= view.currentPairsMin);
+      const pairPlan = bestPairOpening(view.hand, view.rules);
+      const willOpen = view.isCift
+        ? pairPlan.count >= view.currentPairsMin
+        : bestOpening(view.hand, view.rules).points >= this.openTarget(view) ||
+          (this.difficulty === 'zor' && pairPlan.count >= view.currentPairsMin);
       return willOpen || pk.zorunlu ? null : { type: 'cancelPickup' };
     }
 
@@ -354,6 +360,7 @@ export class HeuristicBot implements MoveProvider {
   /* ---------------------------- açışlar ---------------------------- */
 
   private tryOpen(view: PlayerView): Move | null {
+    if (view.isCift) return null;
     const { hand, rules } = view;
     // Profil + beceri hedefi; her hâlükârda ETKİN sınırın altına inilemez.
     const target = Math.max(this.openTarget(view), view.currentOpeningMin);
