@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
 
 // 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -311,10 +311,18 @@ export class OkeyRoom extends Room {
     this.startAt = Date.now();
     this.pushViews();
     const tick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000);
-    this.startTimer = setTimeout(() => {
+    this.startTimer = setTimeout(async () => {
       clearInterval(tick);
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; }
+      const entryUsers = new Map(this.seatUsers);
+      const entry = await deductEntry(entryUsers, this.bet);
+      if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+      if (this.seats.size < this.humanSeats.length) {
+        await refundEntry(entryUsers, this.bet, 'seat_left_before_start');
+        this.pushViews();
+        return;
+      }
       const banko = this.cfg?.rules?.variant === 'banko';
       this.game = createOkeyGame({ ...this.cfg, dealFirst: !banko });
       for (const [seat, name] of this.seatNames) {
@@ -323,10 +331,19 @@ export class OkeyRoom extends Room {
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
       console.log('[OkeyRoom] oyun başladı' + (banko ? ' (banko: ilk el seçim fazı)' : ''));
-      deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS (kullanıcı modeli)
       if (banko) this.enterBankoPhase();
       else this.afterChange();
     }, this.START_MS);
+  }
+
+  private abortEntryStart(failedSeats: number[]) {
+    this.startAt = 0;
+    const reason = failedSeats.length
+      ? `Giriş ücreti alınamadı (koltuk ${failedSeats.map((s) => s + 1).join(', ')})`
+      : 'Giriş ücreti alınamadı';
+    this.logEvent(reason);
+    this.broadcast('sitError', { reason });
+    this.pushViews();
   }
 
   /* ── RECONNECT LIFECYCLE — 51 ile birebir (0.17: onDrop/onReconnect/onLeave) ── */

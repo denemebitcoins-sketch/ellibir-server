@@ -195,6 +195,11 @@ export async function rpc(fn: string, args: Record<string, unknown>): Promise<bo
       body: JSON.stringify(args),
     });
     if (!r.ok) { console.error(`[supabase] RPC ${fn} hata ${r.status}:`, await r.text()); return false; }
+    const body = (await r.text()).trim().toLowerCase();
+    if (body === 'false') {
+      console.error(`[supabase] RPC ${fn} false döndü`);
+      return false;
+    }
     return true;
   } catch (e: any) {
     console.error(`[supabase] RPC ${fn}:`, e?.message);
@@ -204,10 +209,39 @@ export async function rpc(fn: string, args: Record<string, unknown>): Promise<bo
 
 /** PEŞİN BAHİS GİRİŞİ: maç fiilen BAŞLARKEN her gerçek oturandan bahsi kes (odalar çağırır).
  *  Kaçan/düşen zaten ödemiş olur; settle yalnız ödeme yapar. */
-export async function deductEntry(seatUsers: Map<number, string>, bet: number): Promise<void> {
-  if (!supabaseConfigured() || bet <= 0) return;
-  for (const [, uid] of seatUsers) await rpc('deduct_chips', { p_user_id: uid, p_amount: bet });
+export type EntryDeductResult = { ok: true; failedSeats: [] } | { ok: false; failedSeats: number[] };
+
+export async function deductEntry(seatUsers: Map<number, string>, bet: number): Promise<EntryDeductResult> {
+  if (!supabaseConfigured() || bet <= 0) return { ok: true, failedSeats: [] };
+  const charged: Array<[number, string]> = [];
+  const failedSeats: number[] = [];
+  for (const [seat, uid] of seatUsers) {
+    const ok = await rpc('deduct_chips', { p_user_id: uid, p_amount: bet });
+    if (!ok) {
+      failedSeats.push(seat);
+      break;
+    }
+    charged.push([seat, uid]);
+  }
+  if (failedSeats.length > 0) {
+    for (const [, uid] of charged) {
+      const refunded = await rpc('add_chips', { p_user_id: uid, p_amount: bet });
+      if (!refunded) console.error(`[entry] iade başarısız uid=${uid} amount=${bet}`);
+    }
+    console.error(`[entry] bahis kesilemedi; maç başlatılmadı. failedSeats=${failedSeats.join(',')}`);
+    return { ok: false, failedSeats };
+  }
   console.log(`[entry] PESIN bahis kesildi: ${seatUsers.size} oyuncu × ${bet}`);
+  return { ok: true, failedSeats: [] };
+}
+
+export async function refundEntry(seatUsers: Map<number, string>, bet: number, reason = 'entry_abort'): Promise<void> {
+  if (!supabaseConfigured() || bet <= 0) return;
+  for (const [, uid] of seatUsers) {
+    const ok = await rpc('add_chips', { p_user_id: uid, p_amount: bet });
+    if (!ok) console.error(`[entry] iade başarısız uid=${uid} amount=${bet} reason=${reason}`);
+  }
+  if (seatUsers.size > 0) console.log(`[entry] bahis iade edildi: ${seatUsers.size} oyuncu × ${bet} reason=${reason}`);
 }
 
 /* ── ÇANAK (ilerleyen jackpot; BÖLÜM 33) ─────────────────────────────────────

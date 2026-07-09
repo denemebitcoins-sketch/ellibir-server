@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/tavla';
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
 
 // 51/OKEY ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -126,7 +126,7 @@ export class TavlaRoom extends Room {
 
     // TEKRAR OYNA (kullanıcı isteği): maç bitince oyuncular oy verir; bağlı TÜM insan
     // koltukları isteyince aynı ayarlarla YENİ MAÇ başlar (bot rakipte tek oy yeter).
-    this.onMessage('rematch', (client) => {
+    this.onMessage('rematch', async (client) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null || !this.game || !this.game.matchEnded) return;
       this.rematchVotes.add(seat);
@@ -134,11 +134,18 @@ export class TavlaRoom extends Room {
       const all = connected.length > 0 && connected.every((s) => this.rematchVotes.has(s));
       if (!all) { this.pushViews(); return; } // oy listede görünsün (rakip bekleniyor…)
       this.rematchVotes.clear();
+      const entryUsers = new Map(this.seatUsers);
+      const entry = await deductEntry(entryUsers, this.bet);
+      if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+      if (this.seats.size < this.humanSeats.length) {
+        await refundEntry(entryUsers, this.bet, 'seat_left_before_rematch');
+        this.pushViews();
+        return;
+      }
       this.settled = false;
       this.game = createTavlaGame({ ...this.cfg, seed: Date.now() % 2147483647 });
       this.canakGame = -1;   // yeni maç: gameNumber sayacı sıfırdan — patlama kontrolü kilitlenmesin
       this.refreshCanak();   // "tekrar oyna sonrası çanak eski kalıyor" fix'i
-      deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS — yeni maç yeni giriş
       for (const [st, name] of this.seatNames) {
         const p = this.game.players[st];
         if (p && name) p.name = name;
@@ -275,10 +282,18 @@ export class TavlaRoom extends Room {
     this.startAt = Date.now();
     this.pushViews();
     const tick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000);
-    this.startTimer = setTimeout(() => {
+    this.startTimer = setTimeout(async () => {
       clearInterval(tick);
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; }
+      const entryUsers = new Map(this.seatUsers);
+      const entry = await deductEntry(entryUsers, this.bet);
+      if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+      if (this.seats.size < this.humanSeats.length) {
+        await refundEntry(entryUsers, this.bet, 'seat_left_before_start');
+        this.pushViews();
+        return;
+      }
       this.game = createTavlaGame(this.cfg);
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players[seat];
@@ -286,9 +301,18 @@ export class TavlaRoom extends Room {
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
       console.log('[TavlaRoom] oyun başladı');
-      deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS (kullanıcı modeli)
       this.afterChange();
     }, this.START_MS);
+  }
+
+  private abortEntryStart(failedSeats: number[]) {
+    this.startAt = 0;
+    const reason = failedSeats.length
+      ? `Giriş ücreti alınamadı (koltuk ${failedSeats.map((s) => s + 1).join(', ')})`
+      : 'Giriş ücreti alınamadı';
+    this.logEvent(reason);
+    this.broadcast('sitError', { reason });
+    this.pushViews();
   }
 
   /* ── RECONNECT LIFECYCLE — 51/OKEY ile birebir (0.17: onDrop/onReconnect/onLeave) ── */

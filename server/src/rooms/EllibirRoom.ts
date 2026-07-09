@@ -3,7 +3,7 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
 
 // Hediye türü → alıcının yanında kaç saat durur (client GiftCatalog ile aynı).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -324,10 +324,18 @@ export class EllibirRoom extends Room {
     this.startAt = Date.now();
     this.pushViews(); // "oyun başlıyor" overlay (dolu ama henüz başlamadı)
     const tick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000); // canlı geri sayım
-    this.startTimer = setTimeout(() => {
+    this.startTimer = setTimeout(async () => {
       clearInterval(tick);
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
+      const entryUsers = new Map(this.seatUsers);
+      const entry = await deductEntry(entryUsers, this.bet);
+      if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+      if (this.seats.size < this.humanSeats.length) {
+        await refundEntry(entryUsers, this.bet, 'seat_left_before_start');
+        this.pushViews();
+        return;
+      }
       this.game = createGame(this.cfg);
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players.find((pl: any) => pl.seat === seat);
@@ -336,10 +344,19 @@ export class EllibirRoom extends Room {
       this.resetHandOrder();
       console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
       this.settled = false;
-      deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS (kullanıcı modeli)
       this.pushViews();
       this.runEngine();
     }, this.START_MS);
+  }
+
+  private abortEntryStart(failedSeats: number[]) {
+    this.startAt = 0;
+    const reason = failedSeats.length
+      ? `Giriş ücreti alınamadı (koltuk ${failedSeats.map((s) => s + 1).join(', ')})`
+      : 'Giriş ücreti alınamadı';
+    this.logEvent(reason);
+    this.broadcast('sitError', { reason });
+    this.pushViews();
   }
 
   // ⚠ COLYSEUS 0.17 KOPMA LIFECYCLE (eski onLeave(consented) DEĞİL):
@@ -682,10 +699,18 @@ export class EllibirRoom extends Room {
 
   /// Aynı masada yeni maç: kartlar toplanır, yazboz/olaylar sıfırlanır, masa ayarı korunur.
   /// Oyuncu eksikse (biri çıktıysa) bekleme moduna geçer (game=null → "rakip bekleniyor").
-  private newMatch() {
+  private async newMatch() {
     if (this.seats.size < this.humanSeats.length) { this.game = null; this.pushViews(); return; }
+    const entryUsers = new Map(this.seatUsers);
+    const entry = await deductEntry(entryUsers, this.bet);
+    if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+    if (this.seats.size < this.humanSeats.length) {
+      await refundEntry(entryUsers, this.bet, 'seat_left_before_new_match');
+      this.game = null;
+      this.pushViews();
+      return;
+    }
     this.game = createGame({ ...this.cfg, seed: Math.floor(Math.random() * 1_000_000_000) });
-    deductEntry(this.seatUsers, this.bet).catch(() => {}); // PEŞİN BAHİS — yeni maç yeni giriş
     for (const [seat, name] of this.seatNames) {
       const p = this.game.players.find((pl: any) => pl.seat === seat);
       if (p && name) p.name = name;
