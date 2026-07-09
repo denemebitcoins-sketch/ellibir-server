@@ -355,7 +355,12 @@ export async function canakBurst(game: string, uid: string, name = ''): Promise<
   } catch { /* kontrol başarısızsa patlatmayı engelleme */ }
   const amt = await rpcValue('canak_take', { p_game: game });
   if (!amt || amt <= 0) return 0;
-  await rpc('add_chips', { p_user_id: uid, p_amount: amt });
+  const paid = await rpc('add_chips', { p_user_id: uid, p_amount: amt });
+  if (!paid) {
+    const restored = await canakAdd(game, amt);
+    console.error(`[canak] ödeme başarısız; çanak geri eklendi game=${game} uid=${uid} tutar=${amt} restored=${restored ?? 'null'}`);
+    return 0;
+  }
   console.log(`[canak] PATLADI game=${game} uid=${uid} tutar=${amt}`);
   const gameLbl = game === '51' ? '51' : game.toUpperCase();
   const svc = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' };
