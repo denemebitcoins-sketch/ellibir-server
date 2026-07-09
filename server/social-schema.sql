@@ -512,6 +512,19 @@ create table if not exists public.admin_rewards (
 );
 create index if not exists admin_rewards_user_idx on public.admin_rewards (user_id, claimed);
 
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conname = 'admin_rewards_nonnegative_amounts'
+       and conrelid = 'public.admin_rewards'::regclass
+  ) then
+    alter table public.admin_rewards
+      add constraint admin_rewards_nonnegative_amounts
+      check (chips >= 0 and diamonds >= 0 and (chips > 0 or diamonds > 0)) not valid;
+  end if;
+end $$;
+
 alter table public.admin_rewards enable row level security;
 drop policy if exists admin_rewards_select on public.admin_rewards;
 create policy admin_rewards_select on public.admin_rewards
@@ -521,7 +534,12 @@ create policy admin_rewards_select on public.admin_rewards
 drop policy if exists admin_rewards_insert on public.admin_rewards;
 create policy admin_rewards_insert on public.admin_rewards
   for insert to authenticated
-  with check (exists (select 1 from public.profiles pr where pr.id = auth.uid()::text and pr.role = 'admin'));
+  with check (
+    exists (select 1 from public.profiles pr where pr.id = auth.uid()::text and pr.role = 'admin')
+    and chips >= 0
+    and diamonds >= 0
+    and (chips > 0 or diamonds > 0)
+  );
 
 -- Ödülü AL (atomik; yalnız sahibi, yalnız bir kez). Ödenen çip miktarını döner (-1 = geçersiz).
 create or replace function public.claim_admin_reward(p_id bigint)
