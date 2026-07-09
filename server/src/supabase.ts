@@ -11,6 +11,14 @@ const ANON = process.env.SUPABASE_ANON_KEY ?? '';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
 export const supabaseConfigured = (): boolean => !!(URL && SERVICE);
+export const authVerificationConfigured = (): boolean => !!(URL && ANON);
+
+export function onlineAuthRequired(): boolean {
+  const flag = String(process.env.AUTH_REQUIRED ?? '').trim().toLowerCase();
+  if (['0', 'false', 'off', 'no'].includes(flag)) return false;
+  if (['1', 'true', 'on', 'yes'].includes(flag)) return true;
+  return authVerificationConfigured();
+}
 
 /** Auth token → userId (null = geçersiz/anon). Supabase GoTrue /auth/v1/user. */
 export async function verifyToken(token: string | null | undefined): Promise<string | null> {
@@ -26,6 +34,48 @@ export async function verifyToken(token: string | null | undefined): Promise<str
     console.error('[supabase] verifyToken:', e?.message);
     return null;
   }
+}
+
+/** Production'da kimliksiz oda girişi ekonomi bypass'ına dönüşmesin. */
+export async function requireVerifiedUser(token: string | null | undefined): Promise<string | null> {
+  const uid = await verifyToken(token);
+  if (!uid && onlineAuthRequired()) throw new Error('auth_required');
+  return uid;
+}
+
+/** Client'tan gelen bahis değerini izinli masa bahislerine kilitle. */
+export function normalizeRoomBet(raw: unknown, allowed: readonly number[], label: string): number {
+  const hasRaw = raw != null && String(raw).trim() !== '';
+  const strict = onlineAuthRequired();
+  if (!hasRaw) {
+    if (strict) throw new Error(`${label}_bet_required`);
+    return 0;
+  }
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n) || n <= 0) {
+    if (strict) throw new Error(`${label}_bet_invalid`);
+    return 0;
+  }
+  if (!allowed.includes(n)) {
+    if (strict) throw new Error(`${label}_bet_not_allowed`);
+    return n;
+  }
+  return n;
+}
+
+export function safeClientRole(raw: unknown): string {
+  const v = String(raw ?? 'normal').trim().toLowerCase();
+  return v === 'vip' ? 'vip' : 'normal';
+}
+
+export function safeClientGender(raw: unknown): string {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return v === 'k' || v === 'e' ? v : '';
+}
+
+export function safeClientName(raw: unknown, fallback: string): string {
+  const n = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, 28);
+  return n || fallback;
 }
 
 /** Kullanıcı banlı mı? profiles.banned okur (service-role). Hata/yoksa false (girişi engelleme). */

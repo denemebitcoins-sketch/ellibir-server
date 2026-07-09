@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { verifyToken, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
 
 // 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -78,7 +78,7 @@ export class OkeyRoom extends Room {
 
   static async onAuth(_token: string, options: any): Promise<any> {
     normalizeOkeyJoinOptions(options);
-    const uid = await verifyToken(options?.token);
+    const uid = await requireVerifiedUser(options?.token);
     if (uid && (await isGameBanned(uid))) throw new Error('banned');
     return uid ?? true;
   }
@@ -146,7 +146,7 @@ export class OkeyRoom extends Room {
     if (rules.variant === 'yuzbir' && parsed?.scoring?.startScore == null) rules.scoring.startScore = 0;
     rules.teamMode = mode === 'duo';
 
-    this.bet = Number(options?.bet) || 0;
+    this.bet = normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'okey');
     this.cfg = { seed, names, botSeats, rules };
     this.setMetadata({ game: 'okey', mode, table: tableNo, variant: rules.variant, humans: this.humanSeats.length });
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
@@ -253,7 +253,7 @@ export class OkeyRoom extends Room {
   }
 
   async onAuth(_client: Client, options: any): Promise<any> {
-    const uid = await verifyToken(options?.token);
+    const uid = await requireVerifiedUser(options?.token);
     if (uid && (await isGameBanned(uid))) throw new Error('banned');
     return uid ?? true;
   }
@@ -264,9 +264,9 @@ export class OkeyRoom extends Room {
     const seat = spectate ? null : this.humanSeats.find((s) => !taken.has(s));
     if (seat == null) {
       this.spectators.add(client.sessionId);
-      const specName = options?.playerName ? String(options.playerName) : 'İzleyici';
+      const specName = safeClientName(options?.playerName, 'İzleyici');
       this.spectatorNames.set(client.sessionId, specName);
-      this.spectatorMeta.set(client.sessionId, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
+      this.spectatorMeta.set(client.sessionId, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
       this.logEvent(`${specName} izleyici olarak masaya katıldı`);
       client.send('seat', { seat: -1 });
       this.pushViews();
@@ -275,8 +275,8 @@ export class OkeyRoom extends Room {
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
-    if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
-    this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
+    this.seatNames.set(seat, safeClientName(options?.playerName, `Oyuncu ${seat + 1}`));
+    this.seatMeta.set(seat, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
     client.send('seat', { seat });
     console.log(`[OkeyRoom.onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();
@@ -299,8 +299,8 @@ export class OkeyRoom extends Room {
     this.seats.set(client.sessionId, seat);
     if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
-    if (options?.playerName) this.seatNames.set(seat, String(options.playerName));
-    this.seatMeta.set(seat, { gender: options?.gender ? String(options.gender) : '', role: options?.role ? String(options.role) : 'normal' });
+    this.seatNames.set(seat, safeClientName(options?.playerName, `Oyuncu ${seat + 1}`));
+    this.seatMeta.set(seat, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
     client.send('seat', { seat });
     this.startGameIfReady();
     this.pushViews();
