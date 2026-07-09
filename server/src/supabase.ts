@@ -78,6 +78,59 @@ export function safeClientName(raw: unknown, fallback: string): string {
   return n || fallback;
 }
 
+export type ClientProfileMeta = { name: string; gender: string; role: string };
+
+export function authUserIdFromClient(client: any): string | null {
+  const auth = client?.auth;
+  if (typeof auth === 'string' && auth) return auth;
+  if (auth && typeof auth.uid === 'string' && auth.uid) return auth.uid;
+  return null;
+}
+
+function vipActive(raw: unknown): boolean {
+  if (!raw) return false;
+  const t = Date.parse(String(raw));
+  return Number.isFinite(t) && t > Date.now();
+}
+
+function trustedProfileRole(row: any): string {
+  const role = String(row?.role ?? 'normal').trim().toLowerCase();
+  if (role === 'admin') return 'admin';
+  if (role === 'vip' || vipActive(row?.vip_until)) return 'vip';
+  return 'normal';
+}
+
+export async function resolveClientProfileMeta(
+  userId: string | null | undefined,
+  options: any,
+  fallbackName: string,
+): Promise<ClientProfileMeta> {
+  const fallback: ClientProfileMeta = {
+    name: safeClientName(options?.playerName, fallbackName),
+    gender: safeClientGender(options?.gender),
+    role: userId && supabaseConfigured() ? 'normal' : safeClientRole(options?.role),
+  };
+  if (!userId || !supabaseConfigured()) return fallback;
+  try {
+    const r = await fetch(
+      `${URL}/rest/v1/profiles?id=eq.${userId}&select=name,gender,role,vip_until`,
+      { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
+    );
+    if (!r.ok) return fallback;
+    const rows: any = await r.json();
+    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    if (!row) return fallback;
+    return {
+      name: safeClientName(row?.name, fallback.name),
+      gender: safeClientGender(row?.gender),
+      role: trustedProfileRole(row),
+    };
+  } catch (e: any) {
+    console.error('[supabase] resolveClientProfileMeta:', e?.message);
+    return fallback;
+  }
+}
+
 /** Kullanıcı banlı mı? profiles.banned okur (service-role). Hata/yoksa false (girişi engelleme). */
 export async function isBanned(userId: string | null | undefined): Promise<boolean> {
   if (!userId || !supabaseConfigured()) return false;

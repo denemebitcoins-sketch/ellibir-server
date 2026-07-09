@@ -3,7 +3,7 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 
 // Hediye türü → alıcının yanında kaç saat durur (client GiftCatalog ile aynı).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -243,7 +243,7 @@ export class EllibirRoom extends Room {
     this.onMessage('sit', (client, raw) => {
       let msg: any = raw;
       if (typeof raw === 'string') { try { msg = JSON.parse(raw); } catch { msg = {}; } }
-      this.trySit(client, msg?.seat, { playerName: msg?.playerName });
+      void this.trySit(client, msg?.seat, msg ?? {});
     });
 
     console.log(`[EllibirRoom] oluştu seed=${seed} humans=${this.humanSeats}`);
@@ -259,7 +259,7 @@ export class EllibirRoom extends Room {
     return uid ?? true;
   }
 
-  onJoin(client: Client, options: any) {
+  async onJoin(client: Client, options: any) {
     const taken = new Set(this.seats.values());
     // İZLE ile gelen (spectate:true) → koltuk boş OLSA BİLE oturtma; izleyici kalır.
     // Oturmak için sonradan 'sit' mesajı gönderilir. (HEMEN OYNA/davet-kabul spectate yollamaz → otomatik oturur.)
@@ -268,20 +268,22 @@ export class EllibirRoom extends Room {
     if (seat == null) {
       // Boş insan koltuğu yok (veya izleyici) → İZLEYİCİ olarak kabul (koltuksuz, seats Map'e konmaz).
       this.spectators.add(client.sessionId);
-      const specName = safeClientName(options?.playerName, 'İzleyici');
-      this.spectatorNames.set(client.sessionId, specName);
-      this.spectatorMeta.set(client.sessionId, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
-      this.logEvent(`${specName} izleyici olarak masaya katıldı`); // client farklı renk verir
+      const meta = await resolveClientProfileMeta(authUserIdFromClient(client), options, 'İzleyici');
+      this.spectatorNames.set(client.sessionId, meta.name);
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.logEvent(`${meta.name} izleyici olarak masaya katıldı`); // client farklı renk verir
       client.send('seat', { seat: -1 });
       console.log(`[onJoin] izleyici, izleyici sayısı=${this.spectators.size}`);
       this.pushViews();
       return;
     }
     this.seats.set(client.sessionId, seat);
-    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    const uid = authUserIdFromClient(client);
+    if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
-    this.seatNames.set(seat, safeClientName(options?.playerName, `Oyuncu ${seat + 1}`));
-    this.seatMeta.set(seat, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
+    const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
+    this.seatNames.set(seat, meta.name);
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
@@ -289,7 +291,7 @@ export class EllibirRoom extends Room {
   }
 
   /** İzleyiciyi/koltuksuzu boş bir koltuğa oturt ('sit' mesajı). Oyun başlamadan (game==null) izinli. */
-  private trySit(client: Client, rawSeat: any, options: any) {
+  private async trySit(client: Client, rawSeat: any, options: any) {
     if (this.seats.has(client.sessionId)) return; // zaten oturuyor
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
     const taken = new Set(this.seats.values());
@@ -308,10 +310,12 @@ export class EllibirRoom extends Room {
 
     this.spectators.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
-    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    const uid = authUserIdFromClient(client);
+    if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
-    this.seatNames.set(seat, safeClientName(options?.playerName, `Oyuncu ${seat + 1}`));
-    this.seatMeta.set(seat, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
+    const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
+    this.seatNames.set(seat, meta.name);
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
     client.send('seat', { seat });
     console.log(`[sit] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();

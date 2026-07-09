@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, safeClientGender, safeClientName, safeClientRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 
 // 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -246,38 +246,40 @@ export class OkeyRoom extends Room {
     this.onMessage('sit', (client, raw) => {
       let msg: any = raw;
       if (typeof raw === 'string') { try { msg = JSON.parse(raw); } catch { msg = {}; } }
-      this.trySit(client, msg?.seat, msg ?? {});
+      void this.trySit(client, msg?.seat, msg ?? {});
     });
 
     console.log(`[OkeyRoom] oluştu seed=${seed} mode=${mode} humans=${this.humanSeats}`);
   }
 
-  onJoin(client: Client, options: any) {
+  async onJoin(client: Client, options: any) {
     const taken = new Set(this.seats.values());
     const spectate = options?.spectate === true || options?.spectate === 'true';
     const seat = spectate ? null : this.humanSeats.find((s) => !taken.has(s));
     if (seat == null) {
       this.spectators.add(client.sessionId);
-      const specName = safeClientName(options?.playerName, 'İzleyici');
-      this.spectatorNames.set(client.sessionId, specName);
-      this.spectatorMeta.set(client.sessionId, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
-      this.logEvent(`${specName} izleyici olarak masaya katıldı`);
+      const meta = await resolveClientProfileMeta(authUserIdFromClient(client), options, 'İzleyici');
+      this.spectatorNames.set(client.sessionId, meta.name);
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
       client.send('seat', { seat: -1 });
       this.pushViews();
       return;
     }
     this.seats.set(client.sessionId, seat);
-    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    const uid = authUserIdFromClient(client);
+    if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
-    this.seatNames.set(seat, safeClientName(options?.playerName, `Oyuncu ${seat + 1}`));
-    this.seatMeta.set(seat, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
+    const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
+    this.seatNames.set(seat, meta.name);
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
     client.send('seat', { seat });
     console.log(`[OkeyRoom.onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();
     this.pushViews();
   }
 
-  private trySit(client: Client, rawSeat: any, options: any) {
+  private async trySit(client: Client, rawSeat: any, options: any) {
     if (this.seats.has(client.sessionId)) return;
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
     const taken = new Set(this.seats.values());
@@ -291,10 +293,12 @@ export class OkeyRoom extends Room {
 
     this.spectators.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
-    if (typeof (client as any).auth === 'string') this.seatUsers.set(seat, (client as any).auth);
+    const uid = authUserIdFromClient(client);
+    if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
-    this.seatNames.set(seat, safeClientName(options?.playerName, `Oyuncu ${seat + 1}`));
-    this.seatMeta.set(seat, { gender: safeClientGender(options?.gender), role: safeClientRole(options?.role) });
+    const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
+    this.seatNames.set(seat, meta.name);
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
     client.send('seat', { seat });
     this.startGameIfReady();
     this.pushViews();
