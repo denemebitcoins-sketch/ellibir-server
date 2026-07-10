@@ -14,6 +14,7 @@ describe('profile and direct-message authority schema', () => {
       expect(sql).toMatch(/security\s+invoker[\s\S]*?new\.chips\s*:=\s*old\.chips/i);
       expect(sql).toMatch(/new\.message_banned_until\s*:=\s*old\.message_banned_until/i);
       expect(sql).toMatch(/new\.role\s*:=\s*old\.role/i);
+      expect(sql).toMatch(/new\.avatar_status\s*:=\s*case\s+when\s+new\.avatar_status\s*=\s*'pending'/i);
       expect(sql).toMatch(/public\.is_current_user_admin\(\)/i);
     },
   );

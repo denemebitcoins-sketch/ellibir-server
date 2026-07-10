@@ -118,7 +118,7 @@ begin
     new.chat_banned_until := old.chat_banned_until;
     new.message_banned_until := old.message_banned_until;
     new.game_banned_until := old.game_banned_until;
-    new.avatar_status := old.avatar_status;
+    new.avatar_status := case when new.avatar_status = 'pending' then 'pending' else old.avatar_status end;
   end if;
   return new;
 end;
