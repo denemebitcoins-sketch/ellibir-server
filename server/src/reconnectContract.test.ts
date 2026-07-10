@@ -46,4 +46,20 @@ describe('reconnect contract smoke', () => {
     expect(src).toContain('PlayerPrefs.SetString(RC_ROOM');
     expect(src).toContain('PlayerPrefs.SetString(RC_TOKEN');
   });
+  it.each(roomFiles)('%s room releases the waiting countdown interval on dispose', (_game, file) => {
+    const src = readFromRepo(file);
+
+    expect(src).toContain('private startTick: NodeJS.Timeout | null = null;');
+    expect(src).toContain('this.startTick = setInterval');
+    expect(src).toMatch(/onDispose\(\)\s*\{[\s\S]*?clearInterval\(this\.startTick\)/);
+  });
+
+  it('keeps ws as a fail-fast direct runtime dependency', () => {
+    const pkg = JSON.parse(readFromRepo('server/package.json'));
+    const globals = readFromRepo('server/src/nodeGlobals.ts');
+
+    expect(pkg.dependencies?.ws).toBeTruthy();
+    expect(globals).toContain("require('ws')");
+    expect(globals).not.toContain('catch');
+  });
 });

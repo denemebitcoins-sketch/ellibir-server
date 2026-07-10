@@ -32,6 +32,7 @@ export class TavlaRoom extends Room {
   private seatNames = new Map<number, string>();
   private abandoned = new Set<number>();       // kopan insan koltukları (bot devralır)
   private startTimer: NodeJS.Timeout | null = null;
+  private startTick: NodeJS.Timeout | null = null;
   private botTimer: NodeJS.Timeout | null = null;
   private humanTimer: NodeJS.Timeout | null = null;
   private gameTimer: NodeJS.Timeout | null = null;
@@ -285,9 +286,10 @@ export class TavlaRoom extends Room {
     if (this.game || this.startTimer || this.seats.size < this.humanSeats.length) return;
     this.startAt = Date.now();
     this.pushViews();
-    const tick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000);
+    if (this.startTick) clearInterval(this.startTick);
+    this.startTick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000);
     this.startTimer = setTimeout(async () => {
-      clearInterval(tick);
+      if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; }
       const entryUsers = new Map(this.seatUsers);
@@ -645,6 +647,7 @@ export class TavlaRoom extends Room {
 
   onDispose() {
     if (this.startTimer) clearTimeout(this.startTimer);
+    if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
     if (this.gameTimer) clearTimeout(this.gameTimer);
     this.clearTurnTimers();
     console.log('[TavlaRoom] dispose');

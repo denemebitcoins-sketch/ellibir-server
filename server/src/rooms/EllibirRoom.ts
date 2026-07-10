@@ -30,6 +30,7 @@ export class EllibirRoom extends Room {
   private handEndTimer: NodeJS.Timeout | null = null;
   private matchEndTimer: NodeJS.Timeout | null = null;
   private startTimer: NodeJS.Timeout | null = null;
+  private startTick: NodeJS.Timeout | null = null;
   private sorguTimer: NodeJS.Timeout | null = null;   // insan sorgu kararı zaman aşımı (→ VER)
   private sorguDeadlineAt = 0;                         // sorgu sayacının biteceği an (client geri sayımı)
   private readonly SORGU_MS = 15000;                  // RULES.md 1.11: SORGU_SURESI = 15 sn
@@ -327,9 +328,10 @@ export class EllibirRoom extends Room {
     if (this.game || this.startTimer || this.seats.size < this.humanSeats.length) return;
     this.startAt = Date.now();
     this.pushViews(); // "oyun başlıyor" overlay (dolu ama henüz başlamadı)
-    const tick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000); // canlı geri sayım
+    if (this.startTick) clearInterval(this.startTick);
+    this.startTick = setInterval(() => { if (!this.game) this.pushViews(); }, 1000); // canlı geri sayım
     this.startTimer = setTimeout(async () => {
-      clearInterval(tick);
+      if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
       const entryUsers = new Map(this.seatUsers);
@@ -802,6 +804,7 @@ export class EllibirRoom extends Room {
     if (this.handEndTimer) clearTimeout(this.handEndTimer);
     if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
     if (this.startTimer) clearTimeout(this.startTimer);
+    if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
     this.clearSorguTimer();
     this.clearTurnTimer();
   }
