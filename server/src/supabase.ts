@@ -183,7 +183,7 @@ export async function isChatBanned(userId: string | null | undefined): Promise<b
       `${URL}/rest/v1/profiles?id=eq.${userId}&select=chat_banned_until`,
       { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
     );
-    if (!r.ok) return false;
+    if (!r.ok) throw new Error(`chat_ban_http_${r.status}`);
     const rows: any = await r.json();
     const until = Array.isArray(rows) && rows.length > 0 ? rows[0]?.chat_banned_until : null;
     if (!until) return false;
@@ -191,7 +191,7 @@ export async function isChatBanned(userId: string | null | undefined): Promise<b
     return Number.isFinite(t) && t > Date.now();
   } catch (e: any) {
     console.error('[supabase] isChatBanned:', e?.message);
-    return false;
+    throw e;
   }
 }
 

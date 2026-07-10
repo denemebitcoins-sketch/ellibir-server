@@ -6,6 +6,7 @@ import {
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
+import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 
 // 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
 const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
@@ -75,6 +76,8 @@ export class OkeyRoom extends Room {
   private cfg: any = null;
   private lastReconnectAt = new Map<string, number>();
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkani (wifi->mobil gecisi)
+  private readonly messageGuard = new RoomMessageGuard();
+  private readonly giftBusy = new Set<string>();
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar (izleyici katıldı vb.)
 
   static async onAuth(_token: string, options: any): Promise<any> {
@@ -156,6 +159,10 @@ export class OkeyRoom extends Room {
     this.onMessage('cmd', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null || !this.game) return;
+      if (!payloadWithinLimit(raw, 16 * 1024) || !this.messageGuard.allow(client.sessionId, 'cmd', 12, 1000)) {
+        client.send('moveError', { code: 'rate_limited', message: 'Çok hızlı hamle gönderildi.' });
+        return;
+      }
       let cmd: any;
       try { cmd = typeof raw === 'string' ? JSON.parse(raw) : raw; }
       catch { client.send('moveError', { code: 'bad_json' }); return; }
@@ -170,6 +177,10 @@ export class OkeyRoom extends Room {
     this.onMessage('chat', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
+      if (!payloadWithinLimit(raw, 1024) || !this.messageGuard.allow(client.sessionId, 'chat', 4, 5000)) {
+        client.send('chatBlocked', { reason: 'Çok hızlı mesaj gönderiyorsun.' });
+        return;
+      }
       let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
       text = String(text).slice(0, 200).trim();
       if (!text) return;
@@ -179,7 +190,7 @@ export class OkeyRoom extends Room {
         isChatBanned(uid).then((banned) => {
           if (banned) { client.send('chatBlocked', { reason: 'Konuşman yasaklı.' }); return; }
           this.broadcast('chat', { seat, name, text });
-        }).catch(() => this.broadcast('chat', { seat, name, text }));
+        }).catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
         return;
       }
       this.broadcast('chat', { seat, name, text });
@@ -188,26 +199,33 @@ export class OkeyRoom extends Room {
     this.onMessage('gift', async (client, raw) => {
       const fromSeat = this.seats.get(client.sessionId);
       if (fromSeat == null) return;
-      const toSeat = Number(raw?.to_seat);
-      const giftType = Number(raw?.gift_id);
-      if (!Number.isInteger(toSeat) || toSeat < 0 || toSeat > 3) return;
-      if (!Number.isInteger(giftType) || giftType < 1 || giftType > 12) return;
-      const fromUid = this.seatUsers.get(fromSeat);
-      const toUid = this.seatUsers.get(toSeat);
-      if (fromUid) {
-        const cost = GIFT_DIAMONDS[giftType] ?? 999;
-        const ok = await deductDiamonds(fromUid, cost);
-        if (!ok) { client.send('giftFailed', { reason: 'Yetersiz elmas' }); return; }
+      if (!payloadWithinLimit(raw, 1024) || !this.messageGuard.allow(client.sessionId, 'gift', 1, 1000) || this.giftBusy.has(client.sessionId)) {
+        client.send('giftFailed', { reason: 'Hediye işlemi sürüyor; biraz bekle.' });
+        return;
       }
-      const fromName = this.seatNames.get(fromSeat) ?? `Oyuncu ${fromSeat + 1}`;
-      const hours = GIFT_HOURS[giftType] ?? 2;
-      const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
-      // HEDİYE O MASAYA ÖZEL (kullanıcı kararı 2026-07-05): Supabase kalıcılığı KALDIRILDI — yalnız broadcast.
-      this.broadcast('giftSent', {
-        from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
-      });
-      this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
-      this.pushViews();
+      this.giftBusy.add(client.sessionId);
+      try {
+        const toSeat = Number(raw?.to_seat);
+        const giftType = Number(raw?.gift_id);
+        if (!Number.isInteger(toSeat) || toSeat < 0 || toSeat > 3) return;
+        if (!Number.isInteger(giftType) || giftType < 1 || giftType > 12) return;
+        const fromUid = this.seatUsers.get(fromSeat);
+        const toUid = this.seatUsers.get(toSeat);
+        if (fromUid) {
+          const cost = GIFT_DIAMONDS[giftType] ?? 999;
+          const ok = await deductDiamonds(fromUid, cost);
+          if (!ok) { client.send('giftFailed', { reason: 'Yetersiz elmas' }); return; }
+        }
+        const fromName = this.seatNames.get(fromSeat) ?? `Oyuncu ${fromSeat + 1}`;
+        const hours = GIFT_HOURS[giftType] ?? 2;
+        const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
+        // HEDİYE O MASAYA ÖZEL (kullanıcı kararı 2026-07-05): Supabase kalıcılığı KALDIRILDI — yalnız broadcast.
+        this.broadcast('giftSent', {
+          from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
+        });
+        this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
+        this.pushViews();
+      } finally { this.giftBusy.delete(client.sessionId); }
     });
 
     // Client arka plana düştü / koltuğu koruyarak menüye döndü: bağlantı fiziksel olarak
@@ -215,6 +233,7 @@ export class OkeyRoom extends Room {
     this.onMessage('away', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
+      if (!payloadWithinLimit(raw, 256) || !this.messageGuard.allow(client.sessionId, 'away', 6, 3000)) return;
       const away = raw?.away !== false;
       if (away) {
         if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} masadan uzaklaştı — bot devraldı`);
@@ -229,6 +248,7 @@ export class OkeyRoom extends Room {
     this.onMessage('quickChat', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
+      if (!payloadWithinLimit(raw, 512) || !this.messageGuard.allow(client.sessionId, 'quickChat', 4, 4000)) return;
       let text = typeof raw === 'string' ? raw : (raw?.text ?? '');
       text = String(text).slice(0, 120).trim();
       if (!text) return;
@@ -245,6 +265,7 @@ export class OkeyRoom extends Room {
     });
 
     this.onMessage('sit', (client, raw) => {
+      if (!payloadWithinLimit(raw, 2048) || !this.messageGuard.allow(client.sessionId, 'sit', 4, 5000)) return;
       let msg: any = raw;
       if (typeof raw === 'string') { try { msg = JSON.parse(raw); } catch { msg = {}; } }
       void this.trySit(client, msg?.seat, msg ?? {});
@@ -293,6 +314,8 @@ export class OkeyRoom extends Room {
     else { client.send('sitError', { reason: 'koltuk seç' }); return; }
 
     this.spectators.delete(client.sessionId);
+    this.spectatorNames.delete(client.sessionId);
+    this.spectatorMeta.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
     const uid = authUserIdFromClient(client);
     if (uid) this.seatUsers.set(seat, uid);
@@ -362,6 +385,12 @@ export class OkeyRoom extends Room {
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) this.pushViews();
+      this.spectatorNames.delete(client.sessionId);
+      this.spectatorMeta.delete(client.sessionId);
+      this.messageGuard.forget(client.sessionId);
+      this.giftBusy.delete(client.sessionId);
+      this.lastReconnectAt.delete(client.sessionId);
+      this.takeoverPending.delete(client.sessionId);
       return;
     }
     this.abandoned.add(seat);
@@ -421,6 +450,12 @@ export class OkeyRoom extends Room {
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) this.pushViews();
+      this.spectatorNames.delete(client.sessionId);
+      this.spectatorMeta.delete(client.sessionId);
+      this.messageGuard.forget(client.sessionId);
+      this.giftBusy.delete(client.sessionId);
+      this.lastReconnectAt.delete(client.sessionId);
+      this.takeoverPending.delete(client.sessionId);
       return;
     }
     if (!this.game) {
@@ -436,6 +471,10 @@ export class OkeyRoom extends Room {
   }
 
   private cleanupSeat(sessionId: string, seat: number) {
+    this.messageGuard.forget(sessionId);
+    this.giftBusy.delete(sessionId);
+    this.lastReconnectAt.delete(sessionId);
+    this.takeoverPending.delete(sessionId);
     this.seats.delete(sessionId);
     this.seatUsers.delete(seat);
     this.seatNames.delete(seat);
@@ -689,6 +728,8 @@ export class OkeyRoom extends Room {
   }
 
   onDispose() {
+    this.messageGuard.clear();
+    this.giftBusy.clear();
     if (this.startTimer) clearTimeout(this.startTimer);
     if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
     if (this.elTimer) clearTimeout(this.elTimer);
