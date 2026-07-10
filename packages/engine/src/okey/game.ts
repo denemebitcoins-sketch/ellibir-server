@@ -490,6 +490,10 @@ function canOpenAdditionalWithTile(state: OkeyGameState, seat: number, tile: Oke
   if (p.openMode === 'pairs') {
     return pairGroupsFor([...p.hand, tile], state).some((g) => g.some((t) => t.id === tile.id));
   }
+  if (p.openMode === 'melds' && state.openMelds.some((m) => m.kind === 'pair') &&
+      pairGroupsFor([...p.hand, tile], state).some((g) => g.some((t) => t.id === tile.id))) {
+    return true;
+  }
   return groups.some((g) => {
     const c = classifyMeld(g, state);
     return g.some((t) => t.id === tile.id) && !!c && c.kind !== 'pair';
@@ -580,9 +584,12 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
   if (state.phase !== 'discard') return { ok: false, error: 'açmak için önce taş çekmelisin' };
   const p = state.players[seat]!;
   const alreadyOpened = p.hasOpened;
-  if (p.hasOpened && p.openMode !== 'pairs') return { ok: false, error: 'seri açan çift açamaz' };
+  const addingPairsAfterMelds = p.hasOpened && p.openMode === 'melds';
+  if (addingPairsAfterMelds && !state.openMelds.some((m) => m.kind === 'pair'))
+    return { ok: false, error: 'çift işlemek için önce masada çift açılmış olmalı' };
   const picked = pickGroupsFromHand(p, pairs);
   if (typeof picked === 'string') return { ok: false, error: picked };
+  if (picked.length === 0) return { ok: false, error: 'açılacak çift seç' };
   const pickedIds = picked.flatMap((g) => g.map((t) => t.id));
   const pendingErr = pendingLeftError(p, pickedIds);
   if (pendingErr) return { ok: false, error: pendingErr };
@@ -607,7 +614,7 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
     state.yuzbirMaxOpenPairs = Math.max(state.yuzbirMaxOpenPairs, melds.length);
   }
   state.openMelds.push(...melds);
-  state.matchLog.push(alreadyOpened ? `${p.name} çift ekledi` : `${p.name} ${melds.length} çift ile açtı`);
+  state.matchLog.push(alreadyOpened ? `${p.name} çift işledi` : `${p.name} ${melds.length} çift ile açtı`);
   return { ok: true };
 }
 

@@ -692,6 +692,43 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(yuzbirOpeningMin(st)).toBe(126);
   });
 
+  it('seri açan, masada çift açışı varsa elindeki çiftleri işleyebilir', () => {
+    const st = g101();
+    const opening = [
+      [t('R', 10), t('R', 11), t('R', 12), t('R', 13)],
+      [t('Y', 10), t('Y', 11), t('Y', 12), t('Y', 13)],
+      [t('B', 10), t('B', 11), t('B', 12)],
+    ];
+    const pair = [t('K', 4), t('K', 4)];
+    st.players[0]!.hand = opening.flat().concat(pair, [t('R', 1)]);
+    expect(applyOkeyMove(st, 0, { t: 'open', groups: opening.map((x) => x.map((z) => z.id)) } as any).ok).toBe(true);
+
+    const blocked = applyOkeyMove(st, 0, { t: 'openPairs', pairs: [pair.map((z) => z.id)] } as any);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toContain('masada çift');
+
+    st.openMelds.push({
+      id: 'table-pair',
+      ownerSeat: 1,
+      kind: 'pair',
+      tiles: [t('Y', 6), t('Y', 6)],
+      points: 12,
+    });
+    st.players[1]!.hasOpened = true;
+    st.players[1]!.openMode = 'pairs';
+    st.players[1]!.openingPairs = 5;
+    st.yuzbirMaxOpenPairs = 5;
+
+    const opened = applyOkeyMove(st, 0, { t: 'openPairs', pairs: [pair.map((z) => z.id)] } as any);
+    expect(opened.ok).toBe(true);
+    expect(st.players[0]!.openMode).toBe('melds');
+    expect(st.players[0]!.openingPoints).toBe(125);
+    expect(st.players[0]!.openingPairs).toBe(0);
+    expect(st.yuzbirMaxOpenPairs).toBe(5);
+    expect(st.openMelds.at(-1)?.kind).toBe('pair');
+    expect(st.matchLog.at(-1)).toContain('çift işledi');
+  });
+
   it('çift açtıktan sonra ek çift açabilir; ilk çift açılışı sabit kalır', () => {
     const st = g101();
     const first = [
