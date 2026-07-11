@@ -1031,13 +1031,66 @@ function tryAutoOpenYuzbir(state: OkeyGameState, seat: number): void {
   const p = state.players[seat]!;
   if (p.hasOpened || state.phase !== 'discard') return;
   const pair = bestYuzbirPairOpening(state, seat);
-  if (pair.count >= yuzbirPairOpeningMin(state)) {
+  const pairTileCount = pair.pairs.reduce((n, g) => n + g.length, 0);
+  if (pair.count >= yuzbirPairOpeningMin(state) && pairTileCount < p.hand.length) {
     applyOkeyMove(state, seat, { t: 'openPairs', pairs: pair.pairs });
     return;
   }
   const meld = bestYuzbirMeldOpening(state, seat);
-  if (meld.points >= yuzbirOpeningMin(state))
+  const meldTileCount = meld.groups.reduce((n, g) => n + g.length, 0);
+  if (meld.points >= yuzbirOpeningMin(state) && meldTileCount < p.hand.length)
     applyOkeyMove(state, seat, { t: 'open', groups: meld.groups });
+}
+
+/** Süresi dolan oyuncunun soldan aldığı taşı mümkünse kurala uygun biçimde kullanır. */
+function tryAutoUsePendingYuzbirLeft(state: OkeyGameState, seat: number): boolean {
+  if (state.rules.variant !== 'yuzbir' || state.phase !== 'discard') return false;
+  const p = state.players[seat]!;
+  const pendingId = p.yuzbirPendingLeftTileId;
+  if (!pendingId) return false;
+
+  if (!p.hasOpened) {
+    const pair = bestYuzbirPairOpening(state, seat);
+    const pairTileCount = pair.pairs.reduce((n, g) => n + g.length, 0);
+    if (pair.count >= yuzbirPairOpeningMin(state) && pairTileCount < p.hand.length &&
+        pair.pairs.some((g) => g.includes(pendingId))) {
+      const r = applyOkeyMove(state, seat, { t: 'openPairs', pairs: pair.pairs });
+      if (r.ok && !p.yuzbirPendingLeftTileId) return true;
+    }
+    const meld = bestYuzbirMeldOpening(state, seat);
+    const meldTileCount = meld.groups.reduce((n, g) => n + g.length, 0);
+    if (meld.points >= yuzbirOpeningMin(state) && meldTileCount < p.hand.length &&
+        meld.groups.some((g) => g.includes(pendingId))) {
+      const r = applyOkeyMove(state, seat, { t: 'open', groups: meld.groups });
+      if (r.ok && !p.yuzbirPendingLeftTileId) return true;
+    }
+    return false;
+  }
+
+  const pending = p.hand.find((t) => t.id === pendingId);
+  if (!pending) return false;
+  for (const meld of state.openMelds) {
+    if (!canExtendYuzbirMeldWithTile(state, meld, pending)) continue;
+    const r = applyOkeyMove(state, seat, { t: 'extend', meldId: meld.id, tileId: pendingId });
+    if (r.ok && !p.yuzbirPendingLeftTileId) return true;
+  }
+
+  if (p.openMode === 'pairs' || (p.openMode === 'melds' && state.openMelds.some((m) => m.kind === 'pair'))) {
+    const pair = pairGroupsFor(p.hand, state).find((g) => g.some((t) => t.id === pendingId));
+    if (pair && pair.length < p.hand.length) {
+      const r = applyOkeyMove(state, seat, { t: 'openPairs', pairs: [pair.map((t) => t.id)] });
+      if (r.ok && !p.yuzbirPendingLeftTileId) return true;
+    }
+  }
+  if (p.openMode === 'melds') {
+    const group = bestGrouping([...p.hand], state.okeyColor, state.okeyRank, false)
+      .find((g) => g.some((t) => t.id === pendingId) && classifyMeld(g, state)?.kind !== 'pair');
+    if (group && group.length < p.hand.length) {
+      const r = applyOkeyMove(state, seat, { t: 'open', groups: [group.map((t) => t.id)] });
+      if (r.ok && !p.yuzbirPendingLeftTileId) return true;
+    }
+  }
+  return false;
 }
 
 export function autoOkeyMove(state: OkeyGameState, seat: number): void {
@@ -1046,8 +1099,16 @@ export function autoOkeyMove(state: OkeyGameState, seat: number): void {
     applyOkeyMove(state, seat, { t: 'draw', from: 'pile' });
     if (state.elEnded) return;
   }
-  tryAutoOpenYuzbir(state, seat);
   const p = state.players[seat]!;
+  if (state.rules.variant === 'yuzbir' && p.yuzbirPendingLeftTileId) {
+    if (!tryAutoUsePendingYuzbirLeft(state, seat)) {
+      const returned = applyOkeyMove(state, seat, { t: 'returnLeft' });
+      if (!returned.ok) return;
+      const drawn = applyOkeyMove(state, seat, { t: 'draw', from: 'pile' });
+      if (!drawn.ok || state.elEnded) return;
+    }
+  }
+  tryAutoOpenYuzbir(state, seat);
   // Okey atma: asla otomatik atılmaz; en son ele gelen (dizilim bozmaz) okey-dışı taş atılır.
   for (let i = p.hand.length - 1; i >= 0; i--) {
     const t = p.hand[i]!;

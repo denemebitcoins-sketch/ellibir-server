@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOkeyDeck, dealOkey, nextRank, identityOf, isOkeyTile,
-  canFinishMelds, canFinishPairs, isValidRun, isValidSet, isValidPair,
+  canFinishMelds, canFinishPairs, isValidRun, isValidSet, isValidPair, bestGrouping,
   createOkeyGame, applyOkeyMove, elMultOf, beginBankoPhase, resolveBankoPhase, botBankoDecide, startNextEl, autoOkeyMove, playOkeyBotTurn,
   yuzbirOpeningMin, yuzbirPairOpeningMin,
 } from '../src/okey';
@@ -66,6 +66,22 @@ describe('deste ve gösterge', () => {
     expect(id.rank).toBe(OR);
     expect(isOkeyTile(t('K', 13), OC, OR)).toBe(true);
     expect(identityOf(t('K', 13), OC, OR).wild).toBe(true);
+  });
+});
+
+describe('otomatik dizilim', () => {
+  it('eşit kapsamada okeyi daha yüksek puanlı seriye ayırır', () => {
+    const joker = t('K', 13);
+    const hand = [t('R', 2), t('R', 3), t('B', 12), t('B', 13), joker];
+
+    const groups = bestGrouping(hand, OC, OR, false);
+    const picked = groups.flat().map((x) => x.id);
+
+    expect(picked).toContain(joker.id);
+    expect(picked).toContain(hand[2]!.id);
+    expect(picked).toContain(hand[3]!.id);
+    expect(picked).not.toContain(hand[0]!.id);
+    expect(picked).not.toContain(hand[1]!.id);
   });
 });
 
@@ -505,6 +521,47 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
     expect(st.discards[3]![st.discards[3]!.length - 1]?.id).toBe(left.id);
     expect(st.players[0]!.hand.some((x) => x.id === left.id)).toBe(false);
+    expect(st.phase).toBe('draw');
+  });
+
+  it('101de süre dolunca kullanılamayan soldan taş geri konur ve tur kilitlenmez', () => {
+    const st = g101();
+    const left = t('R', 13);
+    const stockTile = t('Y', 6);
+    st.players[0]!.hand = [t('R', 1), t('Y', 3), t('B', 5)];
+    st.discards[3]!.push(left);
+    st.stock = [stockTile];
+    st.phase = 'draw';
+    st.turn = 0;
+
+    expect(applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any).ok).toBe(true);
+    autoOkeyMove(st, 0);
+
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
+    expect(st.discards[3]![st.discards[3]!.length - 1]?.id).toBe(left.id);
+    expect(st.turn).toBe(1);
+    expect(st.phase).toBe('draw');
+  });
+
+  it('101de süre dolunca soldan alınan taş açara yetiyorsa önce açılır', () => {
+    const st = g101();
+    const g1 = [t('R', 10), t('R', 11), t('R', 12)];
+    const left = t('R', 13);
+    const g2 = [t('Y', 10), t('Y', 11), t('Y', 12), t('Y', 13)];
+    const g3 = [t('B', 10), t('B', 11), t('B', 12)];
+    const loose = t('K', 2);
+    st.players[0]!.hand = [...g1, ...g2, ...g3, loose];
+    st.discards[3]!.push(left);
+    st.phase = 'draw';
+    st.turn = 0;
+
+    expect(applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any).ok).toBe(true);
+    autoOkeyMove(st, 0);
+
+    expect(st.players[0]!.hasOpened).toBe(true);
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
+    expect(st.openMelds.flatMap((m) => m.tiles).some((x) => x.id === left.id)).toBe(true);
+    expect(st.turn).toBe(1);
     expect(st.phase).toBe('draw');
   });
 

@@ -4,7 +4,7 @@ export * from './rules';
 export { buildOkeyDeck, dealOkey, identityOf, isOkeyTile, nextRank, makeTileId } from './deck';
 export {
   canFinishMelds, canFinishPairs, checkFinish, countIdentities,
-  isValidRun, isValidSet, isValidPair,
+  isValidRun, isValidSet, isValidPair, bestGrouping,
 } from './melds';
 export {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, elMultOf,

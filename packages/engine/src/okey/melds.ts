@@ -211,7 +211,7 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
   const give = (k: string) => counts.set(k, get(k) + 1);
   const maxRunPos = allowHighOne ? 14 : 13;
 
-  const memo = new Map<string, { cov: number; groups: string[][] }>();
+  const memo = new Map<string, { cov: number; score: number; groups: string[][] }>();
   const stateKey = (w: number): string => {
     let sb = '';
     for (const c of OKEY_COLORS)
@@ -222,7 +222,7 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
     return sb + '|' + w;
   };
 
-  const solve = (w: number): { cov: number; groups: string[][] } => {
+  const solve = (w: number): { cov: number; score: number; groups: string[][] } => {
     let anchorK: string | null = null;
     let ac: OkeyColor = 'R';
     let ar = 0;
@@ -231,7 +231,7 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
         if (get(key(c, r)) > 0) { anchorK = key(c, r); ac = c; ar = r; break; }
       if (anchorK) break;
     }
-    if (!anchorK) return { cov: 0, groups: [] };
+    if (!anchorK) return { cov: 0, score: 0, groups: [] };
     const sk = stateKey(w);
     const hit = memo.get(sk);
     if (hit) return hit;
@@ -252,10 +252,12 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
         for (const c of chosen) take(key(c, ar));
         const sub = solve(w - ju);
         for (const c of chosen) give(key(c, ar));
-        if (sub.cov + size > best.cov) {
+        const candidateCov = sub.cov + size;
+        const candidateScore = sub.score + ar * size;
+        if (candidateCov > best.cov || (candidateCov === best.cov && candidateScore > best.score)) {
           const grp: string[] = chosen.map((c) => key(c, ar));
           for (let x = 0; x < ju; x++) grp.push('W');
-          best = { cov: sub.cov + size, groups: [...sub.groups, grp] };
+          best = { cov: candidateCov, score: candidateScore, groups: [...sub.groups, grp] };
         }
       }
     }
@@ -277,7 +279,12 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
           }
           if (used.includes(anchorK) && need <= w) {
             const sub = solve(w - need);
-            if (sub.cov + len > best.cov) best = { cov: sub.cov + len, groups: [...sub.groups, grpDesc] };
+            let runScore = 0;
+            for (let pos = start; pos <= end; pos++) runScore += rankAtPos(pos);
+            const candidateCov = sub.cov + len;
+            const candidateScore = sub.score + runScore;
+            if (candidateCov > best.cov || (candidateCov === best.cov && candidateScore > best.score))
+              best = { cov: candidateCov, score: candidateScore, groups: [...sub.groups, grpDesc] };
           }
           for (const k of used) give(k);
         }
