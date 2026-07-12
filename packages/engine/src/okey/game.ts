@@ -399,7 +399,7 @@ export function pairGroupsFor(tiles: readonly OkeyTile[], state: OkeyGameState):
 }
 
 export function bestYuzbirMeldOpening(state: OkeyGameState, seat: number): { groups: string[][]; points: number } {
-  const groups = bestGrouping([...state.players[seat]!.hand], state.okeyColor, state.okeyRank, false);
+  const groups = bestGrouping([...state.players[seat]!.hand], state.okeyColor, state.okeyRank, false, true);
   let points = 0;
   const picked: string[][] = [];
   for (const g of groups) {
@@ -887,8 +887,8 @@ function leftoverFor(state: OkeyGameState, seat: number): { sum: number; cift: b
   pairs += Math.floor(w / 2);
   const pairLeftover = singles.filter(Boolean).reduce((a, t) => a + val(t), 0) + (w % 2) * orr;
   if (pairs >= 5) return { sum: pairLeftover, cift: true };
-  // PER değerlendirmesi: kapsama-maksimum gruplar (BestGrouping) dışında kalanların toplamı.
-  const groups = bestGrouping(p.hand, oc, orr);
+  // BANKO'da ceza hesabı en yüksek puanlı perleri korur.
+  const groups = bestGrouping(p.hand, oc, orr, true, true);
   const used = new Set<string>();
   for (const g of groups) for (const t of g) used.add(t.id);
   const sum = p.hand.filter((t) => !used.has(t.id)).reduce((a, t) => a + val(t), 0);

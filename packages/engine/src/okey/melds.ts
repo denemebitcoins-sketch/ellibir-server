@@ -193,7 +193,9 @@ export function isValidPair(tiles: readonly OkeyTile[], okeyColor: OkeyColor, ok
    SIRALA/skorlama için: eldeki taşlardan en çok taşı kapsayan geçerli seri/küt
    kümesini bulur (skip-anchor + memo; okey boşluğa ORTAYA girer, pos ekseni 1..14). */
 
-export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank, allowHighOne = true): OkeyTile[][] {
+export function bestGrouping(
+  hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank, allowHighOne = true, preferScore = false,
+): OkeyTile[][] {
   const counts = new Map<string, number>();
   const pools = new Map<string, OkeyTile[]>();
   const wildPool: OkeyTile[] = [];
@@ -210,6 +212,10 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
   const take = (k: string) => counts.set(k, get(k) - 1);
   const give = (k: string) => counts.set(k, get(k) + 1);
   const maxRunPos = allowHighOne ? 14 : 13;
+  const better = (candidateCov: number, candidateScore: number, bestCov: number, bestScore: number): boolean =>
+    preferScore
+      ? candidateScore > bestScore || (candidateScore === bestScore && candidateCov > bestCov)
+      : candidateCov > bestCov || (candidateCov === bestCov && candidateScore > bestScore);
 
   const memo = new Map<string, { cov: number; score: number; groups: string[][] }>();
   const stateKey = (w: number): string => {
@@ -254,7 +260,7 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
         for (const c of chosen) give(key(c, ar));
         const candidateCov = sub.cov + size;
         const candidateScore = sub.score + ar * size;
-        if (candidateCov > best.cov || (candidateCov === best.cov && candidateScore > best.score)) {
+        if (better(candidateCov, candidateScore, best.cov, best.score)) {
           const grp: string[] = chosen.map((c) => key(c, ar));
           for (let x = 0; x < ju; x++) grp.push('W');
           best = { cov: candidateCov, score: candidateScore, groups: [...sub.groups, grp] };
@@ -283,7 +289,7 @@ export function bestGrouping(hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: O
             for (let pos = start; pos <= end; pos++) runScore += rankAtPos(pos);
             const candidateCov = sub.cov + len;
             const candidateScore = sub.score + runScore;
-            if (candidateCov > best.cov || (candidateCov === best.cov && candidateScore > best.score))
+            if (better(candidateCov, candidateScore, best.cov, best.score))
               best = { cov: candidateCov, score: candidateScore, groups: [...sub.groups, grpDesc] };
           }
           for (const k of used) give(k);

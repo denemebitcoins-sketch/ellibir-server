@@ -83,6 +83,19 @@ describe('otomatik dizilim', () => {
     expect(picked).not.toContain(hand[0]!.id);
     expect(picked).not.toContain(hand[1]!.id);
   });
+
+  it('banko/101 puan onceliginde jokeri 2-4-5 yerine 11-13 arasina koyar', () => {
+    const low = [t('R', 2), t('R', 4), t('R', 5)];
+    const high = [t('B', 11), t('B', 13)];
+    const joker = t('K', 13);
+
+    const groups = bestGrouping([...low, ...high, joker], OC, OR, false, true);
+    const picked = new Set(groups.flat().map((x) => x.id));
+
+    expect(picked.has(joker.id)).toBe(true);
+    expect(high.every((x) => picked.has(x.id))).toBe(true);
+    expect(low.every((x) => !picked.has(x.id))).toBe(true);
+  });
 });
 
 describe('per doğrulama', () => {

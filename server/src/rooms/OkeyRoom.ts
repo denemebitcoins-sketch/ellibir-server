@@ -7,11 +7,7 @@ import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src
 import { okeyViewFor } from '../okeyView';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
-
-// 51 ile AYNI hediye katalogu (GiftCatalog client'ta ortak).
-const GIFT_HOURS: Record<number, number> = { 1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24 };
-const GIFT_DIAMONDS: Record<number, number> = { 1: 5, 2: 8, 3: 6, 4: 25, 5: 15, 6: 18, 7: 12, 8: 10, 9: 14, 10: 16, 11: 35, 12: 60 };
-const GIFT_NAMES: Record<number, string> = { 1: 'Çay', 2: 'Türk Kahvesi', 3: 'Limonata', 4: 'Semaver', 5: 'Pasta', 6: 'Baklava', 7: 'Lokum', 8: 'Dondurma', 9: 'Çikolata', 10: 'Meyve Tabağı', 11: 'Çiçek Buketi', 12: 'Altın Hediye Kesesi' };
+import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
 
@@ -205,14 +201,12 @@ export class OkeyRoom extends Room {
       }
       this.giftBusy.add(client.sessionId);
       try {
-        const toSeat = Number(raw?.to_seat);
-        const giftType = Number(raw?.gift_id);
-        if (!Number.isInteger(toSeat) || toSeat < 0 || toSeat > 3) return;
-        if (!Number.isInteger(giftType) || giftType < 1 || giftType > 12) return;
+        const gift = normalizeGiftRequest(raw, 3);
+        if (!gift) { client.send('giftFailed', { reason: 'Hediye veya hedef geçersiz.' }); return; }
+        const { giftId: giftType, targets } = gift;
         const fromUid = this.seatUsers.get(fromSeat);
-        const toUid = this.seatUsers.get(toSeat);
         if (fromUid) {
-          const cost = GIFT_DIAMONDS[giftType] ?? 999;
+          const cost = (GIFT_DIAMONDS[giftType] ?? 999) * targets.length;
           const ok = await deductDiamonds(fromUid, cost);
           if (!ok) { client.send('giftFailed', { reason: 'Yetersiz elmas' }); return; }
         }
@@ -220,10 +214,12 @@ export class OkeyRoom extends Room {
         const hours = GIFT_HOURS[giftType] ?? 2;
         const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
         // HEDİYE O MASAYA ÖZEL (kullanıcı kararı 2026-07-05): Supabase kalıcılığı KALDIRILDI — yalnız broadcast.
-        this.broadcast('giftSent', {
-          from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
-        });
-        this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
+        for (const toSeat of targets) {
+          this.broadcast('giftSent', {
+            from_seat: fromSeat, to_seat: toSeat, gift_id: giftType, from_name: fromName, expires_at: expiresAt,
+          });
+          this.logEvent(`${fromName}, ${this.nameOfSeat(toSeat)} için ${GIFT_NAMES[giftType] ?? 'hediye'} ısmarladı`);
+        }
         this.pushViews();
       } finally { this.giftBusy.delete(client.sessionId); }
     });
