@@ -8,6 +8,7 @@ import { tavlaViewFor } from '../tavlaView';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
+import { selectJoinSeat } from '../seatSelection';
 
 /**
  * TAVLA masası (2 kişilik) — OkeyRoom/EllibirRoom ile AYNI sosyal/reconnect altyapısı
@@ -256,7 +257,8 @@ export class TavlaRoom extends Room {
   async onJoin(client: Client, options: any) {
     const taken = new Set(this.seats.values());
     const spectate = options?.spectate === true || options?.spectate === 'true';
-    const seat = spectate ? null : this.humanSeats.find((s) => !taken.has(s));
+    const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
+    const seat = decision.seat;
     if (seat == null) {
       this.spectators.add(client.sessionId);
       const meta = await resolveClientProfileMeta(authUserIdFromClient(client), options, 'İzleyici');
@@ -264,6 +266,11 @@ export class TavlaRoom extends Room {
       this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
       this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
       client.send('seat', { seat: -1 });
+      if (decision.error) {
+        client.send('sitError', {
+          reason: decision.error === 'seat_unavailable' ? 'seçilen koltuk dolu' : 'geçersiz koltuk',
+        });
+      }
       this.pushViews();
       return;
     }

@@ -6,6 +6,7 @@ import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
+import { selectJoinSeat } from '../seatSelection';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -280,7 +281,8 @@ export class EllibirRoom extends Room {
     // İZLE ile gelen (spectate:true) → koltuk boş OLSA BİLE oturtma; izleyici kalır.
     // Oturmak için sonradan 'sit' mesajı gönderilir. (HEMEN OYNA/davet-kabul spectate yollamaz → otomatik oturur.)
     const spectate = options?.spectate === true || options?.spectate === 'true';
-    const seat = spectate ? null : this.humanSeats.find((s) => !taken.has(s));
+    const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
+    const seat = decision.seat;
     if (seat == null) {
       // Boş insan koltuğu yok (veya izleyici) → İZLEYİCİ olarak kabul (koltuksuz, seats Map'e konmaz).
       this.spectators.add(client.sessionId);
@@ -289,6 +291,11 @@ export class EllibirRoom extends Room {
       this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
       this.logEvent(`${meta.name} izleyici olarak masaya katıldı`); // client farklı renk verir
       client.send('seat', { seat: -1 });
+      if (decision.error) {
+        client.send('sitError', {
+          reason: decision.error === 'seat_unavailable' ? 'seçilen koltuk dolu' : 'geçersiz koltuk',
+        });
+      }
       console.log(`[onJoin] izleyici, izleyici sayısı=${this.spectators.size}`);
       this.pushViews();
       return;
