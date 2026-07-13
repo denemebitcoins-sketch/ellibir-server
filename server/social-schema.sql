@@ -829,6 +829,8 @@ alter table public.profiles add column if not exists total_won bigint not null d
 alter table public.profiles add column if not exists vip_until timestamptz;
 alter table public.profiles add column if not exists last_daily date;
 alter table public.profiles add column if not exists daily_day integer not null default 0;
+alter table public.profiles add column if not exists daily_claim_week text;
+alter table public.profiles add column if not exists daily_claim_mask integer not null default 0;
 alter table public.profiles add column if not exists vip_daily_day integer not null default 0;
 alter table public.profiles add column if not exists vip_last_daily date;
 alter table public.profiles add column if not exists role text not null default 'normal';
@@ -873,6 +875,8 @@ begin
     new.vip_until := null;
     new.last_daily := null;
     new.daily_day := 0;
+    new.daily_claim_week := null;
+    new.daily_claim_mask := 0;
     new.vip_daily_day := 0;
     new.vip_last_daily := null;
     new.role := 'normal';
@@ -891,6 +895,8 @@ begin
     new.vip_until := old.vip_until;
     new.last_daily := old.last_daily;
     new.daily_day := old.daily_day;
+    new.daily_claim_week := old.daily_claim_week;
+    new.daily_claim_mask := old.daily_claim_mask;
     new.vip_daily_day := old.vip_daily_day;
     new.vip_last_daily := old.vip_last_daily;
     new.role := old.role;
@@ -922,6 +928,17 @@ for each row execute function public.profiles_guard_client_sensitive();
 --   doğrulaması gelene kadar client mağaza akışıyla aynı prototip davranışı sağlar.
 -- ─────────────────────────────────────────────────────────────────────
 alter table public.profiles add column if not exists vip_last_daily date;
+alter table public.profiles add column if not exists daily_claim_week text;
+alter table public.profiles add column if not exists daily_claim_mask integer not null default 0;
+
+-- Eski model yalnız son alınan günü tutuyordu. Kurulum anında bilinen son günü yeni
+-- haftalık maskeye taşır; bundan sonraki her claim önceki günlerin bitlerini korur.
+update public.profiles
+   set daily_claim_week = to_char(last_daily, 'IYYY-IW'),
+       daily_claim_mask = (1 << (daily_day - 1))
+ where last_daily is not null
+   and daily_day between 1 and 7
+   and (daily_claim_week is null or daily_claim_week = '');
 
 -- Mevcut kurulumlarda bu RPC'ler farkli return type ile tanimli olabilir.
 -- PostgreSQL `create or replace function` ile return type degisimine izin vermez;
@@ -997,10 +1014,8 @@ begin
       'vip_until', null, 'vip_claimed_today', false, 'vip_claimable_today', false);
   end if;
 
-  if r.last_daily is not null
-     and to_char(r.last_daily, 'IYYY-IW') = v_week
-     and coalesce(r.daily_day, 0) between 1 and 7 then
-    v_mask := power(2, r.daily_day - 1)::int;
+  if coalesce(r.daily_claim_week, '') = v_week then
+    v_mask := greatest(0, least(coalesce(r.daily_claim_mask, 0), 127));
   end if;
 
   v_vip_active := coalesce(r.role, 'normal') = 'admin' or (r.vip_until is not null and r.vip_until > now());
@@ -1041,6 +1056,9 @@ declare
   v_normal_claimed boolean := false;
   v_vip_claimed boolean := false;
   v_vip_only boolean := false;
+  v_week text := to_char((now() at time zone 'Europe/Istanbul')::date, 'IYYY-IW');
+  v_mask int := 0;
+  v_day_bit int := (1 << (v_dow - 1));
 begin
   if auth.uid() is null or p_day is null or p_day <> v_dow then
     return jsonb_build_object('ok', false);
@@ -1052,7 +1070,10 @@ begin
   end if;
 
   v_vip_active := coalesce(r.role, 'normal') = 'admin' or (r.vip_until is not null and r.vip_until > now());
-  v_normal_claimed := r.last_daily = v_today and coalesce(r.daily_day, 0) = v_dow;
+  if coalesce(r.daily_claim_week, '') = v_week then
+    v_mask := greatest(0, least(coalesce(r.daily_claim_mask, 0), 127));
+  end if;
+  v_normal_claimed := (v_mask & v_day_bit) <> 0;
   v_vip_claimed := r.vip_last_daily = v_today and coalesce(r.vip_daily_day, 0) = v_dow;
 
   if v_normal_claimed then
@@ -1083,6 +1104,8 @@ begin
            diamonds = coalesce(diamonds, 0) + v_diamonds_delta,
            last_daily = v_today,
            daily_day = v_dow,
+           daily_claim_week = v_week,
+           daily_claim_mask = (v_mask | v_day_bit),
            vip_daily_day = case when v_vip_active and not v_vip_claimed then v_dow else vip_daily_day end,
            vip_last_daily = case when v_vip_active and not v_vip_claimed then v_today else vip_last_daily end
      where id::text = v_uid
@@ -1206,6 +1229,8 @@ begin
     new.vip_until := null;
     new.last_daily := null;
     new.daily_day := 0;
+    new.daily_claim_week := null;
+    new.daily_claim_mask := 0;
     new.vip_daily_day := 0;
     new.vip_last_daily := null;
     new.role := 'normal';
@@ -1225,6 +1250,8 @@ begin
     new.vip_until := old.vip_until;
     new.last_daily := old.last_daily;
     new.daily_day := old.daily_day;
+    new.daily_claim_week := old.daily_claim_week;
+    new.daily_claim_mask := old.daily_claim_mask;
     new.vip_daily_day := old.vip_daily_day;
     new.vip_last_daily := old.vip_last_daily;
     new.role := old.role;
@@ -1934,3 +1961,89 @@ end;
 $$;
 revoke execute on function public.buy_diamond_package_mock(int) from public, anon;
 grant execute on function public.buy_diamond_package_mock(int) to authenticated;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 38) PROMOSYON KODLARI — katalog istemciden gizli, kullanım atomik
+-- ─────────────────────────────────────────────────────────────────────
+create table if not exists public.promo_codes (
+  code text primary key,
+  active boolean not null default true,
+  starts_at timestamptz,
+  expires_at timestamptz,
+  chip_reward bigint not null default 0 check (chip_reward >= 0),
+  diamond_reward integer not null default 0 check (diamond_reward >= 0),
+  max_redemptions integer check (max_redemptions is null or max_redemptions > 0),
+  redemption_count integer not null default 0 check (redemption_count >= 0),
+  created_at timestamptz not null default now(),
+  check (code = upper(btrim(code))),
+  check (char_length(code) between 3 and 32),
+  check (code ~ '^[A-Z0-9_-]+$'),
+  check (chip_reward > 0 or diamond_reward > 0)
+);
+
+create table if not exists public.promo_redemptions (
+  code text not null references public.promo_codes(code) on delete restrict,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  chip_reward bigint not null default 0,
+  diamond_reward integer not null default 0,
+  redeemed_at timestamptz not null default now(),
+  primary key (code, user_id)
+);
+
+create index if not exists promo_redemptions_user_idx
+  on public.promo_redemptions (user_id, redeemed_at desc);
+
+alter table public.promo_codes enable row level security;
+alter table public.promo_redemptions enable row level security;
+
+create or replace function public.redeem_promo_code(p_code text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_code text := upper(btrim(coalesce(p_code, '')));
+  c public.promo_codes%rowtype;
+  p public.profiles%rowtype;
+begin
+  if v_uid is null then return jsonb_build_object('ok', false, 'error', 'unauthorized'); end if;
+  if char_length(v_code) < 3 or char_length(v_code) > 32 or v_code !~ '^[A-Z0-9_-]+$' then
+    return jsonb_build_object('ok', false, 'error', 'invalid_code');
+  end if;
+
+  select * into c from public.promo_codes where code = v_code for update;
+  if not found or not c.active
+     or (c.starts_at is not null and now() < c.starts_at)
+     or (c.expires_at is not null and now() >= c.expires_at) then
+    return jsonb_build_object('ok', false, 'error', 'invalid_code');
+  end if;
+  if c.max_redemptions is not null and c.redemption_count >= c.max_redemptions then
+    return jsonb_build_object('ok', false, 'error', 'limit_reached');
+  end if;
+  if exists (select 1 from public.promo_redemptions where code = v_code and user_id = v_uid) then
+    return jsonb_build_object('ok', false, 'error', 'already_redeemed');
+  end if;
+
+  select * into p from public.profiles where id = v_uid for update;
+  if not found then return jsonb_build_object('ok', false, 'error', 'profile_not_found'); end if;
+
+  insert into public.promo_redemptions(code, user_id, chip_reward, diamond_reward)
+  values (v_code, v_uid, c.chip_reward, c.diamond_reward);
+  update public.promo_codes set redemption_count = redemption_count + 1 where code = v_code;
+  update public.profiles
+     set chips = coalesce(chips, 0) + c.chip_reward,
+         diamonds = coalesce(diamonds, 0) + c.diamond_reward
+   where id = v_uid
+   returning * into p;
+
+  return jsonb_build_object(
+    'ok', true, 'chips_delta', c.chip_reward, 'diamonds_delta', c.diamond_reward,
+    'chips', coalesce(p.chips, 0), 'diamonds', coalesce(p.diamonds, 0)
+  );
+end;
+$$;
+
+revoke all on function public.redeem_promo_code(text) from public;
+grant execute on function public.redeem_promo_code(text) to authenticated;

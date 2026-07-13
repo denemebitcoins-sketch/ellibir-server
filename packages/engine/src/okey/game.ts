@@ -745,6 +745,17 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
           state.scores[seat] = state.scores[seat]! + penalty;
           state.matchLog.push(`${p.name} işlek taş attı (+${penalty} ceza)`);
         }
+        // Açılmış oyuncu son taşını iskartaya bırakarak biter. Bu kontrol stok
+        // beraberliğinden önce yapılmalı; ayrı bir bitiş hedefi gerektirmez.
+        if (p.hasOpened && p.hand.length === 0) {
+          const okeyThrown = isOkeyTile(tile, state.okeyColor, state.okeyRank);
+          const pairs = p.openMode === 'pairs';
+          const kind: OkeyFinishKind = pairs
+            ? (okeyThrown ? 'pairsOkey' : 'pairs')
+            : (okeyThrown ? 'okey' : 'normal');
+          endElWin(state, seat, kind);
+          return { ok: true };
+        }
       }
       state.turn = (seat + 1) % 4;
       state.phase = 'draw';
@@ -848,10 +859,10 @@ function pushElDelta(state: OkeyGameState): void {
   if (state.bankoRows.length < state.elDeltas.length) state.bankoRows.push([0, 0, 0, 0]);
 }
 
-/** BANKO: gösterge rengi çarpanı — siyah 5, kırmızı 4, sarı 3, mavi 2 (kullanıcı kuralı). */
+/** BANKO: gösterge rengi çarpanı — siyah 5, kırmızı 4, mavi 3, sarı 2. */
 function colorMultOf(state: OkeyGameState): number {
   const c = state.gosterge?.color;
-  return c === 'K' ? 5 : c === 'R' ? 4 : c === 'Y' ? 3 : 2;
+  return c === 'K' ? 5 : c === 'R' ? 4 : c === 'B' ? 3 : 2;
 }
 
 /** BANKO el çarpanı: renk × 2^(bu el banko diyen sayısı). */

@@ -423,6 +423,22 @@ describe('BANKO v3: açık SEÇİM FAZI (el dağıtılmadan, herkes görür)', (
   });
 });
 
+describe('BANKO puan çarpanları', () => {
+  it.each([
+    ['Y', 2],
+    ['B', 3],
+    ['R', 4],
+    ['K', 5],
+  ] as const)('%s gösterge rengi ×%i uygular', (color, expected) => {
+    const st = createOkeyGame({ seed: 71, dealerSeat: 0, rules: { variant: 'banko', totalEls: 1 } as any });
+    st.gosterge = t(color, 8);
+    st.bankoThisEl = [false, false, false, false];
+    expect(elMultOf(st)).toBe(expected);
+    st.bankoThisEl[2] = true;
+    expect(elMultOf(st)).toBe(expected * 2);
+  });
+});
+
 describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
   function g101() {
     const st = createOkeyGame({ seed: 101, dealerSeat: 0, rules: { variant: 'yuzbir', totalEls: 1 } as any });
@@ -556,7 +572,7 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.phase).toBe('draw');
   });
 
-  it('101de süre dolunca soldan alınan taş açara yetiyorsa önce açılır', () => {
+  it('101de süre dolunca soldan alınan taş açara yetiyorsa açılır ve son iskarta eli bitirir', () => {
     const st = g101();
     const g1 = [t('R', 10), t('R', 11), t('R', 12)];
     const left = t('R', 13);
@@ -574,8 +590,9 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.players[0]!.hasOpened).toBe(true);
     expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
     expect(st.openMelds.flatMap((m) => m.tiles).some((x) => x.id === left.id)).toBe(true);
-    expect(st.turn).toBe(1);
-    expect(st.phase).toBe('draw');
+    expect(st.elEnded).toBe(true);
+    expect(st.elWinner).toBe(0);
+    expect(st.players[0]!.hand).toHaveLength(0);
   });
 
   it('101de soldan alınan taş aynı turda açılmadan atış yapılamaz, açınca kilit kalkar', () => {
@@ -858,5 +875,24 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.elEnded).toBe(true);
     expect(st.scores[0]).toBe(-101);
     expect(st.scores[1]).toBe(202);
+  });
+
+  it('101de açılmış oyuncu son taşı iskartaya atınca deste boş olsa da el biter', () => {
+    const st = g101();
+    const last = t('B', 4);
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [last];
+    st.stock = [];
+
+    const r = applyOkeyMove(st, 0, { t: 'discard', tileId: last.id });
+
+    expect(r.ok).toBe(true);
+    expect(st.players[0]!.hand).toHaveLength(0);
+    expect(st.elEnded).toBe(true);
+    expect(st.elWinner).toBe(0);
+    expect(st.finishKind).toBe('normal');
+    expect(st.matchLog.some((line) => line.includes('Taşlar bitti'))).toBe(false);
+    expect(st.scores[0]).toBe(-101);
   });
 });
