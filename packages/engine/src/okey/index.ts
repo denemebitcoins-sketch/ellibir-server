@@ -7,7 +7,7 @@ export {
   isValidRun, isValidSet, isValidPair, bestGrouping,
 } from './melds';
 export {
-  createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, elMultOf,
+  createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, elMultOf, bankoPlayerMultOf,
   beginBankoPhase, chooseBanko, choosePas, resolveBankoPhase, botBankoDecide,
   yuzbirOpeningMin, yuzbirPairOpeningMin, bestYuzbirMeldOpening, bestYuzbirPairOpening, pairGroupsFor,
 } from './game';

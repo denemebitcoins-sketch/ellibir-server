@@ -44,7 +44,7 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     stockCount: state.stock.length,
     // BANKO varyantı
     variant: state.rules.variant ?? 'duz',
-    elMult: state.rules.variant === 'banko' ? elMultOf(state) : 0,
+    elMult: state.rules.variant === 'banko' ? elMultOf(state, seat) : 0,
     bankoUsed: state.bankoUsed ?? [false, false, false, false],
     bankoPending: state.bankoPending ?? [false, false, false, false],
     bankoPhase: state.bankoPhase ?? false,

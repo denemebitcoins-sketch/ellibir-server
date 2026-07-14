@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOkeyDeck, dealOkey, nextRank, identityOf, isOkeyTile,
   canFinishMelds, canFinishPairs, isValidRun, isValidSet, isValidPair, bestGrouping,
-  createOkeyGame, applyOkeyMove, elMultOf, beginBankoPhase, resolveBankoPhase, botBankoDecide, startNextEl, autoOkeyMove, playOkeyBotTurn,
+  createOkeyGame, applyOkeyMove, elMultOf, bankoPlayerMultOf, beginBankoPhase, resolveBankoPhase, botBankoDecide, startNextEl, autoOkeyMove, playOkeyBotTurn,
   yuzbirOpeningMin, yuzbirPairOpeningMin,
 } from '../src/okey';
 import type { NormalOkeyTile, OkeyColor, OkeyRank, OkeyTile } from '../src/okey';
@@ -435,7 +435,47 @@ describe('BANKO puan çarpanları', () => {
     st.bankoThisEl = [false, false, false, false];
     expect(elMultOf(st)).toBe(expected);
     st.bankoThisEl[2] = true;
-    expect(elMultOf(st)).toBe(expected * 2);
+    expect(elMultOf(st)).toBe(expected);
+    expect(elMultOf(st, 2)).toBe(expected * 2);
+  });
+
+  it('yalnız kazananın ve hedef oyuncunun bankosunu uygular', () => {
+    const st = createOkeyGame({ seed: 72, dealerSeat: 0, rules: { variant: 'banko', totalEls: 1 } as any });
+    st.gosterge = t('K', 8); // siyah = 5
+    st.bankoThisEl = [true, false, true, true];
+
+    expect(bankoPlayerMultOf(st, 0, 0)).toBe(10); // kazananın bankosu bir kez
+    expect(bankoPlayerMultOf(st, 0, 1)).toBe(10); // yalnız kazanan bankosu
+    expect(bankoPlayerMultOf(st, 0, 2)).toBe(20); // kazanan + kendi bankosu
+    expect(bankoPlayerMultOf(st, 0, 3)).toBe(20); // diğer bankolar hedefe taşınmaz
+  });
+
+  it('el sonu cezalarını kişi bazlı hesaplar ve özel bitişi herkese uygular', () => {
+    const st = createOkeyGame({ seed: 73, dealerSeat: 0, rules: { variant: 'banko', totalEls: 1 } as any });
+    st.gosterge = t('K', 8);
+    st.okeyColor = 'K';
+    st.okeyRank = 13 as OkeyRank;
+    st.bankoThisEl = [true, false, true, false];
+    st.turn = 0;
+    st.phase = 'discard';
+    const winner = [
+      t('R', 1), t('R', 2), t('R', 3),
+      t('Y', 7), t('B', 7), t('K', 7),
+      t('B', 9), t('B', 10), t('B', 11), t('B', 12),
+      t('Y', 1), t('K', 1), t('B', 1), t('R', 1),
+    ];
+    const finishOkey = t('K', 13);
+    st.players[0]!.hand = [...winner, finishOkey];
+    st.players[1]!.hand = [t('R', 2)];
+    st.players[2]!.hand = [t('R', 3)];
+    st.players[3]!.hand = [t('R', 4)];
+    st.scores = [0, 0, 0, 0];
+
+    const result = applyOkeyMove(st, 0, { t: 'finish', tileId: finishOkey.id });
+
+    expect(result.ok).toBe(true);
+    expect(st.finishKind).toBe('okey');
+    expect(st.scores).toEqual([-200, 40, 120, 80]);
   });
 });
 
@@ -525,6 +565,58 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(r.ok).toBe(true);
     expect(st.openMelds[0]!.tiles.map((x) => x.id)).toEqual([okey.id, r8.id, r9.id, r10.id]);
     expect(st.players[0]!.hand.some((x) => x.id === okey.id)).toBe(false);
+  });
+
+  it('101 renkli perde okeyi yalnız dört taşlık per tamamlanınca geri verir', () => {
+    const st = g101();
+    const r11 = t('R', 11), y11 = t('Y', 11), b11 = t('B', 11), k11 = t('K', 11), okey = t('K', 13);
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [b11, k11];
+    st.openMelds = [{ id: 'm-set', ownerSeat: 1, kind: 'set', points: 33, tiles: [r11, y11, okey] }];
+
+    const thirdColor = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-set', tileId: b11.id } as any);
+    expect(thirdColor.ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(4);
+    expect(st.openMelds[0]!.tiles.some((x) => x.id === okey.id)).toBe(true);
+    expect(st.players[0]!.hand.some((x) => x.id === okey.id)).toBe(false);
+
+    const fourthColor = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-set', tileId: k11.id } as any);
+    expect(fourthColor.ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(4);
+    expect(st.openMelds[0]!.tiles.some((x) => x.id === okey.id)).toBe(false);
+    expect(st.players[0]!.hand.some((x) => x.id === okey.id)).toBe(true);
+  });
+
+  it('101 açık seride okeyin temsil ettiği değer sonradan kaydırılamaz', () => {
+    const st = g101();
+    const r6 = t('R', 6), r7 = t('R', 7), okey = t('K', 13), r4 = t('R', 4), r8 = t('R', 8);
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [r4, r8];
+    st.openMelds = [{ id: 'm-fixed-run', ownerSeat: 1, kind: 'run', points: 21, tiles: [r6, r7, okey] }];
+
+    const shifted = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-fixed-run', tileId: r4.id } as any);
+    expect(shifted.ok).toBe(false);
+    expect(st.openMelds[0]!.tiles.map((x) => x.id)).toEqual([r6.id, r7.id, okey.id]);
+
+    const exact = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-fixed-run', tileId: r8.id } as any);
+    expect(exact.ok).toBe(true);
+    expect(st.openMelds[0]!.tiles.map((x) => x.id)).toEqual([r6.id, r7.id, r8.id]);
+    expect(st.players[0]!.hand.some((x) => x.id === okey.id)).toBe(true);
+  });
+
+  it('101 10-Okey-12-13 serisine 8 işlenemez', () => {
+    const st = g101();
+    const r10 = t('R', 10), okey = t('K', 13), r12 = t('R', 12), r13 = t('R', 13), r8 = t('R', 8);
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [r8];
+    st.openMelds = [{ id: 'm-fixed-middle', ownerSeat: 1, kind: 'run', points: 46, tiles: [r10, okey, r12, r13] }];
+
+    const result = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-fixed-middle', tileId: r8.id } as any);
+    expect(result.ok).toBe(false);
+    expect(st.openMelds[0]!.tiles.map((x) => x.id)).toEqual([r10.id, okey.id, r12.id, r13.id]);
   });
 
   it('101de soldan taş elde tutulmak için alınabilir ve geri bırakılabilir', () => {

@@ -421,7 +421,7 @@ function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld,
   if (meld.kind === 'pair') return false;
   const test = [...meld.tiles, tile];
   if (meld.kind === 'set') return isValidSet(test, state.okeyColor, state.okeyRank);
-  return isValidRun(test, state.okeyColor, state.okeyRank, false);
+  return buildYuzbirRunExtension(state, meld.tiles, tile) != null;
 }
 
 function isYuzbirIslekDiscard(state: OkeyGameState, tile: OkeyTile): boolean {
@@ -439,11 +439,12 @@ function buildYuzbirJokerReplacement(
     const rescued = meld.tiles[i]!;
     if (!identityOf(rescued, state.okeyColor, state.okeyRank).wild) continue;
     if (meld.kind === 'run' && !yuzbirRunJokerSlotMatchesTile(state, meld.tiles, i, tile)) continue;
-    const candidate = meld.tiles.filter((_, idx) => idx !== i).concat(tile);
+    const candidate = [...meld.tiles];
+    candidate[i] = tile;
     const ok = meld.kind === 'pair'
       ? isValidPair(candidate, state.okeyColor, state.okeyRank)
       : meld.kind === 'set'
-        ? isValidSet(candidate, state.okeyColor, state.okeyRank)
+        ? candidate.length === 4 && isValidSet(candidate, state.okeyColor, state.okeyRank)
         : isValidRun(candidate, state.okeyColor, state.okeyRank, false);
     if (!ok) continue;
     return { rescued, tiles: sortYuzbirMeldTiles(state, meld.kind, candidate) };
@@ -454,34 +455,95 @@ function buildYuzbirJokerReplacement(
 function yuzbirRunJokerSlotMatchesTile(state: OkeyGameState, tiles: readonly OkeyTile[], wildIndex: number, incomingTile: OkeyTile): boolean {
   const incoming = identityOf(incomingTile, state.okeyColor, state.okeyRank);
   if (incoming.wild) return false;
-  let prev: ReturnType<typeof identityOf> | null = null;
-  let next: ReturnType<typeof identityOf> | null = null;
-  for (let i = wildIndex - 1; i >= 0; i--) {
-    const id = identityOf(tiles[i]!, state.okeyColor, state.okeyRank);
-    if (!id.wild) { prev = id; break; }
-  }
-  for (let i = wildIndex + 1; i < tiles.length; i++) {
-    const id = identityOf(tiles[i]!, state.okeyColor, state.okeyRank);
-    if (!id.wild) { next = id; break; }
-  }
-  if (prev && prev.color !== incoming.color) return false;
-  if (next && next.color !== incoming.color) return false;
-  if (prev && next) {
-    const expected = prev.rank + 1;
-    return expected <= 13 && expected === next.rank - 1 && incoming.rank === expected;
-  }
-  if (prev) return prev.rank < 13 && incoming.rank === prev.rank + 1;
-  if (next) return next.rank > 1 && incoming.rank === next.rank - 1;
-  return false;
+  const run = resolveYuzbirRun(state, tiles);
+  return !!run && incoming.color === run.color && incoming.rank === run.start + wildIndex;
 }
 
 function sortYuzbirMeldTiles(state: OkeyGameState, kind: OkeyPublicMeldKind, tiles: OkeyTile[]): OkeyTile[] {
+  if (kind === 'run') return resolveYuzbirRun(state, tiles)?.tiles ?? tiles;
   if (tiles.some((t) => identityOf(t, state.okeyColor, state.okeyRank).wild)) return tiles;
-  if (kind === 'run')
-    return [...tiles].sort((a, b) => identityOf(a, state.okeyColor, state.okeyRank).rank - identityOf(b, state.okeyColor, state.okeyRank).rank);
   if (kind === 'set')
     return [...tiles].sort((a, b) => identityOf(a, state.okeyColor, state.okeyRank).color.localeCompare(identityOf(b, state.okeyColor, state.okeyRank).color));
   return tiles;
+}
+
+interface ResolvedYuzbirRun {
+  color: OkeyColor;
+  start: number;
+  tiles: OkeyTile[];
+}
+
+/**
+ * Açılmış 101 serisindeki sıra, jokerin temsil ettiği değerin sözleşmesidir.
+ * Eski/dağınık veride ise geçerli seçenekler arasından en yüksek puanlı sıra bir kez
+ * normalize edilir; sonraki işlemelerde bu sıra artık kaydırılamaz.
+ */
+function resolveYuzbirRun(state: OkeyGameState, tiles: readonly OkeyTile[]): ResolvedYuzbirRun | null {
+  if (!tiles || tiles.length < 3 || tiles.length > 13) return null;
+  const ids = tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank));
+  const realIndexes = ids.map((id, index) => ({ id, index })).filter((x) => !x.id.wild);
+  if (realIndexes.length === 0) return null;
+  const color = realIndexes[0]!.id.color;
+  if (!realIndexes.every((x) => x.id.color === color)) return null;
+
+  // Önce oyuncunun açtığı mevcut sıralamayı koru.
+  for (let start = 1; start + tiles.length - 1 <= 13; start++) {
+    if (realIndexes.every((x) => x.id.rank === start + x.index))
+      return { color, start, tiles: [...tiles] };
+  }
+
+  const realByRank = new Map<number, OkeyTile>();
+  for (let i = 0; i < ids.length; i++) {
+    if (ids[i]!.wild) continue;
+    if (realByRank.has(ids[i]!.rank)) return null;
+    realByRank.set(ids[i]!.rank, tiles[i]!);
+  }
+
+  // Dağınık eski veriyi yalnız bir kez normalize et. Yüksek başlangıç, mevcut
+  // 101 açar puanı seçimiyle aynı deterministik sonucu verir.
+  for (let start = 14 - tiles.length; start >= 1; start--) {
+    const end = start + tiles.length - 1;
+    if ([...realByRank.keys()].some((rank) => rank < start || rank > end)) continue;
+    const wilds = tiles.filter((_, i) => ids[i]!.wild);
+    const normalized: OkeyTile[] = [];
+    let wi = 0;
+    for (let rank = start; rank <= end; rank++) {
+      const real = realByRank.get(rank);
+      if (real) normalized.push(real);
+      else if (wi < wilds.length) normalized.push(wilds[wi++]!);
+      else { wi = -1; break; }
+    }
+    if (wi === wilds.length) return { color, start, tiles: normalized };
+  }
+  return null;
+}
+
+function buildYuzbirRunExtension(state: OkeyGameState, tiles: readonly OkeyTile[], tile: OkeyTile): OkeyTile[] | null {
+  const run = resolveYuzbirRun(state, tiles);
+  if (!run) return null;
+  const incoming = identityOf(tile, state.okeyColor, state.okeyRank);
+  const end = run.start + run.tiles.length - 1;
+  if (incoming.wild) {
+    if (end < 13) return [...run.tiles, tile];
+    if (run.start > 1) return [tile, ...run.tiles];
+    return null;
+  }
+  if (incoming.color !== run.color) return null;
+  if (incoming.rank === run.start - 1) return [tile, ...run.tiles];
+  if (incoming.rank === end + 1) return [...run.tiles, tile];
+  return null;
+}
+
+function yuzbirMeldPoints(state: OkeyGameState, kind: OkeyPublicMeldKind, tiles: readonly OkeyTile[]): number {
+  if (kind === 'run') {
+    const run = resolveYuzbirRun(state, tiles);
+    if (run) {
+      let total = 0;
+      for (let rank = run.start; rank < run.start + run.tiles.length; rank++) total += rank;
+      return total;
+    }
+  }
+  return classifyMeld(tiles, state)?.points ?? 0;
 }
 
 function canOpenAdditionalWithTile(state: OkeyGameState, seat: number, tile: OkeyTile): boolean {
@@ -558,8 +620,10 @@ function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][])
   for (const g of picked) {
     const c = classifyMeld(g, state);
     if (!c || c.kind === 'pair') return { ok: false, error: 'seri açışı yalnız geçerli seri/küt gruplarıyla olur' };
-    total += c.points;
-    melds.push({ id: `m${state.nextMeldId++}`, ownerSeat: seat, kind: c.kind, tiles: g, points: c.points });
+    const normalized = sortYuzbirMeldTiles(state, c.kind, g);
+    const points = yuzbirMeldPoints(state, c.kind, normalized);
+    total += points;
+    melds.push({ id: `m${state.nextMeldId++}`, ownerSeat: seat, kind: c.kind, tiles: normalized, points });
   }
   if (!p.hasOpened) {
     const min = yuzbirOpeningMin(state);
@@ -618,15 +682,6 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
   return { ok: true };
 }
 
-function preferPrependRun(tiles: readonly OkeyTile[], tile: OkeyTile, state: OkeyGameState): boolean {
-  const id = identityOf(tile, state.okeyColor, state.okeyRank);
-  if (id.wild) return false;
-  const real = tiles.map((t) => identityOf(t, state.okeyColor, state.okeyRank)).filter((i) => !i.wild);
-  if (real.length === 0) return false;
-  const pos = (rank: number) => rank === 1 && real.some((x) => x.rank >= 10) ? 14 : rank;
-  return pos(id.rank) < Math.min(...real.map((x) => pos(x.rank)));
-}
-
 function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, tileId: string): OkeyMoveResult {
   if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
   if (state.phase !== 'discard') return { ok: false, error: 'işlemek için önce taş çekmelisin' };
@@ -653,14 +708,11 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
     meld.tiles.push(tile);
     meld.tiles = sortYuzbirMeldTiles(state, meld.kind, meld.tiles);
   } else {
-    const test = [...meld.tiles, tile];
-    if (!isValidRun(test, state.okeyColor, state.okeyRank, false)) return { ok: false, error: 'taş bu seriye işlenemez' };
-    if (preferPrependRun(meld.tiles, tile, state)) meld.tiles.unshift(tile);
-    else meld.tiles.push(tile);
-    meld.tiles = sortYuzbirMeldTiles(state, meld.kind, meld.tiles);
+    const next = buildYuzbirRunExtension(state, meld.tiles, tile);
+    if (!next) return { ok: false, error: 'taş bu seriye işlenemez' };
+    meld.tiles = next;
   }
-  const c = classifyMeld(meld.tiles, state);
-  if (c) meld.points = c.points;
+  meld.points = yuzbirMeldPoints(state, meld.kind, meld.tiles);
   p.hand.splice(idx, 1);
   if (replacement) p.hand.push(replacement.rescued);
   state.yuzbirMeldProcessCounts[processKey] = processCount + 1;
@@ -865,11 +917,25 @@ function colorMultOf(state: OkeyGameState): number {
   return c === 'K' ? 5 : c === 'R' ? 4 : c === 'B' ? 3 : 2;
 }
 
-/** BANKO el çarpanı: renk × 2^(bu el banko diyen sayısı). */
-export function elMultOf(state: OkeyGameState): number {
+/**
+ * BANKO kişi çarpanı. Başka oyuncuların bankosu hedef oyuncuya taşınmaz:
+ * yer rengi × kazananın bankosu × hedef oyuncunun kendi bankosu.
+ * Kazanan için aynı banko iki kez sayılmaz; berabere elde yalnız kişinin kendi bankosu geçerlidir.
+ */
+export function bankoPlayerMultOf(state: OkeyGameState, winnerSeat: number, targetSeat: number): number {
   let m = colorMultOf(state);
-  for (let s2 = 0; s2 < 4; s2++) if (state.bankoThisEl[s2]) m *= 2;
+  if (winnerSeat >= 0) {
+    if (state.bankoThisEl[winnerSeat]) m *= 2;
+    if (targetSeat >= 0 && targetSeat !== winnerSeat && state.bankoThisEl[targetSeat]) m *= 2;
+  } else if (targetSeat >= 0 && state.bankoThisEl[targetSeat]) {
+    m *= 2;
+  }
   return m;
+}
+
+/** BANKO canlı göstergesi: yer rengi × yalnız görüntülenen koltuğun kendi bankosu. */
+export function elMultOf(state: OkeyGameState, seat = -1): number {
+  return bankoPlayerMultOf(state, -1, seat);
 }
 
 /** BANKO: elde per/çift OLUŞTURMAYAN taşların sayı toplamı (+ çift değerlendirmesi bilgisi).
@@ -906,28 +972,29 @@ function leftoverFor(state: OkeyGameState, seat: number): { sum: number; cift: b
   return { sum, cift: false };
 }
 
-/** BANKO el sonu: kazanan −10×mult×(bitiş çarpanı); kaybedenler elde kalan × mult (çifte ×2). */
+/** BANKO el sonu: her koltuk kendi çarpanıyla hesaplanır; başka oyuncuların bankosu etkilemez. */
 function endElWinBanko(state: OkeyGameState, seat: number, kind: OkeyFinishKind): void {
   const sc = state.rules.scoring;
-  const mult = elMultOf(state);
   const finX = (kind === 'pairs' || kind === 'pairsOkey' ? sc.pairsX : 1)
     * (kind === 'okey' || kind === 'pairsOkey' ? sc.okeyX : 1);
-  const winPts = 10 * mult * finX;
+  const winnerMult = bankoPlayerMultOf(state, seat, seat);
+  const winPts = 10 * winnerMult * finX;
   state.scores[seat] = state.scores[seat]! - winPts;
   for (let s2 = 0; s2 < 4; s2++) {
     if (s2 === seat) continue;
+    const playerMult = bankoPlayerMultOf(state, seat, s2);
     if (state.rules.teamMode && s2 % 2 === seat % 2) {
-      // EŞLİ: ortak da bitmiş sayılır — kazananla AYNI düşüşü alır (leftover cezası yok).
-      state.scores[s2] = state.scores[s2]! - winPts;
-      state.matchLog.push(`${state.players[s2]!.name} (ortak) da bitti sayıldı → −${winPts}`);
+      const partnerPts = 10 * playerMult * finX;
+      state.scores[s2] = state.scores[s2]! - partnerPts;
+      state.matchLog.push(`${state.players[s2]!.name} (ortak) ×${playerMult} → −${partnerPts}`);
       continue;
     }
     const lo = leftoverFor(state, s2);
-    const pts = lo.sum * mult * (lo.cift ? 2 : 1);
+    const pts = lo.sum * playerMult * finX * (lo.cift ? 2 : 1);
     state.scores[s2] = state.scores[s2]! + pts;
-    state.matchLog.push(`${state.players[s2]!.name} elde ${lo.sum} bıraktı${lo.cift ? ' (çift ×2)' : ''} → +${pts}`);
+    state.matchLog.push(`${state.players[s2]!.name} elde ${lo.sum} bıraktı · ×${playerMult} · bitiş ×${finX}${lo.cift ? ' · çift ×2' : ''} → +${pts}`);
   }
-  state.matchLog.push(`Çarpan ×${mult} (gösterge${state.bankoThisEl.some(Boolean) ? ' + banko' : ''}) — ${state.players[seat]!.name} −${winPts}`);
+  state.matchLog.push(`${state.players[seat]!.name} kazanan çarpanı ×${winnerMult} · bitiş ×${finX} → −${winPts}`);
   pushBankoRow(state, seat);
 }
 
@@ -989,13 +1056,14 @@ function endElDraw(state: OkeyGameState): void {
     return;
   }
   if (state.rules.variant === 'banko') {
-    const mult = elMultOf(state);
     for (let s2 = 0; s2 < 4; s2++) {
       const lo = leftoverFor(state, s2);
+      const mult = bankoPlayerMultOf(state, -1, s2);
       const pts = lo.sum * mult * (lo.cift ? 2 : 1);
       state.scores[s2] = state.scores[s2]! + pts;
+      state.matchLog.push(`${state.players[s2]!.name} berabere el ×${mult} → +${pts}`);
     }
-    state.matchLog.push(`Taşlar bitti — herkes elinde kalanı ödedi (çarpan ×${mult})`);
+    state.matchLog.push('Taşlar bitti — herkes kendi banko çarpanıyla elinde kalanı ödedi');
     pushBankoRow(state, -1);
     pushElDelta(state);
     maybeEndMatchBanko(state);
