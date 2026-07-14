@@ -933,9 +933,9 @@ export function bankoPlayerMultOf(state: OkeyGameState, winnerSeat: number, targ
   return m;
 }
 
-/** BANKO canlı göstergesi: yer rengi × yalnız görüntülenen koltuğun kendi bankosu. */
-export function elMultOf(state: OkeyGameState, seat = -1): number {
-  return bankoPlayerMultOf(state, -1, seat);
+/** BANKO canlı göstergesi yalnız yer/gösterge rengidir; kişisel Bankolar el sonunda hesaplanır. */
+export function elMultOf(state: OkeyGameState, _seat = -1): number {
+  return colorMultOf(state);
 }
 
 /** BANKO: elde per/çift OLUŞTURMAYAN taşların sayı toplamı (+ çift değerlendirmesi bilgisi).

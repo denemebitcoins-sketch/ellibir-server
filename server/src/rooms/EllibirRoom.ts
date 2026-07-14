@@ -54,6 +54,7 @@ export class EllibirRoom extends Room {
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkanı (wifi→mobil geçişi)
   private readonly messageGuard = new RoomMessageGuard();
   private readonly giftBusy = new Set<string>();
+  private closingBotOnly = false;
 
   onCreate(options: any) {
     // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
@@ -531,6 +532,18 @@ export class EllibirRoom extends Room {
     this.seatNames.delete(seat);
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
+    this.scheduleBotOnlyClose();
+  }
+
+  /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */
+  private scheduleBotOnlyClose() {
+    if (this.closingBotOnly || this.seats.size > 0) return;
+    this.closingBotOnly = true;
+    setTimeout(() => {
+      if (this.seats.size > 0) { this.closingBotOnly = false; return; }
+      console.log('[EllibirRoom] gerçek oyuncu kalmadı -> oda kapatılıyor');
+      void this.disconnect().catch((e: any) => console.warn('[EllibirRoom] bot-only close:', e?.message ?? e));
+    }, 0);
   }
 
   // Bir koltuğu terk(abandoned) olarak işaretle/kaldır (state'e yansır → bot devralır/bırakır).

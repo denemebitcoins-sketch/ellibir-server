@@ -54,6 +54,22 @@ describe('reconnect contract smoke', () => {
     expect(src).toMatch(/onDispose\(\)\s*\{[\s\S]*?clearInterval\(this\.startTick\)/);
   });
 
+  it.each(roomFiles)('%s room disposes when no real player seat remains', (_game, file) => {
+    const src = readFromRepo(file);
+
+    expect(src).toContain('scheduleBotOnlyClose');
+    expect(src).toContain('this.seats.size > 0');
+    expect(src).toContain('this.disconnect()');
+  });
+
+  it.each(unityNetFiles)('%s Unity net can permanently abandon a saved reconnect reservation', (_game, file) => {
+    const src = readFromUnity(file);
+
+    expect(src).toContain('AbandonPendingGame');
+    expect(src).toContain('PendingGameAbandoner.Abandon');
+    expect(src).toContain('ResumeFromMenu');
+  });
+
   it('keeps ws as a fail-fast direct runtime dependency', () => {
     const pkg = JSON.parse(readFromRepo('server/package.json'));
     const globals = readFromRepo('server/src/nodeGlobals.ts');

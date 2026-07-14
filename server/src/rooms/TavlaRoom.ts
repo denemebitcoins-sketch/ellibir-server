@@ -49,6 +49,7 @@ export class TavlaRoom extends Room {
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkani (wifi->mobil gecisi)
   private readonly messageGuard = new RoomMessageGuard();
   private readonly giftBusy = new Set<string>();
+  private closingBotOnly = false;
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar
 
   onCreate(options: any) {
@@ -464,6 +465,18 @@ export class TavlaRoom extends Room {
     this.seatNames.delete(seat);
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
+    this.scheduleBotOnlyClose();
+  }
+
+  /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */
+  private scheduleBotOnlyClose() {
+    if (this.closingBotOnly || this.seats.size > 0) return;
+    this.closingBotOnly = true;
+    setTimeout(() => {
+      if (this.seats.size > 0) { this.closingBotOnly = false; return; }
+      console.log('[TavlaRoom] gerçek oyuncu kalmadı -> oda kapatılıyor');
+      void this.disconnect().catch((e: any) => console.warn('[TavlaRoom] bot-only close:', e?.message ?? e));
+    }, 0);
   }
 
   private nameOfSeat(seat: number): string {

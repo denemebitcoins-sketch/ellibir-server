@@ -76,6 +76,7 @@ export class OkeyRoom extends Room {
   private readonly messageGuard = new RoomMessageGuard();
   private readonly giftBusy = new Set<string>();
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar (izleyici katıldı vb.)
+  private closingBotOnly = false;
 
   static async onAuth(_token: string, options: any): Promise<any> {
     normalizeOkeyJoinOptions(options);
@@ -483,6 +484,18 @@ export class OkeyRoom extends Room {
     this.seatNames.delete(seat);
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
+    this.scheduleBotOnlyClose();
+  }
+
+  /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */
+  private scheduleBotOnlyClose() {
+    if (this.closingBotOnly || this.seats.size > 0) return;
+    this.closingBotOnly = true;
+    setTimeout(() => {
+      if (this.seats.size > 0) { this.closingBotOnly = false; return; }
+      console.log('[OkeyRoom] gerçek oyuncu kalmadı -> oda kapatılıyor');
+      void this.disconnect().catch((e: any) => console.warn('[OkeyRoom] bot-only close:', e?.message ?? e));
+    }, 0);
   }
 
   private nameOfSeat(seat: number): string {

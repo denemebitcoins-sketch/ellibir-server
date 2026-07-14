@@ -436,7 +436,7 @@ describe('BANKO puan çarpanları', () => {
     expect(elMultOf(st)).toBe(expected);
     st.bankoThisEl[2] = true;
     expect(elMultOf(st)).toBe(expected);
-    expect(elMultOf(st, 2)).toBe(expected * 2);
+    expect(elMultOf(st, 2)).toBe(expected);
   });
 
   it('yalnız kazananın ve hedef oyuncunun bankosunu uygular', () => {
