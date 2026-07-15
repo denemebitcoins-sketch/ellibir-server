@@ -14,6 +14,7 @@ export interface CandidateMeld {
   cards: Card[];
   mask: number;
   points: number;
+  type: 'set' | 'run';
 }
 
 export interface SolveResult {
@@ -45,7 +46,7 @@ export function enumerateCandidateMelds(hand: readonly Card[], rules: RuleConfig
     const mask = maskOf(cards);
     const existing = candidates.get(mask);
     if (!existing || analysis.points > existing.points) {
-      candidates.set(mask, { cards: analysis.cards, mask, points: analysis.points });
+      candidates.set(mask, { cards: analysis.cards, mask, points: analysis.points, type: analysis.type as 'set' | 'run' });
     }
   };
 
@@ -128,28 +129,37 @@ export function enumerateCandidateMelds(hand: readonly Card[], rules: RuleConfig
  * Çakışmayan perde alt kümesini seçer.
  * objective 'points': toplam puanı maksimize eder (açma kararı).
  * objective 'cards' : önce eritilen kart sayısını, sonra puanı maksimize eder (bitirme).
+ * objective 'arrange': önce dizilen kart sayısını; eşitlikte okeyi gereksiz yere
+ * kütlere bağlamamayı, ardından puanı tercih eder (oyuncu eli görsel dizimi).
  */
 export function solveHand(
   hand: readonly Card[],
   rules: RuleConfig,
-  objective: 'points' | 'cards' = 'points',
+  objective: 'points' | 'cards' | 'arrange' = 'points',
 ): SolveResult {
   const candidates = enumerateCandidateMelds(hand, rules).sort((a, b) => b.points - a.points);
-  const memo = new Map<number, { points: number; cards: number; picks: CandidateMeld[] }>();
+  const memo = new Map<number, { points: number; cards: number; setJokers: number; picks: CandidateMeld[] }>();
 
   const better = (
-    a: { points: number; cards: number },
-    b: { points: number; cards: number },
-  ) =>
-    objective === 'points'
-      ? a.points > b.points || (a.points === b.points && a.cards > b.cards)
-      : a.cards > b.cards || (a.cards === b.cards && a.points > b.points);
+    a: { points: number; cards: number; setJokers: number },
+    b: { points: number; cards: number; setJokers: number },
+  ) => {
+    if (objective === 'points') {
+      return a.points > b.points || (a.points === b.points && a.cards > b.cards);
+    }
+    if (objective === 'arrange') {
+      return a.cards > b.cards
+        || (a.cards === b.cards && a.setJokers < b.setJokers)
+        || (a.cards === b.cards && a.setJokers === b.setJokers && a.points > b.points);
+    }
+    return a.cards > b.cards || (a.cards === b.cards && a.points > b.points);
+  };
 
-  const dfs = (used: number, startIdx: number): { points: number; cards: number; picks: CandidateMeld[] } => {
+  const dfs = (used: number, startIdx: number): { points: number; cards: number; setJokers: number; picks: CandidateMeld[] } => {
     const key = used; // startIdx'ten bağımsız en iyi; küçük el için yeterince doğru ve hızlı
     const cached = memo.get(key);
     if (cached) return cached;
-    let best = { points: 0, cards: 0, picks: [] as CandidateMeld[] };
+    let best = { points: 0, cards: 0, setJokers: 0, picks: [] as CandidateMeld[] };
     for (let i = 0; i < candidates.length; i++) {
       const cand = candidates[i]!;
       if ((cand.mask & used) !== 0) continue;
@@ -157,6 +167,7 @@ export function solveHand(
       const total = {
         points: cand.points + sub.points,
         cards: cand.cards.length + sub.cards,
+        setJokers: sub.setJokers + (cand.type === 'set' ? cand.cards.filter((c) => c.joker).length : 0),
         picks: [cand, ...sub.picks],
       };
       if (better(total, best)) best = total;

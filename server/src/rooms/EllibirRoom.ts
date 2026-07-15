@@ -25,7 +25,6 @@ export class EllibirRoom extends Room {
   private seatMeta = new Map<number, { gender: string; role: string }>();        // koltuk → cinsiyet/rol (yazboz sol panel zengin gösterim)
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
-  private matchEndTimer: NodeJS.Timeout | null = null;
   private startTimer: NodeJS.Timeout | null = null;
   private startTick: NodeJS.Timeout | null = null;
   private sorguTimer: NodeJS.Timeout | null = null;   // insan sorgu kararı zaman aşımı (→ VER)
@@ -40,7 +39,6 @@ export class EllibirRoom extends Room {
   private readonly TURN_MIN_MS = 8000;                // rules süresi >0 ama çok küçükse taban
   private readonly TURN_NOLIMIT_SAFETY_MS = 90000;    // tur süresi KAPALI (0) iken yalnız anti-freeze tabanı
   private startAt = 0;                          // başlangıç geri sayımının başladığı an
-  private readonly MATCH_END_MS = 10000;       // maç sonu → yeni maç geri sayımı
   private readonly START_MS = 7000;            // masa dolunca → oyun başlangıç geri sayımı
   private busy = false;                        // runEngine yeniden-giriş kilidi
   private readonly STEP_MS = 850;              // bot adımları arası gecikme (animasyon)
@@ -49,6 +47,9 @@ export class EllibirRoom extends Room {
   private seatNames = new Map<number, string>(); // koltuk → görünen ad (her oyuncu kendi adını yollar)
   private bet = 0;                             // masa bahsi (maç sonu settle için)
   private settled = false;                     // çift settle koruması
+  private settlePromise: Promise<void> | null = null;
+  private rematchVotes = new Set<number>();    // maç sonu TEKRAR OYNA diyen insan koltukları
+  private rematchStarting = false;             // çift ücret/yeni-maç başlangıcı koruması
 
   private lastReconnectAt = new Map<string, number>();
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkanı (wifi→mobil geçişi)
@@ -141,6 +142,10 @@ export class EllibirRoom extends Room {
       let cmd: any;
       try { cmd = typeof raw === 'string' ? JSON.parse(raw) : raw; }
       catch { client.send('moveError', { code: 'bad_json' }); return; }
+      if (cmd?.t === 'rematch') {
+        void this.handleRematch(seat);
+        return;
+      }
       try {
         const r = applyClientCommand(this.game, cmd, seat);
         this.game = r.state;
@@ -532,6 +537,10 @@ export class EllibirRoom extends Room {
     this.seatNames.delete(seat);
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
+    this.rematchVotes.delete(seat);
+    // Mac sonucunda bekleyen bir oyuncu hazirken digeri cikarsa, kalan oyu yeniden
+    // degerlendir. Eksik gercek oyunculu masa newMatch icinde lobby beklemesine doner.
+    if (this.game?.phase === 'matchEnded') void this.maybeStartRematch();
     this.scheduleBotOnlyClose();
   }
 
@@ -655,9 +664,10 @@ export class EllibirRoom extends Room {
     }
     if (this.game.phase === 'matchEnded' && !this.settled) {
       this.settled = true;
+      this.rematchVotes.clear();
       this.maybeCanak(); // son el matchEnded'e atlar — çanak kontrolü kaçmasın
       const r: any = this.game.rules ?? {};
-      settleMatch({
+      this.settlePromise = settleMatch({
         seatUsers: this.seatUsers,
         winnerSeat: Number(this.game.matchWinnerSeat),
         bet: this.bet,
@@ -666,9 +676,39 @@ export class EllibirRoom extends Room {
         game: '51', // çanak hedefi
       }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
         .catch((e) => console.error('[settle] hata:', e?.message));
-      // Masa KAPANMAZ: 10sn (yazboz+kazanan gösterilir) sonra AYNI ayarla yeni maç.
-      if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
-      this.matchEndTimer = setTimeout(() => this.newMatch(), this.MATCH_END_MS);
+    }
+  }
+
+  /** Maç sonu yalnız açık onayla yeniden başlar. Botlar hazır sayılır; gerçek masada
+   *  oturan tüm insanlar TEKRAR OYNA demeden yeni giriş ücreti kesilmez. */
+  private async handleRematch(seat: number) {
+    if (!this.game || this.game.phase !== 'matchEnded' || this.rematchStarting) return;
+    // Son hamlenin view'ı istemciye settle kurulmadan hemen önce ulaşabilir. İlk oy
+    // bu dar aralıkta gelirse sonuçlandırmayı burada senkron biçimde başlat.
+    if (!this.settled) this.checkHandEnd();
+    this.rematchVotes.add(seat);
+    this.pushViews();
+
+    await this.maybeStartRematch();
+  }
+
+  private async maybeStartRematch() {
+    if (!this.game || this.game.phase !== 'matchEnded' || this.rematchStarting) return;
+
+    const occupied = new Set(this.seats.values());
+    const required = this.humanSeats.filter((s) => occupied.has(s));
+    if (required.length === 0 || !required.every((s) => this.rematchVotes.has(s))) return;
+
+    this.rematchStarting = true;
+    try {
+      if (this.settlePromise) await this.settlePromise;
+      this.rematchVotes.clear();
+      await this.newMatch();
+    } catch (e: any) {
+      console.error('[EllibirRoom] rematch hata:', e?.message);
+      this.pushViews();
+    } finally {
+      this.rematchStarting = false;
     }
   }
 
@@ -759,6 +799,7 @@ export class EllibirRoom extends Room {
   /// Aynı masada yeni maç: kartlar toplanır, yazboz/olaylar sıfırlanır, masa ayarı korunur.
   /// Oyuncu eksikse (biri çıktıysa) bekleme moduna geçer (game=null → "rakip bekleniyor").
   private async newMatch() {
+    this.rematchVotes.clear();
     if (this.seats.size < this.humanSeats.length) { this.game = null; this.pushViews(); return; }
     const entryUsers = new Map(this.seatUsers);
     const entry = await deductEntry(entryUsers, this.bet);
@@ -775,6 +816,7 @@ export class EllibirRoom extends Room {
       if (p && name) p.name = name;
     }
     this.settled = false;
+    this.settlePromise = null;
     this.canakHand = -1;   // yeni maç: el sayacı sıfırdan — patlama kontrolü kilitlenmesin
     this.refreshCanak();
     this.resetHandOrder();
@@ -831,6 +873,7 @@ export class EllibirRoom extends Room {
         sv.canakWinSeat = this.canakWin?.seat ?? -1;
         sv.canakWinName = this.canakWin?.name ?? '';
         sv.canakWinAmount = this.canakWin?.amount ?? 0;
+        sv.rematchVotes = [...this.rematchVotes];
         c.send('view', JSON.stringify(sv));
         return;
       }
@@ -849,6 +892,7 @@ export class EllibirRoom extends Room {
       view.canakWinSeat = this.canakWin?.seat ?? -1;
       view.canakWinName = this.canakWin?.name ?? '';
       view.canakWinAmount = this.canakWin?.amount ?? 0;
+      view.rematchVotes = [...this.rematchVotes];
       c.send('view', JSON.stringify(view));
     });
   }
@@ -857,7 +901,6 @@ export class EllibirRoom extends Room {
     this.messageGuard.clear();
     this.giftBusy.clear();
     if (this.handEndTimer) clearTimeout(this.handEndTimer);
-    if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
     if (this.startTimer) clearTimeout(this.startTimer);
     if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
     this.clearSorguTimer();

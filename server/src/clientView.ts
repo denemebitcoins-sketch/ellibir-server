@@ -5,6 +5,7 @@
 import { viewFor, isIslekCard, canSor, canCancelOpen, legalExtendTargets, canRetrieveJoker } from '../../packages/engine/src/game';
 import { analyzeHand } from '../../packages/engine/src/insight';
 import { meldPoints, analyzeCards, analyzePair } from '../../packages/engine/src/melds';
+import { solveHand } from '../../packages/engine/src/solver';
 import type { GameState } from '../../packages/engine/src/types';
 import { VIEW_VERSION } from './viewContract';
 
@@ -269,8 +270,9 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
    seri: seri blokları + renk grupları; cift: özdeş çiftler önde. Bloklar sola,
    jokerler sağa. Renk birimleri kırmızı-siyah dönüşümlü dizilir. */
 export function sortHandOrder(hand: any[], rules: any, mode: 'seri' | 'cift'): string[] {
-  const ins = analyzeHand(hand, rules);
-  const blocks: any[][] = mode === 'seri' ? (ins.melds ?? []) : (ins.pairs ?? []);
+  const blocks: any[][] = mode === 'seri'
+    ? solveHand(hand, rules, 'arrange').melds
+    : (analyzeHand(hand, rules).pairs ?? []);
   const used = new Set<string>();
 
   const blockUnits: { ids: string[]; red: boolean }[] = [];

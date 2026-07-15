@@ -60,4 +60,14 @@ describe('room message abuse guard', () => {
     expect(src).toContain('if (this.rematchStarting) return;');
     expect(src).toMatch(/this\.rematchStarting = true;[\s\S]*?finally \{ this\.rematchStarting = false; \}/);
   });
+
+  it('starts a 51 rematch only after explicit seated-player votes and settlement', () => {
+    const src = readFileSync(path.resolve(repoRoot, 'server/src/rooms/EllibirRoom.ts'), 'utf8');
+    expect(src).toContain('private rematchVotes = new Set<number>();');
+    expect(src).toContain("if (cmd?.t === 'rematch')");
+    expect(src).toContain('required.every((s) => this.rematchVotes.has(s))');
+    expect(src).toContain('if (this.settlePromise) await this.settlePromise;');
+    expect(src).toContain("if (this.game?.phase === 'matchEnded') void this.maybeStartRematch();");
+    expect(src).not.toContain('setTimeout(() => this.newMatch()');
+  });
 });
