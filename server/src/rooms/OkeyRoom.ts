@@ -9,6 +9,7 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatP
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { selectJoinSeat } from '../seatSelection';
+import { okeyCanakChance } from '../canakPolicy';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
 
@@ -509,8 +510,7 @@ export class OkeyRoom extends Room {
 
   /* ── OYUN AKIŞI: her değişimden sonra tek yerden zamanla ── */
 
-  /* ── ÇANAK (BÖLÜM 33): el bitiren İNSAN, bitiş türüne göre şansla çanağı patlatır.
-     okey %3 · çift %5 · çift+okey %8. Patlayan tutarın tamamı bitirene; çanak sıfırlanır. ── */
+  /* ── ÇANAK: el bitiren insan yalniz ozel bitiste ortak politika sansiyla patlatir. ── */
   private canakEl = -1;          // el başına TEK kontrol
   private canakAmount = 0;       // gösterge (bellek kopyası; view'a gider)
   private canakSeq = 0;          // patlama sayacı (view garantisi — broadcast kaçsa da modal açılır)
@@ -523,7 +523,7 @@ export class OkeyRoom extends Room {
     this.canakEl = this.game.elNumber;
     const w = this.game.elWinner ?? -1;
     const fk = this.game.finishKind;
-    const p = fk === 'pairsOkey' ? 0.08 : fk === 'pairs' ? 0.05 : fk === 'okey' ? 0.03 : 0;
+    const p = okeyCanakChance(fk);
     const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
     if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
     canakBurst('okey', uid, this.nameOfSeat(w)).then((amt) => {

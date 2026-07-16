@@ -7,6 +7,7 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatP
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { selectJoinSeat } from '../seatSelection';
+import { ellibirCanakChance } from '../canakPolicy';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -623,8 +624,7 @@ export class EllibirRoom extends Room {
     }
   }
 
-  /* ── ÇANAK (BÖLÜM 33): eli bitiren İNSAN, bitiş türüne göre şansla çanağı patlatır.
-     okey atarak %3 · çift %5 · çift+okey %8 (okey ile aynı tetikler). ── */
+  /* ── ÇANAK: eli bitiren insan yalniz ozel bitiste ortak politika sansiyla patlatir. ── */
   private canakHand = -1;
   private canakAmount = 0;
   private canakSeq = 0;          // patlama sayacı (view garantisi — broadcast kaçsa da modal açılır)
@@ -640,7 +640,7 @@ export class EllibirRoom extends Room {
     this.canakHand = handNo;
     const w = hr.winnerSeat;
     const uid = w != null && w >= 0 ? this.seatUsers.get(w) : undefined;
-    const p = hr.okeyFinish && hr.pairFinish ? 0.08 : hr.pairFinish ? 0.05 : hr.okeyFinish ? 0.03 : 0;
+    const p = ellibirCanakChance(Boolean(hr.okeyFinish), Boolean(hr.pairFinish));
     if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
     canakBurst('51', uid, this.seatNames.get(w) ?? '').then((amt) => {
       if (amt <= 0 || !this.game) { this.refreshCanak(); return; }

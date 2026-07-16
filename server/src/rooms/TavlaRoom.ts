@@ -9,6 +9,7 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatP
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { selectJoinSeat } from '../seatSelection';
+import { tavlaCanakChance } from '../canakPolicy';
 
 /**
  * TAVLA masası (2 kişilik) — OkeyRoom/EllibirRoom ile AYNI sosyal/reconnect altyapısı
@@ -488,7 +489,7 @@ export class TavlaRoom extends Room {
     else this.preLog.push(msg);
   }
 
-  /* ── ÇANAK (BÖLÜM 33): MARS yapan İNSAN %3 şansla çanağı patlatır.
+  /* ── ÇANAK: MARS yapan insan ortak politika sansiyla çanağı patlatır.
      Modal GARANTİSİ: patlama bilgisi SEQ'li olarak view'a da yazılır — broadcast kaçsa bile
      (yarış/yeniden bağlanma) client sonraki push'ta sequence artışını görüp modalı açar. ── */
   private canakGame = -1;        // oyun başına TEK kontrol
@@ -503,8 +504,8 @@ export class TavlaRoom extends Room {
     this.canakGame = this.game.gameNumber;
     const w = this.game.gameWinner;
     const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
-    const MARS_P = 0.03;
-    if (!uid || !this.game.mars || Math.random() >= MARS_P) { this.refreshCanak(); return; }
+    const p = tavlaCanakChance(this.game.mars);
+    if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
     canakBurst('tavla', uid, this.seatNames.get(w) ?? '').then((amt) => {
       if (amt <= 0 || !this.game) { this.refreshCanak(); return; }
       this.canakAmount = 0;
