@@ -164,9 +164,8 @@ export async function isGameBanned(userId: string | null | undefined): Promise<b
     const rows: any = await r.json();
     if (!Array.isArray(rows) || rows.length === 0) return false;
     const row = rows[0];
-    if (row?.banned === true) return true; // geriye-dönük basit bayrak
     const until = row?.game_banned_until;
-    if (!until) return false;
+    if (!until) return row?.banned === true; // typed süre yoksa geriye-dönük basit bayrak
     const t = Date.parse(until);
     return Number.isFinite(t) && t > Date.now();
   } catch (e: any) {
@@ -258,6 +257,23 @@ export async function rpc(fn: string, args: Record<string, unknown>): Promise<bo
     console.error(`[supabase] RPC ${fn}:`, e?.message);
     return false;
   }
+}
+
+/** Service-role RPC with parsed JSON response; used by verified monetization callbacks. */
+export async function rpcService(fn: string, args: Record<string, unknown>): Promise<any> {
+  if (!supabaseConfigured()) throw new Error('supabase_not_configured');
+  const response = await fetch(`${URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: {
+      apikey: SERVICE,
+      Authorization: `Bearer ${SERVICE}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(args),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${fn}_http_${response.status}:${text.slice(0, 240)}`);
+  try { return JSON.parse(text); } catch { return { ok: true }; }
 }
 
 /** PEŞİN BAHİS GİRİŞİ: maç fiilen BAŞLARKEN her gerçek oturandan bahsi kes (odalar çağırır).

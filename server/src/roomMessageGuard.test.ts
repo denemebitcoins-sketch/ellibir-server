@@ -57,14 +57,14 @@ describe('room message abuse guard', () => {
   it('serializes tavla rematch charging/start', () => {
     const src = readFileSync(path.resolve(repoRoot, 'server/src/rooms/TavlaRoom.ts'), 'utf8');
     expect(src).toContain('private rematchStarting = false;');
-    expect(src).toContain('if (this.rematchStarting) return;');
-    expect(src).toMatch(/this\.rematchStarting = true;[\s\S]*?finally \{ this\.rematchStarting = false; \}/);
+    expect(src).toMatch(/if \(!this\.game\?\.matchEnded \|\| this\.rematchStarting\) return;/);
+    expect(src).toMatch(/this\.rematchStarting = true;[\s\S]*?finally\s*\{[\s\S]*?this\.rematchStarting = false;/);
   });
 
   it('starts a 51 rematch only after explicit seated-player votes and settlement', () => {
     const src = readFileSync(path.resolve(repoRoot, 'server/src/rooms/EllibirRoom.ts'), 'utf8');
     expect(src).toContain('private rematchVotes = new Set<number>();');
-    expect(src).toContain("if (cmd?.t === 'rematch')");
+    expect(src).toContain("cmd?.t === 'ready' || cmd?.t === 'rematch'");
     expect(src).toContain('required.every((s) => this.rematchVotes.has(s))');
     expect(src).toContain('if (this.settlePromise) await this.settlePromise;');
     expect(src).toContain("if (this.game?.phase === 'matchEnded') void this.maybeStartRematch();");

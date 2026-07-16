@@ -10,10 +10,13 @@ import { createServer } from 'http';
 import { EllibirRoom } from './rooms/EllibirRoom';
 import { OkeyRoom } from './rooms/OkeyRoom';
 import { TavlaRoom } from './rooms/TavlaRoom';
+import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
+import { startPushWorker } from './pushWorker';
 
 const port = Number(process.env.PORT) || 2567;
 
 const app = express();
+app.use(express.json({ limit: '96kb' }));
 app.get('/', (_req, res) => res.send('Elli Bir Colyseus sunucusu çalışıyor ✦'));
 app.get('/health', (_req, res) => res.json({
   ok: true,
@@ -21,6 +24,25 @@ app.get('/health', (_req, res) => res.json({
   okey101Deal: true,
   commit: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local',
 }));
+app.get('/monetization/admob/ssv', async (req, res) => {
+  try {
+    await handleAdMobSsv(req);
+    res.status(200).send('ok');
+  } catch (error: any) {
+    console.error('[admob-ssv]', error?.message);
+    res.status(400).send('invalid');
+  }
+});
+app.post('/monetization/google-play/verify', async (req, res) => {
+  try {
+    const result = await verifyPlayPurchase(req.header('authorization'), String(req.body?.receipt || ''), String(req.body?.product_id || ''));
+    res.json(result);
+  } catch (error: any) {
+    const message = String(error?.message || 'verification_failed');
+    const status = message === 'auth_required' ? 401 : message === 'play_verifier_not_configured' ? 503 : 400;
+    res.status(status).json({ ok: false, error: message });
+  }
+});
 
 const httpServer = createServer(app);
 // DÜŞME ALGISI HIZLI OLSUN (P1-a): varsayılan ping ~20-60s → oyuncu kopunca onLeave geç tetikleniyor,
@@ -45,4 +67,5 @@ gameServer.define('tavla', TavlaRoom).filterBy(['mode', 'table']);
 try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
 
 gameServer.listen(port);
+startPushWorker();
 console.log(`[Elli Bir] Colyseus dinleniyor: ws://localhost:${port} (seatRes=60s)`);

@@ -143,7 +143,7 @@ export class EllibirRoom extends Room {
       let cmd: any;
       try { cmd = typeof raw === 'string' ? JSON.parse(raw) : raw; }
       catch { client.send('moveError', { code: 'bad_json' }); return; }
-      if (cmd?.t === 'rematch') {
+      if (cmd?.t === 'ready' || cmd?.t === 'rematch') {
         void this.handleRematch(seat);
         return;
       }

@@ -3,6 +3,7 @@ import { clientViewFor, clientViewForSpectator } from './clientView';
 import { okeyViewFor } from './okeyView';
 import { tavlaViewFor } from './tavlaView';
 import { VIEW_VERSION } from './viewContract';
+import { createGame } from '../../packages/engine/src/game';
 
 describe('view DTO contract', () => {
   it('adds the shared DTO version to all empty views', () => {
@@ -42,5 +43,24 @@ describe('view DTO contract', () => {
     expect(Array.isArray(tavla.points)).toBe(true);
     expect(Array.isArray(tavla.movesLeft)).toBe(true);
     expect(Array.isArray(tavla.logMessages)).toBe(true);
+  });
+
+  it('carries the 51 hand winner and finish kind to players and spectators', () => {
+    const state = createGame({ seed: 51 }) as any;
+    state.lastHandResult = {
+      winnerSeat: 2,
+      handFinish: false,
+      pairFinish: true,
+      okeyFinish: true,
+      penalties: [400, 400, 0, 400],
+      breakdown: [],
+    };
+
+    for (const view of [clientViewFor(state, 0), clientViewForSpectator(state)] as any[]) {
+      expect(view.handWinnerSeat).toBe(2);
+      expect(view.handFinish).toBe(false);
+      expect(view.pairFinish).toBe(true);
+      expect(view.okeyFinish).toBe(true);
+    }
   });
 });

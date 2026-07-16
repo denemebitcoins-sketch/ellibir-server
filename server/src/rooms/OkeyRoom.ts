@@ -71,7 +71,10 @@ export class OkeyRoom extends Room {
   private readonly TURN_GRACE_MS = 6000;
   private bet = 0;
   private settled = false;
+  private settlePromise: Promise<void> | null = null;
   private cfg: any = null;
+  private rematchVotes = new Set<number>();
+  private rematchStarting = false;
   private lastReconnectAt = new Map<string, number>();
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkani (wifi->mobil gecisi)
   private readonly messageGuard = new RoomMessageGuard();
@@ -165,12 +168,24 @@ export class OkeyRoom extends Room {
       let cmd: any;
       try { cmd = typeof raw === 'string' ? JSON.parse(raw) : raw; }
       catch { client.send('moveError', { code: 'bad_json' }); return; }
+      if (cmd?.t === 'ready' || cmd?.t === 'rematch') {
+        void this.handleReady(seat);
+        return;
+      }
       const r = applyOkeyMove(this.game, seat, cmd);
       if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
       this.maybeAccelerateBanko(); // insan kararı sonrası erken kapanış kontrolü
       if ((this.game as any).bankoPhase) { this.pushViews(); return; }
       this.afterChange();
     });
+
+    const ready = (client: Client) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null || !this.messageGuard.allow(client.sessionId, 'ready', 2, 5000)) return;
+      void this.handleReady(seat);
+    };
+    this.onMessage('ready', ready);
+    this.onMessage('rematch', ready); // eski istemciler
 
     // ── SOSYAL KATMAN: 51 ile birebir ──
     this.onMessage('chat', (client, raw) => {
@@ -358,6 +373,10 @@ export class OkeyRoom extends Room {
         if (p && name) p.name = name;
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
+      this.settled = false;
+      this.settlePromise = null;
+      this.rematchVotes.clear();
+      this.canakEl = -1;
       console.log('[OkeyRoom] oyun başladı' + (banko ? ' (banko: ilk el seçim fazı)' : ''));
       if (banko) this.enterBankoPhase();
       else this.afterChange();
@@ -485,6 +504,11 @@ export class OkeyRoom extends Room {
     this.seatNames.delete(seat);
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
+    this.rematchVotes.delete(seat);
+    if (this.game?.matchEnded) {
+      this.abandoned.delete(seat);
+      void this.maybeStartRematch();
+    }
     this.scheduleBotOnlyClose();
   }
 
@@ -680,7 +704,8 @@ export class OkeyRoom extends Room {
       for (let s = 0; s < 4; s++) if (this.game.players[s]!.hasOpened) openedSeats.add(s);
     let winnerSeat = 0;
     for (let s = 1; s < 4; s++) if (this.game.scores[s]! < this.game.scores[winnerSeat]!) winnerSeat = s;
-    settleMatch({
+    this.rematchVotes.clear();
+    this.settlePromise = settleMatch({
       seatUsers: this.seatUsers,
       winnerSeat,
       bet: this.bet,
@@ -692,6 +717,68 @@ export class OkeyRoom extends Room {
       game: 'okey', // çanak hedefi (düz + banko ortak çanak)
     }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
+  }
+
+  private async handleReady(seat: number) {
+    if (!this.game?.matchEnded || this.rematchStarting) return;
+    if (!this.settled) this.settleOnce();
+    this.rematchVotes.add(seat);
+    this.pushViews();
+    await this.maybeStartRematch();
+  }
+
+  private async maybeStartRematch() {
+    if (!this.game?.matchEnded || this.rematchStarting) return;
+    const occupied = new Set(this.seats.values());
+    const required = this.humanSeats.filter((seat) => occupied.has(seat));
+    if (required.length === 0 || !required.every((seat) => this.rematchVotes.has(seat))) return;
+
+    this.rematchStarting = true;
+    try {
+      if (this.settlePromise) await this.settlePromise;
+      await this.newMatch();
+    } catch (e: any) {
+      console.error('[OkeyRoom] hazır/yeni maç hata:', e?.message);
+      this.pushViews();
+    } finally {
+      this.rematchStarting = false;
+    }
+  }
+
+  private async newMatch() {
+    this.rematchVotes.clear();
+    if (this.seats.size < this.humanSeats.length) {
+      this.game = null;
+      this.settled = false;
+      this.settlePromise = null;
+      this.abandoned.clear();
+      this.pushViews();
+      return;
+    }
+
+    const entryUsers = new Map(this.seatUsers);
+    const entry = await deductEntry(entryUsers, this.bet);
+    if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+    if (this.seats.size < this.humanSeats.length) {
+      await refundEntry(entryUsers, this.bet, 'seat_left_before_rematch');
+      this.game = null;
+      this.pushViews();
+      return;
+    }
+
+    const banko = this.cfg?.rules?.variant === 'banko';
+    this.game = createOkeyGame({ ...this.cfg, seed: Math.floor(Math.random() * 1_000_000_000), dealFirst: !banko });
+    for (const [seat, name] of this.seatNames) {
+      const player = this.game.players[seat];
+      if (player && name) player.name = name;
+    }
+    this.settled = false;
+    this.settlePromise = null;
+    this.canakEl = -1;
+    this.refreshCanak();
+    this.game.matchLog.push('Tüm oyuncular hazır — yeni maç başladı');
+    if (banko) this.enterBankoPhase();
+    else this.afterChange();
   }
 
   /* ── GÖRÜNÜM ── */
@@ -734,6 +821,7 @@ export class OkeyRoom extends Room {
       v.canakWinName = this.canakWin?.name ?? '';
       v.canakWinAmount = this.canakWin?.amount ?? 0;
       v.preLog = waiting ? this.preLog.slice(-30) : [];
+      v.rematchVotes = [...this.rematchVotes];
     };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);

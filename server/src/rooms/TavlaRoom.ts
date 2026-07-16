@@ -43,6 +43,7 @@ export class TavlaRoom extends Room {
   private readonly TURN_GRACE_MS = 6000;
   private bet = 0;
   private settled = false;
+  private settlePromise: Promise<void> | null = null;
   private cfg: any = null;
   private rematchVotes = new Set<number>(); // maç sonu TEKRAR OYNA oyları (koltuk)
   private rematchStarting = false;
@@ -132,42 +133,14 @@ export class TavlaRoom extends Room {
       this.afterChange();
     });
 
-    // TEKRAR OYNA (kullanıcı isteği): maç bitince oyuncular oy verir; bağlı TÜM insan
-    // koltukları isteyince aynı ayarlarla YENİ MAÇ başlar (bot rakipte tek oy yeter).
-    this.onMessage('rematch', async (client) => {
+    const ready = (client: Client) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null || !this.game || !this.game.matchEnded) return;
-      if (this.rematchStarting) return;
-      if (!this.messageGuard.allow(client.sessionId, 'rematch', 2, 5000)) return;
-      this.rematchVotes.add(seat);
-      const connected = [...this.seats.values()];
-      const all = connected.length > 0 && connected.every((s) => this.rematchVotes.has(s));
-      if (!all) { this.pushViews(); return; } // oy listede görünsün (rakip bekleniyor…)
-
-      this.rematchStarting = true;
-      try {
-        this.rematchVotes.clear();
-        const entryUsers = new Map(this.seatUsers);
-        const entry = await deductEntry(entryUsers, this.bet);
-        if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-        if (this.seats.size < this.humanSeats.length) {
-          await refundEntry(entryUsers, this.bet, 'seat_left_before_rematch');
-          this.pushViews();
-          return;
-        }
-        this.settled = false;
-        this.game = createTavlaGame({ ...this.cfg, seed: Date.now() % 2147483647 });
-        this.canakGame = -1;   // yeni maç: gameNumber sayacı sıfırdan — patlama kontrolü kilitlenmesin
-        this.refreshCanak();   // "tekrar oyna sonrası çanak eski kalıyor" fix'i
-        for (const [st, name] of this.seatNames) {
-          const p = this.game.players[st];
-          if (p && name) p.name = name;
-        }
-        this.game.matchLog.push('TEKRAR OYNA — yeni maç başladı');
-        console.log('[TavlaRoom] rematch — yeni maç');
-        this.afterChange();
-      } finally { this.rematchStarting = false; }
-    });
+      if (!this.messageGuard.allow(client.sessionId, 'ready', 2, 5000)) return;
+      void this.handleReady(seat);
+    };
+    this.onMessage('ready', ready);
+    this.onMessage('rematch', ready); // eski istemciler
 
     // ── SOSYAL KATMAN: 51/OKEY ile birebir ──
     this.onMessage('chat', (client, raw) => {
@@ -340,6 +313,10 @@ export class TavlaRoom extends Room {
         if (p && name) p.name = name;
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
+      this.settled = false;
+      this.settlePromise = null;
+      this.rematchVotes.clear();
+      this.canakGame = -1;
       console.log('[TavlaRoom] oyun başladı');
       this.afterChange();
     }, this.START_MS);
@@ -466,6 +443,11 @@ export class TavlaRoom extends Room {
     this.seatNames.delete(seat);
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
+    this.rematchVotes.delete(seat);
+    if (this.game?.matchEnded) {
+      this.abandoned.delete(seat);
+      void this.maybeStartRematch();
+    }
     this.scheduleBotOnlyClose();
   }
 
@@ -646,7 +628,8 @@ export class TavlaRoom extends Room {
     if (this.settled || !this.game) return;
     this.settled = true;
     const winnerSeat = this.game.matchScore[0]! >= this.game.rules.targetScore ? 0 : 1;
-    settleMatch({
+    this.rematchVotes.clear();
+    this.settlePromise = settleMatch({
       seatUsers: this.seatUsers,
       winnerSeat,
       bet: this.bet,
@@ -655,6 +638,66 @@ export class TavlaRoom extends Room {
       game: 'tavla', // çanak hedefi
     }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
       .catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
+  }
+
+  private async handleReady(seat: number) {
+    if (!this.game?.matchEnded || this.rematchStarting) return;
+    if (!this.settled) this.settleOnce();
+    this.rematchVotes.add(seat);
+    this.pushViews();
+    await this.maybeStartRematch();
+  }
+
+  private async maybeStartRematch() {
+    if (!this.game?.matchEnded || this.rematchStarting) return;
+    const occupied = new Set(this.seats.values());
+    const required = this.humanSeats.filter((seat) => occupied.has(seat));
+    if (required.length === 0 || !required.every((seat) => this.rematchVotes.has(seat))) return;
+
+    this.rematchStarting = true;
+    try {
+      if (this.settlePromise) await this.settlePromise;
+      await this.newMatch();
+    } catch (e: any) {
+      console.error('[TavlaRoom] hazır/yeni maç hata:', e?.message);
+      this.pushViews();
+    } finally {
+      this.rematchStarting = false;
+    }
+  }
+
+  private async newMatch() {
+    this.rematchVotes.clear();
+    if (this.seats.size < this.humanSeats.length) {
+      this.game = null;
+      this.settled = false;
+      this.settlePromise = null;
+      this.abandoned.clear();
+      this.pushViews();
+      return;
+    }
+
+    const entryUsers = new Map(this.seatUsers);
+    const entry = await deductEntry(entryUsers, this.bet);
+    if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+    if (this.seats.size < this.humanSeats.length) {
+      await refundEntry(entryUsers, this.bet, 'seat_left_before_rematch');
+      this.game = null;
+      this.pushViews();
+      return;
+    }
+
+    this.game = createTavlaGame({ ...this.cfg, seed: Date.now() % 2147483647 });
+    for (const [seat, name] of this.seatNames) {
+      const player = this.game.players[seat];
+      if (player && name) player.name = name;
+    }
+    this.settled = false;
+    this.settlePromise = null;
+    this.canakGame = -1;
+    this.refreshCanak();
+    this.game.matchLog.push('Tüm oyuncular hazır — yeni maç başladı');
+    this.afterChange();
   }
 
   /* ── GÖRÜNÜM ── */
