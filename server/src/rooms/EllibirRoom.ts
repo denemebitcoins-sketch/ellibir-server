@@ -6,7 +6,7 @@ import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
-import { selectJoinSeat } from '../seatSelection';
+import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { ellibirCanakChance } from '../canakPolicy';
 
 /**
@@ -105,16 +105,13 @@ export class EllibirRoom extends Room {
     const mode = options?.mode === 'duo' ? 'duo' : options?.mode === 'duo3' ? 'duo3' : 'solo';
     const tableNo = Number(options?.table) || 1;
 
-    // Masa 1 kontrollü botlu test masasıdır. Masa 2-10 gerçek online test/çıkış içindir:
-    // tekli de eşli de 4 insan bekler, oyun başladıktan sonra düşen koltuğu bot devralır.
-    const botTestTable = tableNo === 1;
-    this.humanSeats = botTestTable
-      ? (mode === 'duo' ? [0, 2] : mode === 'duo3' ? [0, 1, 2] : [0])
-      : [0, 1, 2, 3];
+    // Online masalar gercek oyuncularla baslar. Bot yalniz lokal antrenmanda veya
+    // baslamis oyunda baglantisi kopan koltugu devralmak icin kullanilir.
+    this.humanSeats = onlineHumanSeats('ellibir');
     // İnsan koltukları + izleyici kapasitesi (toplam 8: ör. 4 koltuk + birkaç izleyici).
     // humanSeats sayımına DOKUNMAZ — startGameIfReady yalnız gerçek koltukları sayar.
     this.maxClients = 8;
-    const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
+    const botSeats: number[] = [];
 
     // Client'tan gelen kural seti (RuleConfig JSON) — eksik/bozuk alanlar olabilir →
     // DEFAULT_RULES ile MERGE et ki state asla bozulmasın (yoksa emptyView dönerdi). duo → teamMode garanti.

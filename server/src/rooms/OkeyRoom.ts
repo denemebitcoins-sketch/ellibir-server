@@ -8,7 +8,7 @@ import { okeyViewFor } from '../okeyView';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
-import { selectJoinSeat } from '../seatSelection';
+import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { okeyCanakChance } from '../canakPolicy';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
@@ -135,11 +135,8 @@ export class OkeyRoom extends Room {
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
     const mode = options?.mode === 'duo' ? 'duo' : options?.mode === 'quad' ? 'quad' : 'solo';
     const tableNo = Number(options?.table) || 1;
-    const botTestTable = tableNo === 1 && mode !== 'quad';
-    this.humanSeats = botTestTable
-      ? (mode === 'duo' ? [0, 2] : [0])
-      : [0, 1, 2, 3];
-    const botSeats = [0, 1, 2, 3].filter((s) => !this.humanSeats.includes(s));
+    this.humanSeats = onlineHumanSeats('okey');
+    const botSeats: number[] = [];
 
     const { parsed, variant: requestedVariant } = normalizeOkeyJoinOptions(options);
     const rules: OkeyRuleConfig = {

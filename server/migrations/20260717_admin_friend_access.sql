@@ -1,31 +1,8 @@
--- Online Kahvem - VIP entitlement authority (2026-07-16)
--- The storefront lists only benefits that are enforced here or by an existing RPC.
+-- Online Kahvem - accepted administrator friendship access (2026-07-17)
+-- Run after 20260716_admin_social_access.sql and 20260716_vip_entitlements.sql.
 
 begin;
 
-create or replace function public.is_current_user_vip()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1
-      from public.profiles p
-     where p.id::text = auth.uid()::text
-       and (
-         p.role = 'admin'
-         or (p.vip_until is not null and p.vip_until > now())
-       )
-  );
-$$;
-
-revoke execute on function public.is_current_user_vip() from public, anon;
-grant execute on function public.is_current_user_vip() to authenticated;
-
--- Basic profile identity remains visible. This function controls the private/social
--- surface only: wall, posts, likes, comments and friend list RPCs/policies.
 create or replace function public.can_view_profile_social(p_target text)
 returns boolean
 language sql
@@ -82,22 +59,48 @@ as $$
      );
 $$;
 
+create or replace function public.can_send_direct_message(p_to uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null
+     and p_to is not null
+     and p_to <> auth.uid()
+     and not exists (
+       select 1 from public.profiles p
+        where p.id::text = auth.uid()::text
+          and p.message_banned_until is not null
+          and p.message_banned_until > now()
+     )
+     and (
+       public.is_current_user_admin()
+       or (
+         exists (
+           select 1 from public.profiles p
+            where p.id::text = p_to::text
+              and coalesce(p.allow_dm, true)
+         )
+         and exists (
+           select 1 from public.friendships f
+            where f.status = 'accepted'
+              and ((f.requester = auth.uid() and f.addressee = p_to)
+                or (f.requester = p_to and f.addressee = auth.uid()))
+         )
+         and not exists (
+           select 1 from public.blocks b
+            where (b.blocker = auth.uid() and b.blocked = p_to)
+               or (b.blocker = p_to and b.blocked = auth.uid())
+         )
+       )
+     );
+$$;
+
 revoke execute on function public.can_view_profile_social(text) from public, anon;
+revoke execute on function public.can_send_direct_message(uuid) from public, anon;
 grant execute on function public.can_view_profile_social(text) to authenticated;
-
--- Re-state the write policies so direct REST calls obey the same storefront contract.
-drop policy if exists post_likes_insert on public.post_likes;
-create policy post_likes_insert on public.post_likes
-  for insert to authenticated
-  with check (auth.uid() = user_id and public.can_view_post_social(post_id));
-
-drop policy if exists post_comments_insert on public.post_comments;
-create policy post_comments_insert on public.post_comments
-  for insert to authenticated
-  with check (
-    auth.uid() = user_id
-    and public.can_write_social()
-    and public.can_view_post_social(post_id)
-  );
+grant execute on function public.can_send_direct_message(uuid) to authenticated;
 
 commit;

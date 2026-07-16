@@ -8,14 +8,15 @@ import { tavlaViewFor } from '../tavlaView';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
-import { selectJoinSeat } from '../seatSelection';
+import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { tavlaCanakChance } from '../canakPolicy';
 
 /**
  * TAVLA masası (2 kişilik) — OkeyRoom/EllibirRoom ile AYNI sosyal/reconnect altyapısı
  * (chat/hediye/olaylar, onDrop→allowReconnection(180)→onReconnect, izleyici, sit),
  * motor olarak tavla engine. Bot turu ADIM ADIM oynar (client animasyonuna yer).
- * mode: 'solo' (1 insan + 1 bot) | 'duo' (2 insan).
+ * Online masada iki koltuk da gercek oyuncu bekler. Yerel antrenman botlari bu oda
+ * sinifina girmez; baslamis macta dusen koltuk icin devralma botu korunur.
  */
 export class TavlaRoom extends Room {
   maxClients = 8;
@@ -100,9 +101,8 @@ export class TavlaRoom extends Room {
     const names = options?.names ?? ['Oyuncu 1', 'Oyuncu 2'];
     const mode = options?.mode === 'duo' ? 'duo' : 'solo';
     const tableNo = Number(options?.table) || 1;
-    const botTestTable = tableNo === 1 && mode === 'solo';
-    this.humanSeats = botTestTable ? [0] : [0, 1];
-    const botSeats = [0, 1].filter((s) => !this.humanSeats.includes(s));
+    this.humanSeats = onlineHumanSeats('tavla');
+    const botSeats: number[] = [];
 
     let parsed: any = null;
     try { parsed = typeof options?.rules === 'string' ? JSON.parse(options.rules) : options?.rules; }

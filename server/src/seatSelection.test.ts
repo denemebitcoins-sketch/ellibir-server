@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectJoinSeat } from './seatSelection';
+import { onlineHumanSeats, selectJoinSeat } from './seatSelection';
 
 describe('absolute room seat selection', () => {
   const humanSeats = [0, 1, 2, 3];
@@ -30,5 +30,13 @@ describe('absolute room seat selection', () => {
 
   it('always keeps explicit spectators unseated', () => {
     expect(selectJoinSeat(humanSeats, new Set(), true, 2)).toEqual({ seat: null });
+  });
+});
+
+describe('online room human-seat policy', () => {
+  it('does not reserve table 1 seats for startup bots', () => {
+    expect(onlineHumanSeats('ellibir')).toEqual([0, 1, 2, 3]);
+    expect(onlineHumanSeats('okey')).toEqual([0, 1, 2, 3]);
+    expect(onlineHumanSeats('tavla')).toEqual([0, 1]);
   });
 });

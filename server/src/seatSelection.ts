@@ -3,6 +3,16 @@ export type JoinSeatDecision = {
   error?: 'invalid_seat' | 'seat_unavailable';
 };
 
+export type OnlineGameKind = 'ellibir' | 'okey' | 'tavla';
+
+/**
+ * Online salon tables always start with real players. Bots are reserved for the
+ * local training flow and for taking over a disconnected seat after a match starts.
+ */
+export function onlineHumanSeats(game: OnlineGameKind): number[] {
+  return game === 'tavla' ? [0, 1] : [0, 1, 2, 3];
+}
+
 /**
  * Resolves a room join to an absolute table seat.
  * A requested seat is never silently replaced with another free seat.

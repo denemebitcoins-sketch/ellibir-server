@@ -1,5 +1,6 @@
 -- Online Kahvem - administrator social access matrix (2026-07-16)
--- Normal/VIP users cannot inspect, friend or DM an administrator.
+-- Normal/VIP users cannot send a new friend request to an administrator.
+-- An administrator-initiated, accepted friendship grants that player social access.
 -- Administrators can inspect and DM every player without privacy/friend/block gates.
 
 begin;
@@ -16,6 +17,19 @@ as $$
      and (
        p_target = auth.uid()::text
        or public.is_current_user_admin()
+       or (
+         exists (
+           select 1 from public.profiles admin_target
+            where admin_target.id::text = p_target
+              and admin_target.role = 'admin'
+         )
+         and exists (
+           select 1 from public.friendships f
+            where f.status = 'accepted'
+              and ((f.requester::text = auth.uid()::text and f.addressee::text = p_target)
+                or (f.addressee::text = auth.uid()::text and f.requester::text = p_target))
+         )
+       )
        or (
          not exists (
            select 1 from public.profiles admin_target
@@ -65,12 +79,7 @@ as $$
      and (
        public.is_current_user_admin()
        or (
-         not exists (
-           select 1 from public.profiles admin_target
-            where admin_target.id::text = p_to::text
-              and admin_target.role = 'admin'
-         )
-         and exists (
+         exists (
            select 1 from public.profiles p
             where p.id::text = p_to::text
               and coalesce(p.allow_dm, true)
