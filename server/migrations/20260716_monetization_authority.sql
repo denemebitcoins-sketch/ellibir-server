@@ -67,7 +67,7 @@ begin
 
   select coalesce(role, 'normal'), vip_until
     into v_role, v_vip_until
-    from public.profiles where id = v_uid;
+    from public.profiles where id::text = v_uid::text;
   if v_role <> 'admin' and (v_role = 'vip' or (v_vip_until is not null and v_vip_until > now())) then
     return jsonb_build_object('ok', false, 'error', 'vip_no_ads');
   end if;
@@ -131,7 +131,8 @@ begin
   if v_last is not null then
     v_wait := greatest(0, ceil(extract(epoch from ((v_last + interval '15 minutes') - now())))::integer);
   end if;
-  select coalesce(chips, 0) into v_chips from public.profiles where id = v_uid;
+  select coalesce(chips, 0) into v_chips
+    from public.profiles where id::text = v_uid::text;
   return jsonb_build_object('ok', true, 'status', coalesce(v_status, ''),
     'credited', v_status = 'credited', 'reward_chips', v_reward, 'chips', v_chips,
     'used', v_used, 'remaining', greatest(0, 5 - v_used), 'cooldown_seconds', v_wait);
@@ -167,7 +168,7 @@ begin
   if not found then return jsonb_build_object('ok', false, 'error', 'session_not_found'); end if;
   if v_row.status = 'credited' then
     return jsonb_build_object('ok', true, 'duplicate', true, 'chips',
-      (select chips from public.profiles where id = v_row.user_id));
+      (select chips from public.profiles where id::text = v_row.user_id::text));
   end if;
   if v_row.status <> 'pending' or v_row.expires_at <= now() then
     update public.rewarded_ad_sessions set status = 'expired' where id = p_session_id;
@@ -177,7 +178,8 @@ begin
     return jsonb_build_object('ok', false, 'error', 'transaction_reused');
   end if;
 
-  update public.profiles set chips = chips + v_row.reward_chips where id = v_row.user_id
+  update public.profiles set chips = chips + v_row.reward_chips
+    where id::text = v_row.user_id::text
     returning chips into v_chips;
   update public.rewarded_ad_sessions
      set status = 'credited', transaction_id = p_transaction_id, ad_unit = p_ad_unit,
@@ -229,7 +231,7 @@ begin
     end if;
     if v_existing.state = 'verified' then
       select chips, diamonds, vip_until into v_chips, v_wallet_diamonds, v_vip_until
-        from public.profiles where id = p_user_id;
+        from public.profiles where id::text = p_user_id::text;
       return jsonb_build_object('ok', true, 'duplicate', true, 'chips', v_chips,
         'diamonds', v_wallet_diamonds, 'vip_until', v_vip_until);
     end if;
@@ -256,7 +258,8 @@ begin
   end case;
 
   if v_diamonds > 0 then
-    update public.profiles set diamonds = diamonds + v_diamonds where id = p_user_id;
+    update public.profiles set diamonds = diamonds + v_diamonds
+      where id::text = p_user_id::text;
   else
     begin
       v_expiry := nullif(p_store_response #>> '{lineItems,0,expiryTime}', '')::timestamptz;
@@ -265,9 +268,10 @@ begin
     update public.profiles
        set vip_until = greatest(coalesce(vip_until, now()), now())
                        + make_interval(months => v_months)
-     where id = p_user_id;
+     where id::text = p_user_id::text;
     if v_expiry is not null then
-      update public.profiles set vip_until = greatest(vip_until, v_expiry) where id = p_user_id;
+      update public.profiles set vip_until = greatest(vip_until, v_expiry)
+        where id::text = p_user_id::text;
     end if;
   end if;
 
@@ -275,7 +279,7 @@ begin
      set state = 'verified', store_response = coalesce(p_store_response, '{}'::jsonb), verified_at = now()
    where purchase_token = p_purchase_token;
   select chips, diamonds, vip_until into v_chips, v_wallet_diamonds, v_vip_until
-    from public.profiles where id = p_user_id;
+    from public.profiles where id::text = p_user_id::text;
   return jsonb_build_object('ok', true, 'chips', v_chips, 'diamonds', v_wallet_diamonds,
     'vip_until', v_vip_until, 'product_id', p_product_id);
 exception when unique_violation then

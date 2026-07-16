@@ -20,7 +20,7 @@ declare
 begin
   if v_uid is null then return jsonb_build_object('ok', false, 'error', 'auth_required'); end if;
   select banned, chat_banned_until, message_banned_until, game_banned_until
-    into p from public.profiles where id = v_uid;
+    into p from public.profiles where id::text = v_uid::text;
   if not found then return jsonb_build_object('ok', false, 'error', 'profile_not_found'); end if;
 
   v_chat_active := p.chat_banned_until is not null and p.chat_banned_until > now();

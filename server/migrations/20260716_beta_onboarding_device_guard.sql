@@ -81,12 +81,13 @@ begin
     if v_existing.user_id <> v_uid or v_existing.device_hash <> p_device_hash then
       return jsonb_build_object('ok', false, 'error', 'device_registered');
     end if;
-    select chips, diamonds into v_chips, v_diamonds from public.profiles where id = v_uid;
+    select chips, diamonds into v_chips, v_diamonds
+      from public.profiles where id::text = v_uid::text;
     return jsonb_build_object('ok', true, 'granted', false,
       'chips', coalesce(v_chips, 0), 'diamonds', coalesce(v_diamonds, 0));
   end if;
 
-  if not exists (select 1 from public.profiles where id = v_uid) then
+  if not exists (select 1 from public.profiles where id::text = v_uid::text) then
     return jsonb_build_object('ok', false, 'error', 'profile_missing');
   end if;
 
@@ -96,7 +97,7 @@ begin
   update public.profiles
   set chips = greatest(coalesce(chips, 0), 50000),
       diamonds = greatest(coalesce(diamonds, 0), 500)
-  where id = v_uid
+  where id::text = v_uid::text
   returning chips, diamonds into v_chips, v_diamonds;
 
   return jsonb_build_object('ok', true, 'granted', true,

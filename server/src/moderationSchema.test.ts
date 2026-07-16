@@ -7,7 +7,7 @@ const sql = readFileSync(resolve(__dirname, '../migrations/20260716_realtime_mod
 describe('realtime moderation contract', () => {
   it('returns only the authenticated caller state', () => {
     expect(sql).toMatch(/v_uid uuid := auth\.uid\(\)/i);
-    expect(sql).toMatch(/where id = v_uid/i);
+    expect(sql).toMatch(/where id::text = v_uid::text/i);
     expect(sql).toMatch(/grant execute[\s\S]*to authenticated/i);
   });
   it('does not turn an expired typed game ban into a permanent legacy ban', () => {
