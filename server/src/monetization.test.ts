@@ -7,11 +7,11 @@ describe('monetization parser', () => {
       Store: 'GooglePlay', TransactionID: 'GPA.123',
       Payload: JSON.stringify({ json: JSON.stringify({
         orderId: 'GPA.123', packageName: 'com.elli.bir',
-        productId: 'onlinekahvem.diamond.10', purchaseToken: 'token-1',
+        productId: 'onlinekahvem.diamond.100', purchaseToken: 'token-1',
       }), signature: 'sig' }),
     });
     const receipt = _test.parseUnifiedReceipt(raw);
-    expect(receipt.productId).toBe('onlinekahvem.diamond.10');
+    expect(receipt.productId).toBe('onlinekahvem.diamond.100');
     expect(receipt.purchaseToken).toBe('token-1');
     expect(receipt.packageName).toBe('com.elli.bir');
   });
@@ -21,8 +21,8 @@ describe('monetization parser', () => {
   });
 
   it('binds a subscription token to the exact Google Play product', () => {
-    const store = { lineItems: [{ productId: 'onlinekahvem.vip.1month' }] };
-    expect(_test.storeMatchesProduct(store, 'onlinekahvem.vip.1month', 'subscription')).toBe(true);
+    const store = { lineItems: [{ productId: 'onlinekahvem.vip.6month' }] };
+    expect(_test.storeMatchesProduct(store, 'onlinekahvem.vip.6month', 'subscription')).toBe(true);
     expect(_test.storeMatchesProduct(store, 'onlinekahvem.vip.12month', 'subscription')).toBe(false);
     expect(_test.storeMatchesProduct({}, 'onlinekahvem.vip.1month', 'subscription')).toBe(false);
   });

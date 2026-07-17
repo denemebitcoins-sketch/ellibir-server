@@ -106,12 +106,19 @@ async function googleAccessToken(): Promise<string> {
   return json.access_token;
 }
 
-const PRODUCTS: Record<string, { type: 'consumable' | 'subscription'; diamonds?: number; vipMonths?: number }> = {
-  'onlinekahvem.diamond.10': { type: 'consumable', diamonds: 10 },
-  'onlinekahvem.diamond.50': { type: 'consumable', diamonds: 50 },
-  'onlinekahvem.diamond.150': { type: 'consumable', diamonds: 150 },
+const PRODUCTS: Record<string, { type: 'consumable' | 'subscription'; chips?: number; diamonds?: number; vipMonths?: number }> = {
+  'onlinekahvem.chips.100k': { type: 'consumable', chips: 100_000 },
+  'onlinekahvem.chips.250k': { type: 'consumable', chips: 250_000 },
+  'onlinekahvem.chips.600k': { type: 'consumable', chips: 600_000 },
+  'onlinekahvem.chips.1500k': { type: 'consumable', chips: 1_500_000 },
+  'onlinekahvem.chips.4000k': { type: 'consumable', chips: 4_000_000 },
+  'onlinekahvem.diamond.100': { type: 'consumable', diamonds: 100 },
+  'onlinekahvem.diamond.300': { type: 'consumable', diamonds: 300 },
+  'onlinekahvem.diamond.750': { type: 'consumable', diamonds: 750 },
+  'onlinekahvem.diamond.1750': { type: 'consumable', diamonds: 1750 },
+  'onlinekahvem.diamond.4000': { type: 'consumable', diamonds: 4000 },
   'onlinekahvem.vip.1month': { type: 'subscription', vipMonths: 1 },
-  'onlinekahvem.vip.3month': { type: 'subscription', vipMonths: 3 },
+  'onlinekahvem.vip.6month': { type: 'subscription', vipMonths: 6 },
   'onlinekahvem.vip.12month': { type: 'subscription', vipMonths: 12 },
 };
 

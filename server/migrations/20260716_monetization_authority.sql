@@ -250,7 +250,7 @@ begin
     when 'onlinekahvem.diamond.50' then v_diamonds := 50;
     when 'onlinekahvem.diamond.150' then v_diamonds := 150;
     when 'onlinekahvem.vip.1month' then v_months := 1;
-    when 'onlinekahvem.vip.3month' then v_months := 3;
+    when 'onlinekahvem.vip.6month' then v_months := 6;
     when 'onlinekahvem.vip.12month' then v_months := 12;
     else
       update public.play_purchase_receipts set state = 'rejected' where purchase_token = p_purchase_token;
