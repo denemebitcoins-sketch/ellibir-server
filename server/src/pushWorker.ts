@@ -47,7 +47,7 @@ async function firebaseAccessToken(): Promise<string> {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth2:grant-type:jwt-bearer', assertion }),
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`firebase_oauth_${response.status}`);

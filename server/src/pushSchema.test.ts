@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 const sql = readFileSync(resolve(__dirname, '../migrations/20260716_push_notifications.sql'), 'utf8');
+const worker = readFileSync(resolve(__dirname, './pushWorker.ts'), 'utf8');
 
 describe('push notification schema', () => {
   it('keeps device tokens private and registration authenticated', () => {
@@ -22,5 +23,10 @@ describe('push notification schema', () => {
     expect(sql).toContain("current_user not in ('service_role', 'postgres')");
     expect(sql).toContain('grant execute on function public.claim_push_outbox(integer) to service_role');
     expect(sql).toContain('grant execute on function public.enqueue_system_push(text, text, jsonb) to service_role');
+  });
+
+  it('uses the RFC 7523 JWT bearer grant for Firebase OAuth', () => {
+    expect(worker).toContain('urn:ietf:params:oauth:grant-type:jwt-bearer');
+    expect(worker).not.toContain('urn:ietf:params:oauth2:grant-type:jwt-bearer');
   });
 });
