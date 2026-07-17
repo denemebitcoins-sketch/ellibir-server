@@ -32,7 +32,7 @@ app.post('/auth/email/send-code', async (req, res) => {
   } catch (error: any) {
     const message = String(error?.message || 'email_code_failed');
     const status = message === 'auth_required' ? 401
-      : message === 'email_provider_not_configured' || message === 'server_not_configured' ? 503
+      : message === 'email_provider_not_configured' || message === 'server_not_configured' || message === 'email_send_timeout' ? 503
       : message === 'email_not_found' ? 404
       : 400;
     res.status(status).json({ ok: false, error: message });
@@ -44,7 +44,7 @@ app.post('/auth/email/verify-code', async (req, res) => {
   } catch (error: any) {
     const message = String(error?.message || 'email_verify_failed');
     const status = message === 'auth_required' ? 401
-      : message === 'email_provider_not_configured' || message === 'server_not_configured' ? 503
+      : message === 'email_provider_not_configured' || message === 'server_not_configured' || message === 'email_send_timeout' ? 503
       : 400;
     res.status(status).json({ ok: false, error: message });
   }

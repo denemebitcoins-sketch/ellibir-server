@@ -9,6 +9,7 @@ const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 const OTP_SECRET = process.env.EMAIL_OTP_SECRET || SERVICE || 'online-kahvem-local-email-secret';
 const FROM = process.env.EMAIL_FROM || 'Online Kahvem <noreply@onlinekahvem.app>';
 const TTL_MINUTES = Math.max(3, Math.min(30, Number(process.env.EMAIL_OTP_TTL_MINUTES || 10)));
+const MAIL_TIMEOUT_MS = Math.max(3_000, Math.min(20_000, Number(process.env.EMAIL_SEND_TIMEOUT_MS || 8_000)));
 
 type Mode = 'link' | 'login';
 
@@ -105,8 +106,22 @@ async function sendMail(email: string, code: string, mode: Mode): Promise<void> 
   if (!host || !user || !pass) throw new Error('email_provider_not_configured');
   const port = Number(process.env.SMTP_PORT || 587);
   const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465;
-  const transporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
-  await transporter.sendMail({ from: FROM, to: email, subject, html: htmlMail(code, mode), text: textMail(code, mode) });
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+    connectionTimeout: MAIL_TIMEOUT_MS,
+    greetingTimeout: MAIL_TIMEOUT_MS,
+    socketTimeout: MAIL_TIMEOUT_MS,
+  });
+  try {
+    await transporter.sendMail({ from: FROM, to: email, subject, html: htmlMail(code, mode), text: textMail(code, mode) });
+  } catch (error: any) {
+    const msg = String(error?.message || error || '');
+    if (/timeout|timed out|greeting never received|etimedout|esocket/i.test(msg)) throw new Error('email_send_timeout');
+    throw error;
+  }
 }
 
 async function generateLoginCode(email: string): Promise<string> {
