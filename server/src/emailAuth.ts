@@ -111,10 +111,11 @@ async function sendMail(email: string, code: string, mode: Mode): Promise<void> 
     port,
     secure,
     auth: { user, pass },
+    family: 4,
     connectionTimeout: MAIL_TIMEOUT_MS,
     greetingTimeout: MAIL_TIMEOUT_MS,
     socketTimeout: MAIL_TIMEOUT_MS,
-  });
+  } as any);
   try {
     await transporter.sendMail({ from: FROM, to: email, subject, html: htmlMail(code, mode), text: textMail(code, mode) });
   } catch (error: any) {
