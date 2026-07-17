@@ -12,6 +12,7 @@ import { OkeyRoom } from './rooms/OkeyRoom';
 import { TavlaRoom } from './rooms/TavlaRoom';
 import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
 import { startPushWorker } from './pushWorker';
+import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth';
 
 const port = Number(process.env.PORT) || 2567;
 
@@ -24,6 +25,30 @@ app.get('/health', (_req, res) => res.json({
   okey101Deal: true,
   commit: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local',
 }));
+app.get('/auth/email/status', (_req, res) => res.json(emailAuthStatus()));
+app.post('/auth/email/send-code', async (req, res) => {
+  try {
+    res.json(await requestEmailCode(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'email_code_failed');
+    const status = message === 'auth_required' ? 401
+      : message === 'email_provider_not_configured' || message === 'server_not_configured' ? 503
+      : message === 'email_not_found' ? 404
+      : 400;
+    res.status(status).json({ ok: false, error: message });
+  }
+});
+app.post('/auth/email/verify-code', async (req, res) => {
+  try {
+    res.json(await verifyEmailCode(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'email_verify_failed');
+    const status = message === 'auth_required' ? 401
+      : message === 'email_provider_not_configured' || message === 'server_not_configured' ? 503
+      : 400;
+    res.status(status).json({ ok: false, error: message });
+  }
+});
 app.get('/monetization/admob/ssv', async (req, res) => {
   try {
     await handleAdMobSsv(req);
