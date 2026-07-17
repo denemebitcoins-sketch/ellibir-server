@@ -3,7 +3,7 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
@@ -48,6 +48,7 @@ export class EllibirRoom extends Room {
   private seatNames = new Map<number, string>(); // koltuk → görünen ad (her oyuncu kendi adını yollar)
   private bet = 0;                             // masa bahsi (maç sonu settle için)
   private settled = false;                     // çift settle koruması
+  private entryCanakCharged = false;           // komisyon/çanak payı maç başında işlendi
   private settlePromise: Promise<void> | null = null;
   private rematchVotes = new Set<number>();    // maç sonu TEKRAR OYNA diyen insan koltukları
   private rematchStarting = false;             // çift ücret/yeni-maç başlangıcı koruması
@@ -363,13 +364,12 @@ export class EllibirRoom extends Room {
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
       const entryUsers = new Map(this.seatUsers);
-      const entry = await deductEntry(entryUsers, this.bet);
+      const rules: any = this.cfg?.rules ?? {};
+      const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
+      const entry = await deductEntry(entryUsers, this.bet, '51', entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-      if (this.seats.size < this.humanSeats.length) {
-        await refundEntry(entryUsers, this.bet, 'seat_left_before_start');
-        this.pushViews();
-        return;
-      }
+      this.entryCanakCharged = true;
+      this.refreshCanak();
       this.game = createGame(this.cfg);
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players.find((pl: any) => pl.seat === seat);
@@ -671,7 +671,8 @@ export class EllibirRoom extends Room {
         teamMode: !!r.teamMode,
         scores: new Map(this.game.players.map((p: any) => [p.seat, p.totalScore])), // kademeli sıralama için
         game: '51', // çanak hedefi
-      }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
+        entryHousePaid: this.entryCanakCharged,
+      }).then(() => this.refreshCanak()) // maç sonu sonrası masa içi çanak göstergesi tazelensin
         .catch((e) => console.error('[settle] hata:', e?.message));
     }
   }
@@ -799,14 +800,12 @@ export class EllibirRoom extends Room {
     this.rematchVotes.clear();
     if (this.seats.size < this.humanSeats.length) { this.game = null; this.pushViews(); return; }
     const entryUsers = new Map(this.seatUsers);
-    const entry = await deductEntry(entryUsers, this.bet);
+    const rules: any = this.cfg?.rules ?? {};
+    const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
+    const entry = await deductEntry(entryUsers, this.bet, '51', entryHouse);
     if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-    if (this.seats.size < this.humanSeats.length) {
-      await refundEntry(entryUsers, this.bet, 'seat_left_before_new_match');
-      this.game = null;
-      this.pushViews();
-      return;
-    }
+    this.entryCanakCharged = true;
+    this.refreshCanak();
     this.game = createGame({ ...this.cfg, seed: Math.floor(Math.random() * 1_000_000_000) });
     for (const [seat, name] of this.seatNames) {
       const p = this.game.players.find((pl: any) => pl.seat === seat);

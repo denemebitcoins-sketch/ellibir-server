@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planYuzbirSoloPayout } from './supabase';
+import { entryCanakShare, entryHouseAmount, planYuzbirSoloPayout } from './supabase';
 
 const scoresOf = (rows: Array<[number, number]>) => new Map<number, number>(rows);
 
@@ -71,5 +71,25 @@ describe('101 Okey tekli payout planı', () => {
     expect(plan.payouts.get(2)).toBe(975);
     expect(plan.payouts.has(1)).toBe(false);
     expect(plan.winners.has(0)).toBe(true);
+  });
+});
+
+describe('giriş komisyonu ve çanak payı', () => {
+  it('tavlada komisyon iki koltuk bahsinin yüzde onu üzerinden alınır', () => {
+    const house = entryHouseAmount({ bet: 2500, totalSeats: 2, teamMode: false, realSeats: 2 });
+    expect(house).toBe(500);
+    expect(entryCanakShare(house)).toBe(250);
+  });
+
+  it('101 tekli/kademeli modelde komisyon tek bahis yüzde onu ile sınırlıdır', () => {
+    const house = entryHouseAmount({ bet: 1000, totalSeats: 4, teamMode: false, gameVariant: 'yuzbir', realSeats: 4 });
+    expect(house).toBe(100);
+    expect(entryCanakShare(house)).toBe(50);
+  });
+
+  it('eşli masalarda komisyon tüm koltuk bahsi üzerinden hesaplanır', () => {
+    const house = entryHouseAmount({ bet: 1000, totalSeats: 4, teamMode: true, realSeats: 4 });
+    expect(house).toBe(400);
+    expect(entryCanakShare(house)).toBe(200);
   });
 });

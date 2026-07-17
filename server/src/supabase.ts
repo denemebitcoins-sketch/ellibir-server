@@ -280,7 +280,33 @@ export async function rpcService(fn: string, args: Record<string, unknown>): Pro
  *  Kaçan/düşen zaten ödemiş olur; settle yalnız ödeme yapar. */
 export type EntryDeductResult = { ok: true; failedSeats: [] } | { ok: false; failedSeats: number[] };
 
-export async function deductEntry(seatUsers: Map<number, string>, bet: number): Promise<EntryDeductResult> {
+export function entryHouseAmount(opts: {
+  bet: number;
+  totalSeats?: number;
+  teamMode?: boolean;
+  gameVariant?: string;
+  realSeats?: number;
+}): number {
+  const bet = Math.max(0, Math.floor(opts.bet));
+  if (bet <= 0) return 0;
+  const totalSeats = Math.max(1, opts.totalSeats ?? 4);
+  const variant = String(opts.gameVariant ?? '').trim().toLowerCase();
+  if (!opts.teamMode && (variant === 'yuzbir' || opts.realSeats === 4)) {
+    return Math.min(totalSeats * bet, Math.floor(bet * 0.1));
+  }
+  return Math.floor(totalSeats * bet * 0.1);
+}
+
+export function entryCanakShare(houseAmount: number): number {
+  return Math.floor(Math.max(0, Math.floor(houseAmount)) * 0.5);
+}
+
+export async function deductEntry(
+  seatUsers: Map<number, string>,
+  bet: number,
+  canakGame?: string,
+  houseAmount = 0,
+): Promise<EntryDeductResult> {
   if (!supabaseConfigured() || bet <= 0) return { ok: true, failedSeats: [] };
   const charged: Array<[number, string]> = [];
   const failedSeats: number[] = [];
@@ -299,6 +325,19 @@ export async function deductEntry(seatUsers: Map<number, string>, bet: number): 
     }
     console.error(`[entry] bahis kesilemedi; maç başlatılmadı. failedSeats=${failedSeats.join(',')}`);
     return { ok: false, failedSeats };
+  }
+  const canakAmount = canakGame ? entryCanakShare(houseAmount) : 0;
+  if (canakGame && canakAmount > 0) {
+    const total = await canakAdd(canakGame, canakAmount);
+    if (total == null) {
+      for (const [, uid] of charged) {
+        const refunded = await rpc('add_chips', { p_user_id: uid, p_amount: bet });
+        if (!refunded) console.error(`[entry] çanak hatası sonrası iade başarısız uid=${uid} amount=${bet}`);
+      }
+      console.error(`[entry] çanak payı eklenemedi; maç başlatılmadı. game=${canakGame} amount=${canakAmount}`);
+      return { ok: false, failedSeats: [...seatUsers.keys()] };
+    }
+    console.log(`[entry] canak payı eklendi game=${canakGame} amount=${canakAmount} total=${total}`);
   }
   console.log(`[entry] PESIN bahis kesildi: ${seatUsers.size} oyuncu × ${bet}`);
   return { ok: true, failedSeats: [] };
@@ -522,6 +561,7 @@ export async function settleMatch(opts: {
   game?: string;                // çanak hedefi: '51' | 'okey' | 'tavla' (komisyonun %50'si birikir)
   gameVariant?: string;          // okey: 'duz' | 'banko' | 'yuzbir'
   openedSeats?: Iterable<number>; // legacy: eski final-el açan filtresi; 101 payout artık toplam maç sıralamasını esas alır
+  entryHousePaid?: boolean;       // komisyon/çanak payı maç başında işlendi; settle tekrar eklemesin
 }): Promise<void> {
   const { seatUsers, winnerSeat, bet, teamMode, scores } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
@@ -543,7 +583,7 @@ export async function settleMatch(opts: {
         p_winnings: Math.max(0, amount - bet),
       });
     }
-    if (opts.game) await canakAdd(opts.game, Math.floor(plan.house * 0.5));
+    if (opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(plan.house));
     console.log(`[settle] 101 TEKLI E=${bet} toplamSira=${plan.eligibleSeats.join(',')} payouts=${[...plan.payouts.entries()].map(([s, a]) => `${s}:${a}`).join(',')}`);
     return;
   }
@@ -566,7 +606,7 @@ export async function settleMatch(opts: {
     await rpc('record_match_stats', { p_user_id: first,  p_won: true,  p_winnings: Math.round(2.2 * E) });
     for (const uid of [second, third, fourth]) await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
     // ÇANAK: ev payının (0.1E) yarısı çanağa, yarısı yanar (ECONOMY §4 CanakPct=%50).
-    if (opts.game) await canakAdd(opts.game, Math.floor(0.1 * E * 0.5));
+    if (opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(Math.floor(0.1 * E)));
     console.log(`[settle] tekli KADEMELİ 4-kisi E=${E} sira=${ranked.map((r) => r[0])}`);
     return;
   }
@@ -591,7 +631,7 @@ export async function settleMatch(opts: {
   for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: perWinner });
 
   // ÇANAK: komisyonun %50'si ilgili oyunun çanağına birikir (kalan %50 yakılır — ECONOMY §4).
-  if (opts.game) await canakAdd(opts.game, Math.floor((pot - prizePool) * 0.5));
+  if (opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(pot - prizePool));
 
   // İSTATİSTİK: oynanan maç (matches) HER gerçek oyuncuda +1; galibiyet (wins) yalnız
   // kazananlarda +1. Ayrıca kazanan serisi (cur_streak/best_streak) ve toplam kazanç

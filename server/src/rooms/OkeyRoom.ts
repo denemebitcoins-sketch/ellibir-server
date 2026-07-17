@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
@@ -71,6 +71,7 @@ export class OkeyRoom extends Room {
   private readonly TURN_GRACE_MS = 6000;
   private bet = 0;
   private settled = false;
+  private entryCanakCharged = false;
   private settlePromise: Promise<void> | null = null;
   private cfg: any = null;
   private rematchVotes = new Set<number>();
@@ -356,13 +357,17 @@ export class OkeyRoom extends Room {
       this.startTimer = null;
       if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; }
       const entryUsers = new Map(this.seatUsers);
-      const entry = await deductEntry(entryUsers, this.bet);
+      const entryHouse = entryHouseAmount({
+        bet: this.bet,
+        totalSeats: 4,
+        teamMode: !!this.cfg?.rules?.teamMode,
+        gameVariant: this.cfg?.rules?.variant,
+        realSeats: entryUsers.size,
+      });
+      const entry = await deductEntry(entryUsers, this.bet, 'okey', entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-      if (this.seats.size < this.humanSeats.length) {
-        await refundEntry(entryUsers, this.bet, 'seat_left_before_start');
-        this.pushViews();
-        return;
-      }
+      this.entryCanakCharged = true;
+      this.refreshCanak();
       const banko = this.cfg?.rules?.variant === 'banko';
       this.game = createOkeyGame({ ...this.cfg, dealFirst: !banko });
       for (const [seat, name] of this.seatNames) {
@@ -712,7 +717,8 @@ export class OkeyRoom extends Room {
       gameVariant: this.game.rules.variant,
       openedSeats,
       game: 'okey', // çanak hedefi (düz + banko ortak çanak)
-    }).then(() => this.refreshCanak()) // settle çanağa ekledi → masa içi gösterge canlansın
+      entryHousePaid: this.entryCanakCharged,
+    }).then(() => this.refreshCanak()) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
   }
 
@@ -754,14 +760,17 @@ export class OkeyRoom extends Room {
     }
 
     const entryUsers = new Map(this.seatUsers);
-    const entry = await deductEntry(entryUsers, this.bet);
+    const entryHouse = entryHouseAmount({
+      bet: this.bet,
+      totalSeats: 4,
+      teamMode: !!this.cfg?.rules?.teamMode,
+      gameVariant: this.cfg?.rules?.variant,
+      realSeats: entryUsers.size,
+    });
+    const entry = await deductEntry(entryUsers, this.bet, 'okey', entryHouse);
     if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-    if (this.seats.size < this.humanSeats.length) {
-      await refundEntry(entryUsers, this.bet, 'seat_left_before_rematch');
-      this.game = null;
-      this.pushViews();
-      return;
-    }
+    this.entryCanakCharged = true;
+    this.refreshCanak();
 
     const banko = this.cfg?.rules?.variant === 'banko';
     this.game = createOkeyGame({ ...this.cfg, seed: Math.floor(Math.random() * 1_000_000_000), dealFirst: !banko });

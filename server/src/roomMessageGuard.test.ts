@@ -70,4 +70,21 @@ describe('room message abuse guard', () => {
     expect(src).toContain("if (this.game?.phase === 'matchEnded') void this.maybeStartRematch();");
     expect(src).not.toContain('setTimeout(() => this.newMatch()');
   });
+
+  it('charges entry commission into canak at game start, then skips duplicate settlement canak', () => {
+    const contracts = [
+      ['TavlaRoom.ts', "'tavla'"],
+      ['OkeyRoom.ts', "'okey'"],
+      ['EllibirRoom.ts', "'51'"],
+    ] as const;
+
+    for (const [name, game] of contracts) {
+      const src = readFileSync(path.resolve(repoRoot, 'server/src/rooms', name), 'utf8');
+      expect(src).toContain('private entryCanakCharged = false');
+      expect(src).toContain('entryHouseAmount({');
+      expect(src).toContain(`deductEntry(entryUsers, this.bet, ${game}, entryHouse)`);
+      expect(src).toContain('this.entryCanakCharged = true;');
+      expect(src).toContain('entryHousePaid: this.entryCanakCharged');
+    }
+  });
 });
