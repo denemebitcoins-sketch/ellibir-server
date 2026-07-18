@@ -1,4 +1,5 @@
 import { createHmac, randomInt, timingSafeEqual } from 'crypto';
+import dns from 'dns';
 import type { Request } from 'express';
 import nodemailer from 'nodemailer';
 import { verifyToken } from './supabase';
@@ -112,6 +113,9 @@ async function sendMail(email: string, code: string, mode: Mode): Promise<void> 
     secure,
     auth: { user, pass },
     family: 4,
+    lookup: (hostname: string, _options: unknown, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => {
+      dns.lookup(hostname, { family: 4 }, callback);
+    },
     connectionTimeout: MAIL_TIMEOUT_MS,
     greetingTimeout: MAIL_TIMEOUT_MS,
     socketTimeout: MAIL_TIMEOUT_MS,
