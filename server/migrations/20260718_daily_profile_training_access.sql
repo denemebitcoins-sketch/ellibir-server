@@ -4,9 +4,17 @@
 begin;
 
 -- Daily rewards are visible during beta; claiming must also be open.
-insert into public.app_feature_flags(key, enabled)
+create table if not exists public.app_features (
+  key text primary key,
+  enabled boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.app_features(key, enabled)
 values ('daily', true)
-on conflict (key) do update set enabled = excluded.enabled;
+on conflict (key) do update
+   set enabled = excluded.enabled,
+       updated_at = now();
 
 -- Profile social access:
 -- - self and admin can always view
