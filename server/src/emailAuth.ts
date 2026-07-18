@@ -107,8 +107,9 @@ async function sendMail(email: string, code: string, mode: Mode): Promise<void> 
   if (!host || !user || !pass) throw new Error('email_provider_not_configured');
   const port = Number(process.env.SMTP_PORT || 587);
   const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465;
+  const resolved = await dns.promises.lookup(host, { family: 4 });
   const transporter = nodemailer.createTransport({
-    host,
+    host: resolved.address,
     port,
     secure,
     auth: { user, pass },
@@ -116,6 +117,7 @@ async function sendMail(email: string, code: string, mode: Mode): Promise<void> 
     lookup: (hostname: string, _options: unknown, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => {
       dns.lookup(hostname, { family: 4 }, callback);
     },
+    tls: { servername: host },
     connectionTimeout: MAIL_TIMEOUT_MS,
     greetingTimeout: MAIL_TIMEOUT_MS,
     socketTimeout: MAIL_TIMEOUT_MS,
