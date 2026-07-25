@@ -635,6 +635,8 @@ export class EllibirRoom extends Room {
     const handNo = Number(this.game.handNumber ?? 0);
     if (this.canakHand === handNo) return;
     this.canakHand = handNo;
+    // Ücretsiz/antrenman masası (bahis 0) çanağı PATLATAMAZ — sürpriz ekonomi sızıntısı olmaz.
+    if (this.bet <= 0) { this.refreshCanak(); return; }
     const w = hr.winnerSeat;
     const uid = w != null && w >= 0 ? this.seatUsers.get(w) : undefined;
     const p = ellibirCanakChance(Boolean(hr.okeyFinish), Boolean(hr.pairFinish));

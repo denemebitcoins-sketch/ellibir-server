@@ -547,6 +547,8 @@ export class OkeyRoom extends Room {
   private maybeCanak() {
     if (!this.game || this.canakEl === this.game.elNumber) return;
     this.canakEl = this.game.elNumber;
+    // Ücretsiz/antrenman masası (bahis 0) çanağı PATLATAMAZ — sürpriz ekonomi sızıntısı olmaz.
+    if (this.bet <= 0) { this.refreshCanak(); return; }
     const w = this.game.elWinner ?? -1;
     const fk = this.game.finishKind;
     const p = okeyCanakChance(fk);

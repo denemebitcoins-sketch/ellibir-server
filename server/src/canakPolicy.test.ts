@@ -30,3 +30,18 @@ describe('canak olasilik politikasi', () => {
     expect(tavlaCanakChance(true)).toBe(0.005);
   });
 });
+
+// Ücretsiz/antrenman masası (bahis 0) çanağı patlatamaz — üç oda da maybeCanak başında
+// bet<=0 koruması taşır (kaynak-kontrolü; ekonomi sızıntısı regresyonu).
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+describe('ucretsiz masa canak korumasi', () => {
+  const rooms = ['EllibirRoom', 'OkeyRoom', 'TavlaRoom'];
+  for (const room of rooms) {
+    it(room + ': bahis 0 ise canak patlamaz', () => {
+      const src = readFileSync(join(__dirname, 'rooms', room + '.ts'), 'utf8');
+      expect(src).toContain('if (this.bet <= 0) { this.refreshCanak(); return; }');
+    });
+  }
+});

@@ -483,6 +483,8 @@ export class TavlaRoom extends Room {
   private maybeCanak() {
     if (!this.game || this.canakGame === this.game.gameNumber) return;
     this.canakGame = this.game.gameNumber;
+    // Ücretsiz/antrenman masası (bahis 0) çanağı PATLATAMAZ — sürpriz ekonomi sızıntısı olmaz.
+    if (this.bet <= 0) { this.refreshCanak(); return; }
     const w = this.game.gameWinner;
     const uid = w >= 0 ? this.seatUsers.get(w) : undefined;
     const p = tavlaCanakChance(this.game.mars);
