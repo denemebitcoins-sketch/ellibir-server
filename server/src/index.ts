@@ -93,4 +93,19 @@ try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
 
 gameServer.listen(port);
 startPushWorker();
+
+// GÜNLÜK ÖDÜL HATIRLATMASI: her gün 19:00'da (yerel) ödülünü almamış + push cihazı açık
+// kullanıcılara bildirim kuyrukla. SQL: migrations/20260726_game_interest_and_daily_reminders.sql
+import { rpcService } from './supabase';
+let lastDailyReminderDay = '';
+setInterval(() => {
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  if (now.getHours() !== 19 || day === lastDailyReminderDay) return;
+  lastDailyReminderDay = day;
+  rpcService('enqueue_daily_reminders', {})
+    .then((n) => console.log('[daily-reminder] kuyruklandı:', n))
+    .catch((e: any) => console.error('[daily-reminder]', e?.message || e));
+}, 10 * 60 * 1000).unref?.();
+
 console.log(`[Elli Bir] Colyseus dinleniyor: ws://localhost:${port} (seatRes=60s)`);
