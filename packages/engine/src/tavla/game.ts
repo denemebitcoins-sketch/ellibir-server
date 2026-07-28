@@ -2,8 +2,8 @@ import { createRng } from '../deck';
 
 /**
  * TAVLA motoru (Türk tavlası) — saf TS, deterministik (seed + atış sayacı), JSON-serileşebilir.
- * Kurallar: 15 pul, standart diziliş; TEK zarla başlama atışı (büyük atan başlar, kendi çift
- * zarını yeniden atar); çift zar 4 hamle; KAPI (2+ rakip pulu) geçilmez; tek pul KIRILIR (bar'a);
+ * Kurallar: 15 pul, standart diziliş; başlama atışı YALNIZ maçın 1. oyununda (büyük atan başlar,
+ * kendi çift zarını yeniden atar); sonraki oyunlara ÖNCEKİ OYUNUN GALİBİ başlar; çift zar 4 hamle; KAPI (2+ rakip pulu) geçilmez; tek pul KIRILIR (bar'a);
  * kırık rakip evinden girer; tüm pullar evdeyse TOPLAMA (tam sayı; daha büyük zarla en geriden);
  * oyunu ilk toplayan kazanır — rakip HİÇ toplayamadıysa MARS (2 puan), yoksa 1 puan;
  * KATLAMA KÜPÜ (mobil standart): sıra sende + zar atmadan önce, küp ortada/sende ise ×2 teklif;
@@ -48,6 +48,7 @@ export interface TavlaGameState {
   gameEnded: boolean;
   matchEnded: boolean;
   gameWinner: number;        // -1 yok
+  lastGameWinner: number;    // önceki oyunun galibi (-1 yok) — sonraki oyunu O başlatır
   mars: boolean;             // son oyun mars mı bitti
   endReason: string;         // '' | 'normal' | 'drop' (katlamada çekildi) | 'resign' (teslim)
   matchScore: number[];      // [s0, s1]
@@ -93,7 +94,7 @@ export function createTavlaGame(opts: {
     players: [0, 1].map((s) => ({ seat: s, name: names[s] ?? `Oyuncu ${s + 1}`, isBot: bots.has(s) })),
     points: new Array(24).fill(0), bar: [0, 0], off: [0, 0],
     turn: 0, phase: 'roll', dice: [0, 0], movesLeft: [], openRoll: [0, 0],
-    gameEnded: false, matchEnded: false, gameWinner: -1, mars: false, endReason: '',
+    gameEnded: false, matchEnded: false, gameWinner: -1, lastGameWinner: -1, mars: false, endReason: '',
     matchScore: [0, 0], gameDeltas: [], matchLog: [],
     cubeValue: 1, cubeOwner: -1, pendingDouble: -1, pendingResign: -1,
     turnSnap: null,
@@ -120,13 +121,20 @@ export function startNextGame(st: TavlaGameState): void {
   st.cubeValue = 1; st.cubeOwner = -1; st.pendingDouble = -1; st.pendingResign = -1;
   st.turnSnap = null;
   st.turnHistory = [];
-  // Başlama atışı: eşitse yeniden.
-  let a = 0, b = 0;
-  do { a = nextDie(st); b = nextDie(st); } while (a === b);
-  st.openRoll = [a, b];
-  st.turn = a > b ? 0 : 1;
+  // Başlama atışı YALNIZ maçın ilk oyununda (eşitse yeniden). Sonraki oyunlara
+  // önceki oyunun galibi başlar (klasik tavla kuralı — kullanıcı isteği).
+  if (st.gameNumber === 1) {
+    let a = 0, b = 0;
+    do { a = nextDie(st); b = nextDie(st); } while (a === b);
+    st.openRoll = [a, b];
+    st.turn = a > b ? 0 : 1;
+    st.matchLog.push(`Oyun 1 — başlama atışı ${a}-${b}: ${st.players[st.turn]!.name} başlıyor`);
+  } else {
+    st.openRoll = [0, 0];
+    st.turn = st.lastGameWinner >= 0 ? st.lastGameWinner : 0;
+    st.matchLog.push(`Oyun ${st.gameNumber} — önceki oyunun galibi ${st.players[st.turn]!.name} başlıyor`);
+  }
   st.phase = 'roll'; // Türk usulü: başlayan KENDİ çift zarını yeniden atar
-  st.matchLog.push(`Oyun ${st.gameNumber} — başlama atışı ${a}-${b}: ${st.players[st.turn]!.name} başlıyor`);
 }
 
 const ownCount = (st: TavlaGameState, pl: number, i: number) =>
@@ -343,6 +351,7 @@ function endGameWin(st: TavlaGameState, seat: number, ptsOverride?: number, reas
   st.gameDeltas.push(delta);
   st.gameEnded = true;
   st.gameWinner = seat;
+  st.lastGameWinner = seat; // sonraki oyunu galip başlatır (başlama atışı yalnız 1. oyunda)
   st.mars = mars;
   st.endReason = reason;
   st.pendingDouble = -1;

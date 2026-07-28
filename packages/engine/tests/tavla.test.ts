@@ -51,6 +51,29 @@ describe('tavla kurulum', () => {
     startNextGame(st);
     expect(st.checkerLightSeat).toBe(lightSeat);
   });
+
+  it('başlama atışı yalnız 1. oyunda; sonraki oyunlara önceki galip başlar', () => {
+    const st = fresh(11);
+    // 1. oyun: başlama atışı var ve iki zar da 1-6 arası, farklı.
+    expect(st.gameNumber).toBe(1);
+    expect(st.openRoll[0]).toBeGreaterThanOrEqual(1);
+    expect(st.openRoll[0]).not.toBe(st.openRoll[1]);
+    expect(st.turn).toBe(st.openRoll[0]! > st.openRoll[1]! ? 0 : 1);
+    // Oyunu seat1 bitirmiş gibi kur → 2. oyuna seat1 başlamalı, atış YOK.
+    st.gameEnded = true;
+    st.lastGameWinner = 1;
+    startNextGame(st);
+    expect(st.gameNumber).toBe(2);
+    expect(st.openRoll).toEqual([0, 0]);
+    expect(st.turn).toBe(1);
+    expect(st.phase).toBe('roll');
+    // seat0 kazanırsa 3. oyuna seat0 başlar.
+    st.gameEnded = true;
+    st.lastGameWinner = 0;
+    startNextGame(st);
+    expect(st.turn).toBe(0);
+    expect(st.openRoll).toEqual([0, 0]);
+  });
 });
 
 describe('zar ve hamle', () => {
