@@ -52,7 +52,8 @@ declare
   v_third text;
 begin
   if p_uid is null or p_uid = '' then return; end if;
-  v_third := v_pool[(hashtext(p_uid || v_day::text) % array_length(v_pool, 1)) + 1];
+  -- hashtext NEGATİF dönebilir → mod negatif indeks üretir, abs şart (quest_id null hatası).
+  v_third := v_pool[(abs(hashtext(p_uid || v_day::text)) % array_length(v_pool, 1)) + 1];
 
   insert into public.daily_quest_progress (user_id, day, quest_id, target, reward)
   values
