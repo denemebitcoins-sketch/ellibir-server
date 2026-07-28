@@ -12,10 +12,9 @@ import { handCardPenalty } from './melds';
  * bitiş takım adınadır; diğer ödeyenler kendi tabanlarından hesaplanır.
  *
  * DESTE BİTTİ (winnerSeat=null) — bitiren yok, rakip okey/çift çarpanı YOK:
- *  - kimse taahhütte değilse (açan yok, çift yok) → puansız;
  *  - KESİN ÇİFT (isCift) → tabanı × CARPAN_YIYEN_CIFT; taban açmışsa elde kalan,
- *    açamamışsa KAFA_CEZASI (örn açık 31×2=62; kapalı 200×2=400);
- *  - açmış (çift değil) → elde kalan; taahhütsüz → STOCK_OUT_PENALTY.
+ *    açamamışsa kelle cezası (örn açık 31×2=62; kapalı 100×2=200);
+ *  - açmış (çift değil) → elde kalan; kapalı → kelle cezası (100/200).
  */
 export function computeHandResult(
   state: GameState,
