@@ -32,12 +32,15 @@ describe('tavla kurulum', () => {
     expect(st.points[18]).toBe(-5);
   });
 
-  it('başlama atışı: büyük atan başlar, eşitlik yok', () => {
+  it('başlama atışı: büyük atan İKİ zarı birden oynayarak başlar, eşitlik yok', () => {
     for (let s = 1; s < 30; s++) {
       const st = fresh(s);
       expect(st.openRoll[0]).not.toBe(st.openRoll[1]);
       expect(st.turn).toBe(st.openRoll[0]! > st.openRoll[1]! ? 0 : 1);
-      expect(st.phase).toBe('roll');
+      // Kazanan yeniden zar ATMAZ: açılış zarları onun ilk hamlesidir.
+      expect(st.phase).toBe('move');
+      expect(st.dice).toEqual([st.openRoll[0], st.openRoll[1]]);
+      expect(st.movesLeft).toEqual([st.openRoll[0], st.openRoll[1]]);
     }
   });
 
@@ -81,6 +84,8 @@ describe('zar ve hamle', () => {
     let sawDouble = false, sawPlain = false;
     for (let s = 1; s < 60 && !(sawDouble && sawPlain); s++) {
       const st = fresh(s);
+      // 1. oyun açılış zarlarıyla 'move' başlar → zar atabilmek için 2. oyuna geç.
+      st.gameEnded = true; st.lastGameWinner = 0; startNextGame(st);
       const r = applyTavlaMove(st, st.turn, { t: 'roll' });
       expect(r.ok).toBe(true);
       if (st.phase !== 'move') continue; // hamlesiz atış (açılışta olmaz ama güvenli)
@@ -156,6 +161,13 @@ function clearBoard(st: TavlaGameState) {
   st.points.fill(0); st.bar = [0, 0]; st.off = [0, 0];
 }
 
+/** 1. oyun artık açılış zarlarıyla 'move' başlar → zar/katlama testleri için 2. oyun (roll fazı). */
+function freshRoll(seed = 42) {
+  const st = fresh(seed);
+  st.gameEnded = true; st.lastGameWinner = 0; startNextGame(st);
+  return st;
+}
+
 describe('toplama (bear-off)', () => {
   it('tüm pullar evde değilse toplanamaz', () => {
     const st = fresh();
@@ -229,7 +241,7 @@ describe('bot ve simülasyon', () => {
 
 describe('katlama küpü + teslim', () => {
   it('küp yalnız sıra sende + zar atmadan teklif edilir; rakip kabulünde ×2 ve sahiplik geçer', () => {
-    const st = fresh(9);
+    const st = freshRoll(9);
     const t = st.turn, o = 1 - t;
     expect(applyTavlaMove(st, o, { t: 'double' }).ok).toBe(false); // sıra onda değil
     expect(applyTavlaMove(st, t, { t: 'double' }).ok).toBe(true);
@@ -245,7 +257,7 @@ describe('katlama küpü + teslim', () => {
   });
 
   it('katlama REDDİ teslim DEĞİL: oyun mevcut değerle sürer, küp reddedene geçer (kullanıcı kuralı)', () => {
-    const st = fresh(10);
+    const st = freshRoll(10);
     const t = st.turn, o = 1 - t;
     applyTavlaMove(st, t, { t: 'double' });
     expect(applyTavlaMove(st, o, { t: 'dropDouble' }).ok).toBe(true);
@@ -270,7 +282,7 @@ describe('katlama küpü + teslim', () => {
   });
 
   it('kabul edilen küple normal bitiş ×küp; MARS ile ×2×küp', () => {
-    const st = fresh(11);
+    const st = freshRoll(11);
     const t = st.turn, o = 1 - t;
     applyTavlaMove(st, t, { t: 'double' });
     applyTavlaMove(st, o, { t: 'takeDouble' });
@@ -297,7 +309,7 @@ describe('katlama küpü + teslim', () => {
   });
 
   it('teslim teklifi reddedilirse oyun aynı yerden devam eder', () => {
-    const st = fresh(13);
+    const st = freshRoll(13);
     const t = st.turn, o = 1 - t;
     expect(applyTavlaMove(st, t, { t: 'resign' }).ok).toBe(true);
     expect(applyTavlaMove(st, o, { t: 'roll' }).ok).toBe(false);
@@ -307,12 +319,14 @@ describe('katlama küpü + teslim', () => {
     expect(applyTavlaMove(st, t, { t: 'roll' }).ok).toBe(true);
   });
 
-  it('yeni oyunda küp sıfırlanır; autoTavlaMove bekleyen teklifi oto-kabul eder', () => {
-    const st = createTavlaGame({ seed: 13, rules: { targetScore: 5 } });
+  it('yeni oyunda küp sıfırlanır; autoTavlaMove bekleyen katlamayı RED sayar (kullanıcı kuralı)', () => {
+    const st = freshRoll(13);
     const t = st.turn, o = 1 - t;
     applyTavlaMove(st, t, { t: 'double' });
-    autoTavlaMove(st, o); // süre doldu senaryosu
-    expect(st.cubeValue).toBe(2);
+    autoTavlaMove(st, o); // süre doldu senaryosu → RED: değer katlanmaz, küp reddedene geçer
+    expect(st.cubeValue).toBe(1);
+    expect(st.cubeOwner).toBe(o);
+    expect(st.gameEnded).toBe(false);
     applyTavlaMove(st, o, { t: 'resign' });
     autoTavlaMove(st, t); // süre doldu senaryosu: teslim kabul
     expect(st.gameEnded).toBe(true);

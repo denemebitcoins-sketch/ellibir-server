@@ -594,13 +594,13 @@ export class TavlaRoom extends Room {
           this.afterChange();
         }, 1400);
       } else {
-        const ms = 20000 + this.TURN_GRACE_MS; // insan cevap penceresi
+        const ms = 10000 + this.TURN_GRACE_MS; // insan cevap penceresi: 10 sn (kullanıcı kuralı)
         this.turnDeadlineAt = Date.now() + ms;
         this.humanTimer = setTimeout(() => {
           this.humanTimer = null;
           if (!this.game || this.game.pendingDouble < 0) { this.afterChange(); return; }
-          autoTavlaMove(this.game, responder); // süre doldu → oto-KABUL
-          this.logEvent(`${this.nameOfSeat(responder)} süresi doldu — katlama kabul sayıldı`);
+          applyTavlaMove(this.game, responder, { t: 'dropDouble' }); // süre doldu → RED
+          this.logEvent(`${this.nameOfSeat(responder)} süresi doldu — katlama RED sayıldı`);
           this.afterChange();
         }, ms);
       }

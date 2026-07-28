@@ -2,8 +2,9 @@ import { createRng } from '../deck';
 
 /**
  * TAVLA motoru (Türk tavlası) — saf TS, deterministik (seed + atış sayacı), JSON-serileşebilir.
- * Kurallar: 15 pul, standart diziliş; başlama atışı YALNIZ maçın 1. oyununda (büyük atan başlar,
- * kendi çift zarını yeniden atar); sonraki oyunlara ÖNCEKİ OYUNUN GALİBİ başlar; çift zar 4 hamle; KAPI (2+ rakip pulu) geçilmez; tek pul KIRILIR (bar'a);
+ * Kurallar: 15 pul, standart diziliş; başlama atışı YALNIZ maçın 1. oyununda — büyük atan,
+ * atılan İKİ zarı ilk hamlesi olarak oynar (yeniden atmaz); sonraki oyunlara ÖNCEKİ OYUNUN
+ * GALİBİ başlar (kendi zarını atar); çift zar 4 hamle; KAPI (2+ rakip pulu) geçilmez; tek pul KIRILIR (bar'a);
  * kırık rakip evinden girer; tüm pullar evdeyse TOPLAMA (tam sayı; daha büyük zarla en geriden);
  * oyunu ilk toplayan kazanır — rakip HİÇ toplayamadıysa MARS (2 puan), yoksa 1 puan;
  * KATLAMA KÜPÜ (mobil standart): sıra sende + zar atmadan önce, küp ortada/sende ise ×2 teklif;
@@ -121,20 +122,24 @@ export function startNextGame(st: TavlaGameState): void {
   st.cubeValue = 1; st.cubeOwner = -1; st.pendingDouble = -1; st.pendingResign = -1;
   st.turnSnap = null;
   st.turnHistory = [];
-  // Başlama atışı YALNIZ maçın ilk oyununda (eşitse yeniden). Sonraki oyunlara
-  // önceki oyunun galibi başlar (klasik tavla kuralı — kullanıcı isteği).
+  // Başlama atışı YALNIZ maçın ilk oyununda (eşitse yeniden). Büyük atan, atılan
+  // İKİ zarı birden ilk hamlesi olarak oynar (yeniden zar ATMAZ — standart tavla).
+  // Sonraki oyunlara önceki oyunun galibi başlar (kendi zarını atar).
   if (st.gameNumber === 1) {
     let a = 0, b = 0;
     do { a = nextDie(st); b = nextDie(st); } while (a === b);
     st.openRoll = [a, b];
     st.turn = a > b ? 0 : 1;
-    st.matchLog.push(`Oyun 1 — başlama atışı ${a}-${b}: ${st.players[st.turn]!.name} başlıyor`);
+    st.dice = [a, b];
+    st.movesLeft = [a, b];
+    st.phase = 'move';
+    st.matchLog.push(`Oyun 1 — başlama atışı ${a}-${b}: ${st.players[st.turn]!.name} ${a}-${b} oynayarak başlıyor`);
   } else {
     st.openRoll = [0, 0];
     st.turn = st.lastGameWinner >= 0 ? st.lastGameWinner : 0;
+    st.phase = 'roll';
     st.matchLog.push(`Oyun ${st.gameNumber} — önceki oyunun galibi ${st.players[st.turn]!.name} başlıyor`);
   }
-  st.phase = 'roll'; // Türk usulü: başlayan KENDİ çift zarını yeniden atar
 }
 
 const ownCount = (st: TavlaGameState, pl: number, i: number) =>
@@ -382,7 +387,7 @@ export function autoTavlaMove(st: TavlaGameState, seat: number): void {
   }
   if (st.pendingResign >= 0) return;
   if (st.pendingDouble >= 0 && st.pendingDouble !== seat) {
-    applyTavlaMove(st, seat, { t: 'takeDouble' }); // süre doldu → oto-kabul
+    applyTavlaMove(st, seat, { t: 'dropDouble' }); // süre doldu → RED (kullanıcı kuralı)
     return;
   }
   if (st.pendingDouble >= 0) return;
