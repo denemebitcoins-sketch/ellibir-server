@@ -276,6 +276,20 @@ export class OkeyRoom extends Room {
       }
     });
 
+    // MASA REAKSİYONU: {kind} — masadaki TÜM insanlara (+ gönderene echo) broadcast.
+    // State yok, kalıcılık yok: balon client'ta ~2.5sn yaşar. Türler client TableReactions ile birebir.
+    this.onMessage('reaction', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      if (!payloadWithinLimit(raw, 128) || !this.messageGuard.allow(client.sessionId, 'reaction', 1, 5000)) return;
+      let kind = typeof raw === 'string' ? raw : (raw?.kind ?? '');
+      kind = String(kind).slice(0, 16).trim();
+      if (!['clap', 'smile', 'wow', 'angry'].includes(kind)) return;
+      for (const c of this.clients) {
+        if (this.seats.get(c.sessionId) != null) c.send('reaction', { seat, kind });
+      }
+    });
+
     this.onMessage('sit', (client, raw) => {
       if (!payloadWithinLimit(raw, 2048) || !this.messageGuard.allow(client.sessionId, 'sit', 4, 5000)) return;
       let msg: any = raw;
