@@ -171,8 +171,8 @@ describe('çiftten bitme skorlaması', () => {
     const ended = applyMove(state, { type: 'discard', cardId: lastCard.id });
     expect(ended.phase === 'handEnded' || ended.phase === 'matchEnded').toBe(true);
     expect(ended.lastHandResult).toMatchObject({ winnerSeat: 0, pairFinish: true });
-    // Kapalı rakipler: 200 x2 (çiftten) = 400 (elden bitme çarpan değildir).
-    expect(ended.lastHandResult?.penalties).toEqual([0, 400, 400, 400]);
+    // Biri açtı (committed) → kapalı rakipler: 100 x2 (çiftten) = 200 (elden bitme çarpan değildir).
+    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 200, 200]);
   });
 
   it('normal (per) bitişte pairFinish=false olur', () => {
@@ -183,7 +183,7 @@ describe('çiftten bitme skorlaması', () => {
     );
     const ended = applyMove(state, { type: 'discard', cardId: state.players[0]!.hand[0]!.id });
     expect(ended.lastHandResult?.pairFinish).toBe(false);
-    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 200, 200]);
+    expect(ended.lastHandResult?.penalties).toEqual([0, 100, 100, 100]);
   });
 });
 

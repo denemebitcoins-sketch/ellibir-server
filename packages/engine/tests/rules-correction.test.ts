@@ -285,7 +285,7 @@ describe('katlamalı / katlamasız', () => {
     state = applyMove(state, { type: 'open', melds: [ids(m1)] });
     const ended = applyMove(state, { type: 'discard', cardId: last.id });
     expect(ended.lastHandResult?.handFinish).toBe(true);
-    // Katlama yok; ödeyenler kapalı -> düz 200.
-    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 200, 200]);
+    // Katlama yok; el açılmış (committed) -> kapalılar düz 100.
+    expect(ended.lastHandResult?.penalties).toEqual([0, 100, 100, 100]);
   });
 });

@@ -158,23 +158,23 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     return applyMove(state, { type: 'discard', cardId: lastJoker.id });
   }
 
-  it('SOLO örnek: okeyle bitiş — çift 800, normaller 400 öder; bitirene ceza yazılmaz', () => {
+  it('SOLO örnek: okeyle bitiş — çift 400, normaller 200 öder; bitirene ceza yazılmaz', () => {
     const ended = workedExample();
     const result = ended.lastHandResult!;
     expect(result.okeyFinish).toBe(true);
-    // çift: 200 ×2(çift) ×2(okey) = 800; normal: 200 ×2(okey) = 400
-    expect(result.penalties).toEqual([0, 800, 400, 400]);
+    // Biri açtı (committed) → taban 100: çift 100×2(çift)×2(okey)=400; normal 100×2(okey)=200
+    expect(result.penalties).toEqual([0, 400, 200, 200]);
     const b1 = result.breakdown.find((b) => b.seat === 1)!;
-    expect(b1.base).toBe(200);
+    expect(b1.base).toBe(100);
     expect(b1.multipliers.map((m) => m.label).sort()).toEqual(['okey', 'çift']);
-    expect(b1.amount).toBe(800);
+    expect(b1.amount).toBe(400);
     // Yazboz: bitirene ceza satırı YOK; ödeyenlere ayrı satırlar var.
     const handRows = ended.sheet.filter((e) => e.kind === 'penalty');
     expect(handRows.some((e) => e.seat === 0)).toBe(false);
-    expect(handRows.map((e) => e.amount).sort((a, b) => a - b)).toEqual([400, 400, 800]);
+    expect(handRows.map((e) => e.amount).sort((a, b) => a - b)).toEqual([200, 200, 400]);
   });
 
-  it('C6 EŞLİ: bitirenin ortağı CEZA YEMEZ; karşı takım sütununa 800+400=1200 yazılır', () => {
+  it('C6 EŞLİ: bitirenin ortağı CEZA YEMEZ; karşı takım sütununa 400+200=600 yazılır', () => {
     // workedExample ile aynı senaryo, teamMode açık (çapraz eşler 0&2 vs 1&3).
     const rules = makeRules({ teamMode: true });
     let state = createGame({ seed: 1, dealerSeat: 0, rules });
@@ -195,13 +195,13 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     const ended = applyMove(state, { type: 'discard', cardId: lastJoker.id });
     const result = ended.lastHandResult!;
     expect(result.okeyFinish).toBe(true);
-    // Ortak (koltuk 2) MUAF; çift rakip 800, normal rakip 400.
-    expect(result.penalties).toEqual([0, 800, 0, 400]);
+    // Ortak (koltuk 2) MUAF; çift rakip 400, normal rakip 200 (taban 100).
+    expect(result.penalties).toEqual([0, 400, 0, 200]);
     expect(result.breakdown.some((b) => b.seat === 2)).toBe(false);
     expect(teamOf(0)).toBe(0);
     expect(teamOf(2)).toBe(0);
     const [team0, team1] = sheetTeamTotals(ended.sheet);
-    expect(team1).toBe(1200); // karşı takım hanesi
+    expect(team1).toBe(600); // karşı takım hanesi
     expect(team0).toBe(0); // bitirenin takımı ceza yazmaz
   });
 
@@ -242,7 +242,7 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     expect(b1).toMatchObject({ baseKind: 'hand', base: 30, amount: 240 });
   });
 
-  it('C5: deste bitti + taahhütlü — açan elinde kalanı, ÇİFT-AÇAMAYAN 200×2=400, taahhütsüz 200', () => {
+  it('C5: deste bitti + taahhütlü — açan elinde kalanı, ÇİFT-AÇAMAYAN 100×2=200, taahhütsüz 100', () => {
     let state = createGame({ seed: 1, dealerSeat: 3 });
     state = rig(state, {
       currentSeat: 0,
@@ -251,18 +251,18 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
       discard: [c('H', 2)],
       opened: [1], // 1. koltuk açmış (serici)
       hands: {
-        0: [c('S', 13)], // taahhütsüz → 200
+        0: [c('S', 13)], // taahhütsüz → 100
         1: [c('H', 10), c('D', 7)], // açan → elde 17
-        2: [c('D', 9, 0)], // çift İLAN ETMİŞ ama AÇAMAMIŞ → 200×2 = 400
-        3: [c('D', 1)], // taahhütsüz → 200
+        2: [c('D', 9, 0)], // çift İLAN ETMİŞ ama AÇAMAMIŞ → 100×2 = 200
+        3: [c('D', 1)], // taahhütsüz → 100
       },
     });
     state.players = state.players.map((p) => (p.seat === 2 ? { ...p, isCift: true } : p));
     const next = applyMove(state, { type: 'drawStock' });
     expect(next.phase).toBe('handEnded');
     expect(next.lastHandResult?.winnerSeat).toBeNull();
-    // Çift ilan edip açamayan (seat 2) deste bitince de çift-açamama bedelini öder (200×2=400).
-    expect(next.lastHandResult?.penalties).toEqual([200, 17, 400, 200]);
+    // Çift ilan edip açamayan (seat 2) deste bitince de çift bedelini öder (100×2=200).
+    expect(next.lastHandResult?.penalties).toEqual([100, 17, 200, 100]);
     // Yalnız çift-açamayan koltukta çarpan; diğerleri çarpansız.
     const bd = next.lastHandResult!.breakdown;
     expect(bd.find((b) => b.seat === 2)?.multipliers).toEqual([{ label: 'çift', factor: 2 }]);
@@ -279,10 +279,10 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
       stock: [],
       discard: [c('H', 2)],
       hands: {
-        0: [c('S', 13)], // taahhütsüz → 200
+        0: [c('S', 13)], // taahhütsüz → 100
         1: [c('H', 10), c('D', 7)], // açmış çiftçi → elde 17 × 2 = 34
-        2: [c('C', 5)], // taahhütsüz → 200
-        3: [c('D', 1)], // taahhütsüz → 200
+        2: [c('C', 5)], // taahhütsüz → 100
+        3: [c('D', 1)], // taahhütsüz → 100
       },
     });
     // seat 1: çift ilan etmiş VE açmış (openMode='pairs', isCift, hasOpened).
@@ -291,8 +291,8 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     );
     const next = applyMove(state, { type: 'drawStock' });
     expect(next.lastHandResult?.winnerSeat).toBeNull();
-    // seat1 açmış çiftçi: 17 × 2 = 34; taahhütsüzler 200.
-    expect(next.lastHandResult?.penalties).toEqual([200, 34, 200, 200]);
+    // seat1 açmış çiftçi: 17 × 2 = 34; taahhütsüzler 100.
+    expect(next.lastHandResult?.penalties).toEqual([100, 34, 100, 100]);
     expect(next.lastHandResult!.breakdown.find((b) => b.seat === 1)?.multipliers).toEqual([
       { label: 'çift', factor: 2 },
     ]);
@@ -311,8 +311,8 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     });
     state.players = state.players.map((p) => (p.seat === 1 ? { ...p, isCift: true } : p));
     const ended = applyMove(state, { type: 'discard', cardId: lastJoker.id });
-    // Okey bitişi: çift 200×2×2=800, normaller 200×2=400 — katlamasızda da aynı.
-    expect(ended.lastHandResult?.penalties).toEqual([0, 800, 400, 400]);
+    // Okey bitişi: çift 100×2×2=400, normaller 100×2=200 — katlamasızda da aynı.
+    expect(ended.lastHandResult?.penalties).toEqual([0, 400, 200, 200]);
   });
 
   it('açmış ama bitirememiş oyuncu ELİNDE KALAN puanları öder (hibrit)', () => {
@@ -326,13 +326,13 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
       hands: { 0: [last], 1: [c('S', 5)], 2: [c('D', 3)], 3: [c('H', 11)] },
     });
     const ended = applyMove(state, { type: 'discard', cardId: last.id });
-    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 3, 200]);
+    expect(ended.lastHandResult?.penalties).toEqual([0, 100, 3, 100]);
     const b2 = ended.lastHandResult!.breakdown.find((b) => b.seat === 2)!;
     expect(b2.baseKind).toBe('hand');
     expect(b2.base).toBe(3);
   });
 
-  it('HİBRİT örnek: açık ödeyen elde 27p x2 (okey) = 54; kapalı 200 x2 = 400', () => {
+  it('HİBRİT örnek: açık ödeyen elde 27p x2 (okey) = 54; kapalı 100 x2 = 200', () => {
     let state = createGame({ seed: 1, dealerSeat: 0 });
     const lastJoker = joker(6);
     state = rig(state, {
@@ -350,14 +350,14 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     const ended = applyMove(state, { type: 'discard', cardId: lastJoker.id });
     const result = ended.lastHandResult!;
     expect(result.okeyFinish).toBe(true);
-    expect(result.penalties).toEqual([0, 54, 400, 400]);
+    expect(result.penalties).toEqual([0, 54, 200, 200]);
     const b1 = result.breakdown.find((b) => b.seat === 1)!;
     expect(b1).toMatchObject({ baseKind: 'hand', base: 27, amount: 54 });
     const b2 = result.breakdown.find((b) => b.seat === 2)!;
-    expect(b2).toMatchObject({ baseKind: 'closed', base: 200, amount: 400 });
+    expect(b2).toMatchObject({ baseKind: 'closed', base: 100, amount: 200 });
   });
 
-  it('berabere elde (deste bitti) sabit modelde ceza yazılmaz', () => {
+  it('berabere elde (deste bitti) KAFA: kimse açmadıysa kelle başı 200 (kullanıcı kuralı)', () => {
     let state = createGame({ seed: 1, dealerSeat: 3 });
     state = rig(state, {
       currentSeat: 0,
@@ -368,8 +368,8 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     });
     const next = applyMove(state, { type: 'drawStock' });
     expect(next.phase).toBe('handEnded');
-    expect(next.lastHandResult?.penalties).toEqual([0, 0, 0, 0]);
-    expect(next.sheet.filter((e) => e.kind === 'penalty')).toHaveLength(0);
+    expect(next.lastHandResult?.penalties).toEqual([200, 200, 200, 200]);
+    expect(next.sheet.filter((e) => e.kind === 'penalty')).toHaveLength(4);
   });
 });
 
@@ -406,8 +406,8 @@ describe('elde kalan okey (OKEY_EL_PUANI = 50)', () => {
     const b1 = result.breakdown.find((b) => b.seat === 1)!;
     // Taban 50 (elde okey) × 2 (okey bitişi) × 2 (çiftten bitiş) = 200.
     expect(b1).toMatchObject({ baseKind: 'hand', base: 50, amount: 200 });
-    // Kapalı ödeyenler: 200 × 2 × 2 = 800.
-    expect(result.penalties).toEqual([0, 200, 800, 800]);
+    // Kapalı ödeyenler (el açıkken): 100 × 2 × 2 = 400.
+    expect(result.penalties).toEqual([0, 200, 400, 400]);
   });
 });
 

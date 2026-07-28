@@ -50,7 +50,7 @@ describe('RULES.md §4 config sabitleri (Paket 2)', () => {
   });
 
   it('çarpanlar gerçekten config’ten okunur (override etkili)', () => {
-    // Okey çarpanını 3 yap: kapalı ödeyen 200×3 = 600 olmalı.
+    // Okey çarpanını 3 yap: kapalı ödeyen 100×3 = 300 olmalı (biri açtı → taban 100).
     const rules = makeRules({
       scoring: { ...R.scoring, carpanOkeyBitis: 3 },
     });
@@ -65,6 +65,6 @@ describe('RULES.md §4 config sabitleri (Paket 2)', () => {
     });
     const ended = applyMove(state, { type: 'discard', cardId: lastJoker.id });
     expect(ended.lastHandResult?.okeyFinish).toBe(true);
-    expect(ended.lastHandResult?.penalties).toEqual([0, 600, 600, 600]);
+    expect(ended.lastHandResult?.penalties).toEqual([0, 300, 300, 300]);
   });
 });

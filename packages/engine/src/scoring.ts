@@ -33,6 +33,12 @@ export function computeHandResult(
   const handPoints = (player: GameState['players'][number]): number =>
     player.hand.reduce((sum, c) => sum + handCardPenalty(c, rules), 0);
 
+  // KELLE CEZASI (kullanıcı kuralı): kapalı oyuncunun tabanı — KAFA (hiç kimse
+  // açmadı/çift yok) → 200; en az biri açtıysa/çiftse → 100. Bitiş şeklinden
+  // (biri bitirdi / deste tükendi) ve moddan (tekli/eşli) BAĞIMSIZ tek kural.
+  const anyCommitted = state.players.some((p) => p.hasOpened || p.isCift);
+  const closedBase = anyCommitted ? 100 : rules.scoring.basePenalty; // 100 / 200 (KAFA)
+
   if (winnerSeat !== null) {
     const winnerTeam = rules.teamMode ? teamOf(winnerSeat) : null;
     for (const player of state.players) {
@@ -40,9 +46,9 @@ export function computeHandResult(
       // EŞLİ: bitirenin ortağı ceza yemez (takım bitişi).
       if (winnerTeam !== null && teamOf(player.seat) === winnerTeam) continue;
 
-      // HİBRİT taban: açık → elde kalan puanlar; kapalı → sabit ceza.
+      // HİBRİT taban: açık → elde kalan puanlar; kapalı → kelle cezası (100/200).
       const baseKind: PenaltyBreakdown['baseKind'] = player.hasOpened ? 'hand' : 'closed';
-      const base = player.hasOpened ? handPoints(player) : rules.scoring.basePenalty;
+      const base = player.hasOpened ? handPoints(player) : closedBase;
 
       // Çarpanlar config'ten (RULES.md §4 CARPAN_*) — İSTİSNASIZ uygulanır.
       const multipliers: PenaltyBreakdown['multipliers'] = [];
@@ -61,29 +67,20 @@ export function computeHandResult(
     }
     penalties[winnerSeat] = rules.winnerHandPoints;
   } else {
-    // DESTE BİTTİ — RULES.md 1.7 (C5).
-    const anyCommitted = state.players.some((p) => p.hasOpened || p.isCift);
-    if (anyCommitted) {
-      for (const player of state.players) {
-        // KESİN ÇİFT (isCift): el nasıl biterse bitsin çift-yiyen çarpanını öder.
-        //  - AÇMIŞ çift  → (elde kalan) × CARPAN_YIYEN_CIFT  (örn 31×2).
-        //  - AÇAMAMIŞ çift → KAFA_CEZASI(200) × CARPAN_YIYEN_CIFT = 400.
-        // (Bitiren yoktur → rakip okey/çift çarpanı YOKTUR; yalnız kendi çift çarpanı.)
-        // Açmış (çift olmayan) → elde kalan; taahhütsüz → STOCK_OUT_PENALTY.
-        const baseKind: PenaltyBreakdown['baseKind'] =
-          player.hasOpened ? 'hand' : 'closed';
-        const base = player.hasOpened
-          ? handPoints(player)
-          : player.isCift
-            ? rules.scoring.basePenalty
-            : rules.scoring.stockOutPenalty;
-        const multipliers: PenaltyBreakdown['multipliers'] = player.isCift
-          ? [{ label: 'çift', factor: rules.scoring.carpanYiyenCift }]
-          : [];
-        const amount = multipliers.reduce((a, m) => a * m.factor, base);
-        penalties[player.seat] = amount;
-        breakdown.push({ seat: player.seat, baseKind, base, multipliers, amount });
-      }
+    // DESTE BİTTİ — kazanan yok → rakip okey/çiftten çarpanı YOK; yalnız çift çarpanı.
+    // KAFA kuralı burada da geçerli (wash KALDIRILDI — kullanıcı: "kimse açmadan
+    // bitersen kelle başı 200"; biri açtıysa kapalılar 100).
+    for (const player of state.players) {
+      // AÇMIŞ → elde kalan; kapalı → kelle cezası (100/200).
+      const baseKind: PenaltyBreakdown['baseKind'] =
+        player.hasOpened ? 'hand' : 'closed';
+      const base = player.hasOpened ? handPoints(player) : closedBase;
+      const multipliers: PenaltyBreakdown['multipliers'] = player.isCift
+        ? [{ label: 'çift', factor: rules.scoring.carpanYiyenCift }]
+        : [];
+      const amount = multipliers.reduce((a, m) => a * m.factor, base);
+      penalties[player.seat] = amount;
+      breakdown.push({ seat: player.seat, baseKind, base, multipliers, amount });
     }
   }
 

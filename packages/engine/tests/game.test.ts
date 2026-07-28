@@ -69,7 +69,7 @@ describe('el kurulumu ve tur akışı', () => {
     expect(state.phase).toBe('action');
   });
 
-  it('deste bitince el biter (karma yok — RULES.md 1.7)', () => {
+  it('deste bitince el biter — KAFA: kimse açmadıysa kelle başı 200 (kullanıcı kuralı)', () => {
     let state = createGame({ seed: 5, dealerSeat: 3 });
     state = rig(state, {
       currentSeat: 0,
@@ -81,8 +81,8 @@ describe('el kurulumu ve tur akışı', () => {
     const next = applyMove(state, { type: 'drawStock' });
     expect(next.phase).toBe('handEnded');
     expect(next.lastHandResult?.winnerSeat).toBeNull();
-    // Hibrit modelde berabere elde ceza yazılmaz.
-    expect(next.lastHandResult?.penalties).toEqual([0, 0, 0, 0]);
+    // KAFA: kimse açmadı/çift yok → deste bitişi de kelle başı 200 (wash YOK).
+    expect(next.lastHandResult?.penalties).toEqual([200, 200, 200, 200]);
   });
 });
 
@@ -195,7 +195,7 @@ describe('açma / perde işleme / joker', () => {
 });
 
 describe('skorlama', () => {
-  it('elden bitme ceza çarpanı DEĞİLDİR; kapalı rakipler taban 200 öder', () => {
+  it('elden bitme ceza çarpanı DEĞİLDİR; biri açtıysa kapalı rakipler taban 100 öder', () => {
     let state = createGame({ seed: 1, dealerSeat: 0 });
     // 81+: Q-Q-Q (30) + K-K-K (30) + 6-7-8 (21) = 81
     const hand = [
@@ -222,12 +222,12 @@ describe('skorlama', () => {
     const ended = applyMove(state, { type: 'discard', cardId: hand[9]!.id });
     expect(ended.phase).toBe('handEnded');
     expect(ended.lastHandResult).toMatchObject({ winnerSeat: 0, handFinish: true });
-    // Hibrit: ödeyenler kapalı -> 200 (elden bitme çarpan getirmez).
-    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 200, 200]);
-    expect(ended.players[1]!.totalScore).toBe(200);
+    // Biri açtı (committed) → kapalılar kelle başı 100 (elden bitme çarpan getirmez).
+    expect(ended.lastHandResult?.penalties).toEqual([0, 100, 100, 100]);
+    expect(ended.players[1]!.totalScore).toBe(100);
   });
 
-  it('normal bitişte kapalı rakipler taban 200 öder', () => {
+  it('normal bitişte kapalı rakipler taban 100 öder (biri açtıysa)', () => {
     let state = createGame({ seed: 1, dealerSeat: 0 });
     state = rig(state, {
       currentSeat: 0,
@@ -238,7 +238,7 @@ describe('skorlama', () => {
     });
     const ended = applyMove(state, { type: 'discard', cardId: state.players[0]!.hand[0]!.id });
     expect(ended.lastHandResult).toMatchObject({ winnerSeat: 0, handFinish: false });
-    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 200, 200]);
+    expect(ended.lastHandResult?.penalties).toEqual([0, 100, 100, 100]);
   });
 
   it('eleme YOKTUR: yüksek toplam puanlı oyuncu da oynamaya devam eder (RULES.md 1.7)', () => {
@@ -252,7 +252,7 @@ describe('skorlama', () => {
     });
     state.players = state.players.map((p) => (p.seat === 1 ? { ...p, totalScore: 9000 } : p));
     const ended = applyMove(state, { type: 'discard', cardId: state.players[0]!.hand[0]!.id });
-    expect(ended.players[1]!.totalScore).toBe(9200);
+    expect(ended.players[1]!.totalScore).toBe(9100);
     expect(ended.phase).toBe('handEnded'); // maç erken bitmez
 
     const nextHand = startNextHand(ended);
