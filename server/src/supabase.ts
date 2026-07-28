@@ -551,6 +551,17 @@ export function planYuzbirSoloPayout(opts: {
  * Model: her gerçek oyuncu bet kadar koyar (pot). Kazanan pot'u alır, %10 komisyon kesilir.
  * Eşli (teamMode): kazananın TAKIM ARKADAŞI da kazanan sayılır (pot ikiye bölünür).
  */
+/** GÜNLÜK GÖREV kancası: settle'da her gerçek oyuncu için 'play', kazananlar için ek 'win'.
+ *  Fire-and-forget — görev hatası settle'ı asla etkilemez. */
+function questMatchEvent(uid: string, won: boolean, game?: string): void {
+  if (!uid || !supabaseConfigured()) return;
+  void rpc('quest_event_for', { p_user_id: uid, p_kind: 'play', p_game: game ?? null })
+    .catch((e) => console.warn('[quest] play:', e?.message));
+  if (won)
+    void rpc('quest_event_for', { p_user_id: uid, p_kind: 'win', p_game: game ?? null })
+      .catch((e) => console.warn('[quest] win:', e?.message));
+}
+
 export async function settleMatch(opts: {
   seatUsers: Map<number, string>;
   winnerSeat: number;
@@ -582,6 +593,7 @@ export async function settleMatch(opts: {
         p_won: plan.winners.has(seat),
         p_winnings: Math.max(0, amount - bet),
       });
+      questMatchEvent(uid, plan.winners.has(seat), opts.game);
     }
     if (opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(plan.house));
     console.log(`[settle] 101 TEKLI E=${bet} toplamSira=${plan.eligibleSeats.join(',')} payouts=${[...plan.payouts.entries()].map(([s, a]) => `${s}:${a}`).join(',')}`);
@@ -605,6 +617,8 @@ export async function settleMatch(opts: {
     // 3.-4. ödeme yok (peşinleri masada kaldı → net −E)
     await rpc('record_match_stats', { p_user_id: first,  p_won: true,  p_winnings: Math.round(2.2 * E) });
     for (const uid of [second, third, fourth]) await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
+    questMatchEvent(first, true, opts.game);
+    for (const uid of [second, third, fourth]) questMatchEvent(uid, false, opts.game);
     // ÇANAK: ev payının (0.1E) yarısı çanağa, yarısı yanar (ECONOMY §4 CanakPct=%50).
     if (opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(Math.floor(0.1 * E)));
     console.log(`[settle] tekli KADEMELİ 4-kisi E=${E} sira=${ranked.map((r) => r[0])}`);
@@ -641,6 +655,8 @@ export async function settleMatch(opts: {
     await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: Math.max(0, perWinner - bet) });
   for (const uid of losers)
     await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
+  for (const uid of winners) questMatchEvent(uid, true, opts.game);
+  for (const uid of losers) questMatchEvent(uid, false, opts.game);
 
   console.log(`[settle] PESIN winners=${winners.length} losers=${losers.length} seats=${seats} pot=${pot} perWinner(brut)=${perWinner}`);
 }
