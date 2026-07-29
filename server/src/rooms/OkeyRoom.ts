@@ -147,7 +147,10 @@ export class OkeyRoom extends Room {
       yuzbir: { ...DEFAULT_OKEY_RULES.yuzbir, ...(parsed?.yuzbir ?? {}) },
     };
     rules.variant = requestedVariant;
-    if (rules.variant === 'yuzbir' && parsed?.scoring?.startScore == null) rules.scoring.startScore = 0;
+    // Biriktirme modelleri (banko + 101): 0'dan başlanır, sabit el, en düşük kazanır (kullanıcı kuralı).
+    if (rules.variant === 'yuzbir' || rules.variant === 'banko') rules.scoring.startScore = 0;
+    // DÜZ OKEY kaçtan-düş: yalnız izinli basamaklar (20/24/28/30); dışındaysa 24'e çek.
+    if (rules.variant === 'duz' && ![20, 24, 28, 30].includes(rules.scoring.startScore)) rules.scoring.startScore = 24;
     rules.teamMode = mode === 'duo';
 
     this.bet = normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'okey');

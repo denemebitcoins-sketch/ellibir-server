@@ -1,7 +1,7 @@
-/** OKEY kural yapılandırması — KAHVE USULÜ düz okey (kullanıcı tarifi, 2026-07):
- *  Ceza BİRİKİR (düşük iyi). Düz bitiş = rakipler +100 ceza, kazanan kendi cezasından -100.
- *  Çifte bitmek 2x, okey atarak bitmek 2x, çift+okey 4x. Gösterge gösteren kendi cezasından -50.
- *  Baraj/sorgu/açma sertlikleri YOK. Maç sonunda EN DÜŞÜK ceza kazanır. */
+/** OKEY kural yapılandırması — DÜZ OKEY (kullanıcı kuralı, 2026-07):
+ *  Kaçtan-düş: herkes masa ayarındaki puandan (20/24/28/30, vars. 24) başlar; 0'a İNEN anında
+ *  kazanır, 0'a en yakın 2. olur. Düz bitiş 2, çifte/okey bitiş 4 (×2), çift+okey 8 (×4),
+ *  gösterge -1. BANKO/101: biriktirme modeli (0'dan başla, sabit el, en düşük ceza kazanır). */
 export interface OkeyYuzbirConfig {
   openingMin: number;       // seri/küt açışı için minimum toplam
   pairOpeningMin: number;   // çift açışı için minimum çift sayısı
@@ -33,7 +33,7 @@ export const DEFAULT_OKEY_RULES: OkeyRuleConfig = {
   teamMode: false,
   totalEls: 9,             // emniyet tavanı: kimse 0'a inemezse bu kadar el sonunda EN DÜŞÜK kazanır
   turnTimerSeconds: 30,
-  scoring: { startScore: 500, base: 100, gosterge: 50, pairsX: 2, okeyX: 2 },
+  scoring: { startScore: 24, base: 2, gosterge: 1, pairsX: 2, okeyX: 2 },
   yuzbir: {
     openingMin: 101,
     pairOpeningMin: 5,

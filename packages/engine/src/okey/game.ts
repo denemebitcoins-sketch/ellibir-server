@@ -95,7 +95,8 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
   const rules: OkeyRuleConfig = { ...DEFAULT_OKEY_RULES, ...(opts.rules ?? {}),
     scoring: { ...DEFAULT_OKEY_RULES.scoring, ...(opts.rules?.scoring ?? {}) },
     yuzbir: { ...DEFAULT_OKEY_RULES.yuzbir, ...(opts.rules?.yuzbir ?? {}) } };
-  if (rules.variant === 'yuzbir' && opts.rules?.scoring?.startScore == null)
+  // Biriktirme modelleri (banko + 101): 0'dan başlanır, sabit el, en düşük kazanır (kullanıcı kuralı).
+  if (rules.variant === 'yuzbir' || rules.variant === 'banko')
     rules.scoring.startScore = 0;
   const dealerSeat = opts.dealerSeat ?? 0;
   const names = opts.names ?? ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4'];
@@ -853,9 +854,10 @@ function showGosterge(state: OkeyGameState, p: OkeyPlayer): OkeyMoveResult {
   const has = p.hand.some((t) => isNormalOkeyTile(t) && t.color === state.gosterge.color && t.rank === state.gosterge.rank);
   if (!has) return { ok: false, error: 'gösterge teki elinde yok' };
   p.showedGosterge = true;
-  // KAHVE USULÜ: gösteren KENDİ cezasından düşer (rakiplere ceza yazılmaz).
-  state.scores[p.seat] = state.scores[p.seat]! - state.rules.scoring.gosterge;
-  state.matchLog.push(`${p.name} göstergeyi gösterdi (kendi cezasından -${state.rules.scoring.gosterge})`);
+  // DÜZ: kaçtan-düş birimiyle -1 (config); BANKO: kendi ekonomisinde -50 (sabit).
+  const gosVal = state.rules.variant === 'banko' ? 50 : state.rules.scoring.gosterge;
+  state.scores[p.seat] = state.scores[p.seat]! - gosVal;
+  state.matchLog.push(`${p.name} göstergeyi gösterdi (kendi cezasından -${gosVal})`);
   return { ok: true };
 }
 

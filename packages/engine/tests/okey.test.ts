@@ -252,7 +252,7 @@ describe('oyun akışı', () => {
     expect(g.scores.every((s) => s === g.rules.scoring.startScore)).toBe(true);
   });
 
-  it('kurgu bitiş (kahve usulü): düz → kazanan -100 düşer, rakipler +100; okey atarak 2x; eşli’de ortak muaf', () => {
+  it('kurgu bitiş (kaçtan-düş): düz → kazanan -2 düşer, rakipler +2; okey atarak ×2 (4); eşli’de ortak muaf', () => {
     const g = createOkeyGame({ seed: 13, dealerSeat: 0 });
     // Eli elle kur: 0'ın eline bitmiş 14 + atılacak 1 taş koy.
     const win14 = [
@@ -268,10 +268,10 @@ describe('oyun akışı', () => {
     expect(g.elEnded).toBe(true);
     expect(g.elWinner).toBe(0);
     expect(g.finishKind).toBe('normal');
-    expect(g.scores[0]).toBe(400); // 500 - 100 (kazanan düşer)
-    expect(g.scores[1]).toBe(600); // 500 + 100 ceza
-    expect(g.scores[2]).toBe(600);
-    expect(g.scores[3]).toBe(600);
+    expect(g.scores[0]).toBe(22); // 24 - 2 (kazanan düşer)
+    expect(g.scores[1]).toBe(26); // 24 + 2 ceza
+    expect(g.scores[2]).toBe(26);
+    expect(g.scores[3]).toBe(26);
 
     // OKEY atarak (yeni el kur, okeyi son taş olarak at) — eşli modda.
     const g2 = createOkeyGame({ seed: 17, dealerSeat: 0, rules: { teamMode: true } });
@@ -280,26 +280,26 @@ describe('oyun akışı', () => {
     const r2 = applyOkeyMove(g2, 0, { t: 'finish', tileId: okeyTile.id });
     expect(r2.ok).toBe(true);
     expect(g2.finishKind).toBe('okey');
-    expect(g2.scores[0]).toBe(300); // 500 - 200 (okey atarak 2x düşer)
-    expect(g2.scores[2]).toBe(300); // ORTAK DA DÜŞER: kazananla aynı (500 - 200) — bitmiş sayılır
-    expect(g2.scores[1]).toBe(700); // +200 ceza
-    expect(g2.scores[3]).toBe(700);
+    expect(g2.scores[0]).toBe(20); // 24 - 4 (okey atarak ×2 düşer)
+    expect(g2.scores[2]).toBe(20); // ORTAK DA DÜŞER: kazananla aynı (24 - 4) — bitmiş sayılır
+    expect(g2.scores[1]).toBe(28); // +4 ceza
+    expect(g2.scores[3]).toBe(28);
   });
 
-  it('gösterge gösterme: teki eldeyken, ilk atıştan önce — KENDİ puanından 50 düşer', () => {
+  it('gösterge gösterme: teki eldeyken, ilk atıştan önce — KENDİ puanından 1 düşer', () => {
     const g = createOkeyGame({ seed: 19, dealerSeat: 0 });
     const gTek: NormalOkeyTile = { id: 'GTEK', fake: false, color: g.gosterge.color, rank: g.gosterge.rank };
     g.players[1]!.hand[0] = gTek;
     expect(applyOkeyMove(g, 1, { t: 'gosterge' }).ok).toBe(true);
     expect(applyOkeyMove(g, 1, { t: 'gosterge' }).ok).toBe(false); // ikinci kez yok
-    expect(g.scores[1]).toBe(450); // 500 - 50 (kendi puanından düşer)
-    expect(g.scores[0]).toBe(500); // rakipler etkilenmez
-    expect(g.scores[2]).toBe(500);
-    expect(g.scores[3]).toBe(500);
+    expect(g.scores[1]).toBe(23); // 24 - 1 (kendi puanından düşer)
+    expect(g.scores[0]).toBe(24); // rakipler etkilenmez
+    expect(g.scores[2]).toBe(24);
+    expect(g.scores[3]).toBe(24);
   });
 
   it('DÜŞME: 0’a inen maçı HEMEN kazanır (el tavanı beklenmez)', () => {
-    const g = createOkeyGame({ seed: 31, dealerSeat: 0, rules: { totalEls: 99, scoring: { startScore: 100 } as any } });
+    const g = createOkeyGame({ seed: 31, dealerSeat: 0, rules: { totalEls: 99, scoring: { startScore: 2, base: 2 } as any } });
     const win14 = [
       t('R', 1), t('R', 2), t('R', 3),
       t('Y', 7), t('B', 7), t('K', 7),
@@ -309,7 +309,7 @@ describe('oyun akışı', () => {
     const throwaway = t('Y', 11);
     g.players[0]!.hand = [...win14, throwaway];
     expect(applyOkeyMove(g, 0, { t: 'finish', tileId: throwaway.id }).ok).toBe(true);
-    expect(g.scores[0]).toBe(0);       // 100 - 100 → sıfıra indi
+    expect(g.scores[0]).toBe(0);       // 2 - 2 → sıfıra indi
     expect(g.matchEnded).toBe(true);    // maç hemen biter
     expect(g.matchLog[g.matchLog.length - 1]).toContain('sıfıra indi');
   });
