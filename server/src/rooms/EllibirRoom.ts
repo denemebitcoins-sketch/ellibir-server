@@ -46,6 +46,7 @@ export class EllibirRoom extends Room {
   private cfg: any = null;                     // createGame opts (oyun tüm insanlar gelince kurulur)
   private seatUsers = new Map<number, string>(); // koltuk → Supabase userId (yalnız gerçek oyuncular)
   private seatNames = new Map<number, string>(); // koltuk → görünen ad (her oyuncu kendi adını yollar)
+  private adminBots = new Map<number, string>(); // YÖNETİCİNİN eklediği botlar: koltuk → ad (test masaları)
   private bet = 0;                             // masa bahsi (maç sonu settle için)
   private settled = false;                     // çift settle koruması
   private entryCanakCharged = false;           // komisyon/çanak payı maç başında işlendi
@@ -129,6 +130,36 @@ export class EllibirRoom extends Room {
     this.cfg = { seed, playerNames: names, botSeats, rules };
     this.game = null;
     this.setMetadata({ mode, table: tableNo, humans: this.humanSeats.length });
+
+    // YÖNETİCİ BOT YERLEŞTİRME (kullanıcı isteği): admin, masada beklerken istediği boş
+    // koltuğa bot atar → masa dolunca oyun normal akışında (online) başlar. Böylece eşli/tekli
+    // sonuç ekranları gerçek sunucu akışıyla test edilebilir.
+    this.onMessage('adminAddBot', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
+      if (this.game) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+      const target = Number(raw?.seat);
+      if (!Number.isInteger(target) || !this.humanSeats.includes(target)) { client.send('sitError', { reason: 'geçersiz koltuk' }); return; }
+      if ([...this.seats.values()].includes(target) || this.adminBots.has(target)) { client.send('sitError', { reason: 'koltuk dolu' }); return; }
+      this.adminBots.set(target, 'Bot ' + (target + 1));
+      this.seatNames.set(target, this.adminBots.get(target)!);
+      this.logEvent(`Yönetici koltuk ${target + 1} için bot ekledi`);
+      this.startGameIfReady();
+      this.pushViews();
+    });
+    this.onMessage('adminRemoveBot', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
+      if (this.game) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+      const target = Number(raw?.seat);
+      if (this.adminBots.delete(target)) {
+        this.seatNames.delete(target);
+        this.logEvent(`Yönetici koltuk ${target + 1} botunu kaldırdı`);
+        this.pushViews();
+      }
+    });
 
     // Tek mesaj kanalı: client'ın tüm komutları "cmd" (JSON string) olarak gelir.
     this.onMessage('cmd', (client, raw) => {
@@ -366,9 +397,9 @@ export class EllibirRoom extends Room {
     this.pushViews();
   }
 
-  /// Tüm insan koltukları dolunca 7sn geri sayım → oyunu kur. Geri sayımda biri çıkarsa iptal.
+  /// Tüm insan koltukları (gerçek + yönetici botları) dolunca 7sn geri sayım → oyunu kur. Geri sayımda biri çıkarsa iptal.
   private startGameIfReady() {
-    if (this.game || this.startTimer || this.seats.size < this.humanSeats.length) return;
+    if (this.game || this.startTimer || this.seats.size + this.adminBots.size < this.humanSeats.length) return;
     this.startAt = Date.now();
     this.pushViews(); // "oyun başlıyor" overlay (dolu ama henüz başlamadı)
     if (this.startTick) clearInterval(this.startTick);
@@ -376,7 +407,7 @@ export class EllibirRoom extends Room {
     this.startTimer = setTimeout(async () => {
       if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
       this.startTimer = null;
-      if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
+      if (this.seats.size + this.adminBots.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
       const entryUsers = new Map(this.seatUsers);
       const rules: any = this.cfg?.rules ?? {};
       const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
@@ -384,6 +415,8 @@ export class EllibirRoom extends Room {
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
       this.entryCanakCharged = true;
       this.refreshCanak();
+      // Yönetici botları motorun bot koltuklarına eklenir (runEngine onları oynatır).
+      this.cfg.botSeats = [...this.adminBots.keys()];
       this.game = createGame(this.cfg);
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players.find((pl: any) => pl.seat === seat);
@@ -578,6 +611,7 @@ export class EllibirRoom extends Room {
   // O koltukta KARAR verecek bağlı insan var mı? Terk edilmiş koltuk → bot oynar.
   private isHumanTurn(seat: number): boolean {
     if (!this.humanSeats.includes(seat)) return false;
+    if (this.adminBots.has(seat)) return false; // YÖNETİCİ botu: motor oynatır (insan değil)
     // SÜRE AŞIMI ZORLAMASI: bu koltuk için TEK adım bot oynanacaksa "insan değil" say (stepOnce
     // bot hamlesi üretir). forceBotSeat süre aşımı timer'ında set edilir, adım sonrası temizlenir.
     if (this.forceBotSeat === seat) return false;
@@ -849,14 +883,15 @@ export class EllibirRoom extends Room {
   private pushViews() {
     // Oyun henüz başlamadıysa overlay + boş masa (emptyView).
     const waiting = !this.game;
-    const starting = waiting && this.seats.size >= this.humanSeats.length; // dolu, 7sn geri sayım
+    const starting = waiting && this.seats.size + this.adminBots.size >= this.humanSeats.length; // dolu, 7sn geri sayım
     const filled = new Set(this.seats.values());
     // Beklerken masada oturanları göster: insan koltukları (dolu=oturdu, boş=bekleniyor) + botlar.
     const seated = [0, 1, 2, 3].map((s) => ({
       seat: s,
       human: this.humanSeats.includes(s),
-      filled: this.humanSeats.includes(s) ? filled.has(s) : true,  // bot koltukları "dolu"
+      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s)) : true,  // bot koltukları "dolu"
       name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
+      bot: this.adminBots.has(s) || undefined, // YÖNETİCİ botu: client "BOT" rozeti + kaldır butonu gösterir
     }));
     // AKTİF izleyiciler: koltuksuz (seat yok) bağlı client'lar → adları (çıkan izleyici otomatik düşer).
     const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);

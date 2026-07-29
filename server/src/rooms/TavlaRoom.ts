@@ -30,6 +30,7 @@ export class TavlaRoom extends Room {
   private humanSeats: number[] = [];
   private seatUsers = new Map<number, string>();
   private seatNames = new Map<number, string>();
+  private adminBots = new Map<number, string>(); // YONETICININ ekledigi botlar: koltuk -> ad (test masalari)
   private abandoned = new Set<number>();       // kopan insan koltukları (bot devralır)
   private startTimer: NodeJS.Timeout | null = null;
   private startTick: NodeJS.Timeout | null = null;
@@ -228,6 +229,33 @@ export class TavlaRoom extends Room {
       this.afterChange();
     });
 
+    // YONETICI bot yerlestirme (kullanici istegi): admin beklerken bos koltuga bot atar.
+    this.onMessage('adminAddBot', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
+      if (this.game) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+      const target = Number(raw?.seat);
+      if (!Number.isInteger(target) || !this.humanSeats.includes(target)) { client.send('sitError', { reason: 'geçersiz koltuk' }); return; }
+      if ([...this.seats.values()].includes(target) || this.adminBots.has(target)) { client.send('sitError', { reason: 'koltuk dolu' }); return; }
+      this.adminBots.set(target, 'Bot ' + (target + 1));
+      this.seatNames.set(target, this.adminBots.get(target)!);
+      this.logEvent(`Yönetici koltuk ${target + 1} için bot ekledi`);
+      this.startGameIfReady();
+      this.pushViews();
+    });
+    this.onMessage('adminRemoveBot', (client, raw) => {
+      const seat = this.seats.get(client.sessionId);
+      if (seat == null) return;
+      if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
+      if (this.game) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+      const target = Number(raw?.seat);
+      if (this.adminBots.delete(target)) {
+        this.seatNames.delete(target);
+        this.logEvent(`Yönetici koltuk ${target + 1} botunu kaldırdı`);
+        this.pushViews();
+      }
+    });
     this.onMessage('sit', (client, raw) => {
       if (!payloadWithinLimit(raw, 2048) || !this.messageGuard.allow(client.sessionId, 'sit', 4, 5000)) return;
       let msg: any = raw;
@@ -305,7 +333,7 @@ export class TavlaRoom extends Room {
   }
 
   private startGameIfReady() {
-    if (this.game || this.startTimer || this.seats.size < this.humanSeats.length) return;
+    if (this.game || this.startTimer || this.seats.size + this.adminBots.size < this.humanSeats.length) return;
     this.startAt = Date.now();
     this.pushViews();
     if (this.startTick) clearInterval(this.startTick);
@@ -313,13 +341,14 @@ export class TavlaRoom extends Room {
     this.startTimer = setTimeout(async () => {
       if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
       this.startTimer = null;
-      if (this.seats.size < this.humanSeats.length) { this.pushViews(); return; }
+      if (this.seats.size + this.adminBots.size < this.humanSeats.length) { this.pushViews(); return; }
       const entryUsers = new Map(this.seatUsers);
       const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 2, teamMode: false, realSeats: entryUsers.size });
       const entry = await deductEntry(entryUsers, this.bet, 'tavla', entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
       this.entryCanakCharged = true;
       this.refreshCanak();
+      this.cfg.botSeats = [...this.adminBots.keys()]; // yönetici botları motorun bot koltukları
       this.game = createTavlaGame(this.cfg);
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players[seat];
@@ -717,13 +746,14 @@ export class TavlaRoom extends Room {
 
   private pushViews() {
     const waiting = !this.game;
-    const starting = waiting && this.seats.size >= this.humanSeats.length;
+    const starting = waiting && this.seats.size + this.adminBots.size >= this.humanSeats.length;
     const filled = new Set(this.seats.values());
     const seated = [0, 1].map((s) => ({
       seat: s,
       human: this.humanSeats.includes(s),
-      filled: this.humanSeats.includes(s) ? filled.has(s) : true,
+      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s)) : true,
       name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
+      bot: this.adminBots.has(s) || undefined,
     }));
     const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
     const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
