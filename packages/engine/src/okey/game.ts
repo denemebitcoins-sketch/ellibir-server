@@ -861,8 +861,8 @@ function showGosterge(state: OkeyGameState, p: OkeyPlayer): OkeyMoveResult {
   return { ok: true };
 }
 
-/** KAHVE USULÜ el sonu cezası: rakipler +points CEZA yer; kazanan -points düşer.
- *  EŞLİ KURAL (kullanıcı): biri bitince ORTAĞI DA BİTMİŞ SAYILIR — o da AYNI düşüşü (-points) alır. */
+/** DÜZ OKEY el sonu (kullanıcı kuralı 2026-07): rakiplere puan YAZILMAZ — puanlar yalnız düşer
+ *  ya da yerinde sayar. Yalnız bitiren (ve eşlide ortağı — bitmiş sayılır) kendi puanından düşer. */
 function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number): void {
   for (let s = 0; s < 4; s++) {
     if (s === winnerSeat) { state.scores[s] = state.scores[s]! - points; continue; }
@@ -870,7 +870,6 @@ function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number)
       state.scores[s] = state.scores[s]! - points; // ortak da düşer (bitmiş sayılır)
       continue;
     }
-    state.scores[s] = state.scores[s]! + points;
   }
 }
 
@@ -1041,7 +1040,7 @@ function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): voi
   state.elWinner = seat;
   state.finishKind = kind;
   const kindTxt = kind === 'pairsOkey' ? 'ÇİFT + OKEY atarak' : kind === 'pairs' ? 'ÇİFTTEN' : kind === 'okey' ? 'OKEY atarak' : 'düz';
-  state.matchLog.push(`${state.players[seat]!.name} eli ${kindTxt} bitirdi (rakipler +${points} ceza, kendisi -${points})`);
+  state.matchLog.push(`${state.players[seat]!.name} eli ${kindTxt} bitirdi (kendisi -${points})`);
   pushElDelta(state);
   maybeEndMatch(state);
 }

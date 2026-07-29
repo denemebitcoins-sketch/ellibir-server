@@ -269,9 +269,9 @@ describe('oyun akışı', () => {
     expect(g.elWinner).toBe(0);
     expect(g.finishKind).toBe('normal');
     expect(g.scores[0]).toBe(22); // 24 - 2 (kazanan düşer)
-    expect(g.scores[1]).toBe(26); // 24 + 2 ceza
-    expect(g.scores[2]).toBe(26);
-    expect(g.scores[3]).toBe(26);
+    expect(g.scores[1]).toBe(24); // rakipler etkilenmez (düz okeyde ceza YAZILMAZ)
+    expect(g.scores[2]).toBe(24);
+    expect(g.scores[3]).toBe(24);
 
     // OKEY atarak (yeni el kur, okeyi son taş olarak at) — eşli modda.
     const g2 = createOkeyGame({ seed: 17, dealerSeat: 0, rules: { teamMode: true } });
@@ -282,8 +282,8 @@ describe('oyun akışı', () => {
     expect(g2.finishKind).toBe('okey');
     expect(g2.scores[0]).toBe(20); // 24 - 4 (okey atarak ×2 düşer)
     expect(g2.scores[2]).toBe(20); // ORTAK DA DÜŞER: kazananla aynı (24 - 4) — bitmiş sayılır
-    expect(g2.scores[1]).toBe(28); // +4 ceza
-    expect(g2.scores[3]).toBe(28);
+    expect(g2.scores[1]).toBe(24); // rakip takım etkilenmez
+    expect(g2.scores[3]).toBe(24);
   });
 
   it('gösterge gösterme: teki eldeyken, ilk atıştan önce — KENDİ puanından 1 düşer', () => {
