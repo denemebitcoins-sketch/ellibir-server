@@ -1,95 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { entryCanakShare, entryHouseAmount, planYuzbirSoloPayout } from './supabase';
+import { entryCanakShare, entryHouseAmount } from './supabase';
 
-const scoresOf = (rows: Array<[number, number]>) => new Map<number, number>(rows);
-
-describe('101 Okey tekli payout planı', () => {
-  it('yalnız bir oyuncu el açtıysa dağıtılabilir havuzun tamamını alır', () => {
-    const plan = planYuzbirSoloPayout({
-      bet: 1000,
-      totalSeats: 4,
-      scores: scoresOf([[0, 60], [1, 120], [2, 202], [3, 202]]),
-      openedSeats: [1],
-    });
-    expect(plan.house).toBe(100);
-    expect(plan.prizePool).toBe(3900);
-    expect(plan.payouts.get(1)).toBe(3900);
-    expect(plan.winners.has(1)).toBe(true);
+describe('pot + komisyon + çanak', () => {
+  it('4 koltuk tekli masada komisyon potun %10udur', () => {
+    const house = entryHouseAmount({ bet: 1000, totalSeats: 4, teamMode: false, realSeats: 4 });
+    expect(house).toBe(400);
+    expect(entryCanakShare(house)).toBe(200);
   });
 
-  it('birden fazla açan varsa en düşük ceza 3/4, ikinci 1/4 alır', () => {
-    const plan = planYuzbirSoloPayout({
-      bet: 1000,
-      totalSeats: 4,
-      scores: scoresOf([[0, 34], [1, 78], [2, 110], [3, 202]]),
-      openedSeats: [0, 1, 2],
-    });
-    expect(plan.payouts.get(0)).toBe(2925);
-    expect(plan.payouts.get(1)).toBe(975);
-    expect(plan.payouts.has(2)).toBe(false);
-    expect(plan.winners.has(0)).toBe(true);
-    expect(plan.winners.has(1)).toBe(false);
+  it('4 koltuk eşli masada komisyon potun %10udur', () => {
+    const house = entryHouseAmount({ bet: 1000, totalSeats: 4, teamMode: true, realSeats: 4 });
+    expect(house).toBe(400);
+    expect(entryCanakShare(house)).toBe(200);
   });
 
-  it('aynı cezadaki birinciler birinci payını eşit böler', () => {
-    const plan = planYuzbirSoloPayout({
-      bet: 1000,
-      totalSeats: 4,
-      scores: scoresOf([[0, 44], [1, 44], [2, 90], [3, 120]]),
-      openedSeats: [0, 1, 2, 3],
-    });
-    expect(plan.payouts.get(0)).toBe(1463);
-    expect(plan.payouts.get(1)).toBe(1462);
-    expect(plan.payouts.get(2)).toBe(975);
-    expect(plan.winners.has(0)).toBe(true);
-    expect(plan.winners.has(1)).toBe(true);
-  });
-
-  it('tüm açanlar aynı cezada kalırsa havuz tamamen eşit bölünür', () => {
-    const plan = planYuzbirSoloPayout({
-      bet: 1000,
-      totalSeats: 4,
-      scores: scoresOf([[0, 55], [1, 55], [2, 202], [3, 202]]),
-      openedSeats: [0, 1],
-    });
-    expect(plan.payouts.get(0)).toBe(1950);
-    expect(plan.payouts.get(1)).toBe(1950);
-    expect(plan.winners.has(0)).toBe(true);
-    expect(plan.winners.has(1)).toBe(true);
-  });
-
-  it('maç sonu ödeme final elde açanlara değil toplam skor sıralamasına göre yapılır', () => {
-    const plan = planYuzbirSoloPayout({
-      bet: 1000,
-      totalSeats: 4,
-      scores: scoresOf([[0, 20], [1, 120], [2, 70], [3, 202]]),
-      openedSeats: [1, 3],
-      eligibleSeats: [0, 1, 2, 3],
-    });
-    expect(plan.eligibleSeats).toEqual([0, 2, 1, 3]);
-    expect(plan.payouts.get(0)).toBe(2925);
-    expect(plan.payouts.get(2)).toBe(975);
-    expect(plan.payouts.has(1)).toBe(false);
-    expect(plan.winners.has(0)).toBe(true);
-  });
-});
-
-describe('giriş komisyonu ve çanak payı', () => {
-  it('tavlada komisyon iki koltuk bahsinin yüzde onu üzerinden alınır', () => {
+  it('tavlada (2 koltuk) komisyon potun %10udur', () => {
     const house = entryHouseAmount({ bet: 2500, totalSeats: 2, teamMode: false, realSeats: 2 });
     expect(house).toBe(500);
     expect(entryCanakShare(house)).toBe(250);
   });
 
-  it('101 tekli/kademeli modelde komisyon tek bahis yüzde onu ile sınırlıdır', () => {
+  it('101 tekli de dahil tüm oyunlarda komisyon potun %10udur', () => {
     const house = entryHouseAmount({ bet: 1000, totalSeats: 4, teamMode: false, gameVariant: 'yuzbir', realSeats: 4 });
-    expect(house).toBe(100);
-    expect(entryCanakShare(house)).toBe(50);
-  });
-
-  it('eşli masalarda komisyon tüm koltuk bahsi üzerinden hesaplanır', () => {
-    const house = entryHouseAmount({ bet: 1000, totalSeats: 4, teamMode: true, realSeats: 4 });
     expect(house).toBe(400);
     expect(entryCanakShare(house)).toBe(200);
+  });
+
+  it('komisyonun yarısı yanar, yarısı çanağa gider', () => {
+    const house = entryHouseAmount({ bet: 500, totalSeats: 4, teamMode: false, realSeats: 4 });
+    expect(house).toBe(200);
+    expect(entryCanakShare(house)).toBe(100);
+    expect(house - entryCanakShare(house)).toBe(100);
+  });
+});
+
+describe('kazanç matematiği (yorumlu)', () => {
+  it('4 kişi 1000 bahis: kazanan 3600 çip alır (pot 4000 - %10 komisyon)', () => {
+    const pot = 4 * 1000;
+    const prize = pot - Math.floor(pot * 0.1);
+    expect(prize).toBe(3600);
+  });
+
+  it('4 kişi eşli: kazanan takım toplam 3600 alır, her eş 1800', () => {
+    const pot = 4 * 1000;
+    const prize = pot - Math.floor(pot * 0.1);
+    expect(Math.floor(prize / 2)).toBe(1800);
+  });
+
+  it('tavla 1v1 1000 bahis: kazanan 1800 çip alır', () => {
+    const pot = 2 * 1000;
+    const prize = pot - Math.floor(pot * 0.1);
+    expect(prize).toBe(1800);
   });
 });
