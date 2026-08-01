@@ -59,17 +59,18 @@ export function enumerateCandidateMelds(hand: readonly Card[], rules: RuleConfig
     byRank.set(c.rank, list);
   }
   for (const cards of byRank.values()) {
-    // Aynı renkten kopyaları tekille (iki desteden aynı kart gelebilir).
-    const bySuit = new Map(cards.map((c) => [c.suit, c]));
-    const unique = [...bySuit.values()];
+    // İki desteden aynı rank+renk kopyaları ayrı kartlardır; tekilleme YAPMA.
+    // Aynı renkten iki kart içeren kombinasyonlar analyzeSet tarafından reddedilir;
+    // farklı kopyaları kullanan iki ayrı küt (örn. çift 10'lar) böylece bulunabilir.
+    const realCards = cards;
     // Okey sınırı yok (RULES.md 1.3) — yalnız rank kaynağı için ≥1 gerçek kart.
     // ÖNEMLİ: okey alt-kümeleri ayrı adaylar üretir; yoksa iki ayrı per hep
     // AYNI okeye bağlanır ve ikinci okey kullanılamaz (bilinen bug).
     for (let jokerUse = 0; jokerUse <= jokers.length; jokerUse++) {
       for (let size = rules.minSetSize; size <= rules.maxSetSize; size++) {
         const realCount = size - jokerUse;
-        if (realCount < 1 || realCount > unique.length) continue;
-        for (const combo of combinations(unique, realCount)) {
+        if (realCount < 1 || realCount > realCards.length) continue;
+        for (const combo of combinations(realCards, realCount)) {
           for (const js of combinations(jokers, jokerUse)) {
             tryAdd([...combo, ...js]);
           }

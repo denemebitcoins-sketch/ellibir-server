@@ -1,0 +1,135 @@
+{
+  "url": "ws://localhost:2567",
+  "requestedRooms": 8,
+  "startedAt": "2026-07-07T16:05:59.492Z",
+  "durationSec": 25,
+  "rampSec": 3,
+  "dropRate": 0.5,
+  "roomsCreated": 8,
+  "clientsTarget": 10,
+  "clientsJoined": 10,
+  "joinErrors": 0,
+  "leaves": 10,
+  "drops": 0,
+  "reconnectAttempts": 0,
+  "views": 491,
+  "viewBytes": 1210498,
+  "commands": 163,
+  "commandErrors": 3,
+  "parseErrors": 0,
+  "byGame": {
+    "51": {
+      "rooms": 3,
+      "clients": 4,
+      "joined": 4,
+      "views": 169,
+      "commands": 34,
+      "errors": 0
+    },
+    "okey-duz": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 20,
+      "commands": 5,
+      "errors": 0
+    },
+    "okey-101": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 38,
+      "commands": 11,
+      "errors": 0
+    },
+    "tavla": {
+      "rooms": 2,
+      "clients": 3,
+      "joined": 3,
+      "views": 225,
+      "commands": 103,
+      "errors": 3
+    },
+    "okey-banko": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 39,
+      "commands": 10,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "tavla:rule:zaten attın — hamleni oyna": 1,
+    "tavla:rule:katlama cevabı bekleniyor": 2
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 10,
+      "views": 52,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 51,
+      "heapMb": 11
+    },
+    {
+      "t": 10,
+      "joined": 10,
+      "views": 124,
+      "commands": 14,
+      "errors": 0,
+      "rssMb": 47,
+      "heapMb": 9
+    },
+    {
+      "t": 15,
+      "joined": 10,
+      "views": 258,
+      "commands": 63,
+      "errors": 0,
+      "rssMb": 47,
+      "heapMb": 9
+    },
+    {
+      "t": 20,
+      "joined": 10,
+      "views": 389,
+      "commands": 122,
+      "errors": 1,
+      "rssMb": 48,
+      "heapMb": 10
+    },
+    {
+      "t": 25,
+      "joined": 10,
+      "views": 447,
+      "commands": 144,
+      "errors": 2,
+      "rssMb": 47,
+      "heapMb": 9
+    },
+    {
+      "t": 29.5,
+      "joined": 10,
+      "views": 491,
+      "commands": 163,
+      "errors": 3,
+      "rssMb": 47,
+      "heapMb": 9
+    }
+  ],
+  "errors": [],
+  "finishedAt": "2026-07-07T16:06:28.990Z",
+  "elapsedSec": 29.5,
+  "viewsPerSec": 16.65,
+  "commandsPerSec": 5.53,
+  "avgViewBytes": 2465,
+  "latencyMs": {
+    "samples": 161,
+    "p50": 1,
+    "p90": 1,
+    "p95": 2,
+    "p99": 15
+  }
+}

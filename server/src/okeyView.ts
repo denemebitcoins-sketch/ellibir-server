@@ -9,6 +9,13 @@ import { VIEW_VERSION } from './viewContract';
  */
 
 const mapTile = (t: any) => t == null ? null : { id: t.id ?? '', fake: !!t.fake, color: t.fake ? '' : t.color, rank: t.fake ? 0 : t.rank };
+const mapIslekHistory = (h: any) => h == null ? null : {
+  meldId: h.meldId ?? '',
+  tileId: h.tileId ?? '',
+  tile: mapTile(h.tile),
+  rescuedTileId: h.rescuedTileId ?? '',
+  isJokerReplace: !!h.isJokerReplace,
+};
 const mapMeld = (m: any) => ({
   id: m.id ?? '',
   ownerSeat: m.ownerSeat ?? -1,
@@ -64,6 +71,7 @@ export function okeyViewFor(state: OkeyGameState | null, seat: number): Record<s
     // GÖSTERGE butonu koşulu (kullanıcı: ilk taş atıldıktan sonra buton GÖRÜNMESİN):
     myShowedGosterge: !!(me && me.showedGosterge),
     myDiscardCount: me ? me.discardCount : 0,
+    myIslekHistory: (state.islekHistory ?? []).filter((h: any) => h.seat === seat).map(mapIslekHistory),
     // Unity JsonUtility iç içe dizi desteklemez → koltuk başına DÜZ alanlar.
     disc0: state.discards[0]!.map(mapTile),
     disc1: state.discards[1]!.map(mapTile),
@@ -95,7 +103,7 @@ export function emptyOkeyView(seat: number): Record<string, unknown> {
     gosterge: null, okeyColor: 'R', okeyRank: 1, stockCount: 0,
     variant: 'duz', elMult: 0, bankoUsed: [false, false, false, false], bankoPending: [false, false, false, false], bankoThisEl: [false, false, false, false], bankoPhase: false, bankoChoice: [-1, -1, -1, -1], bankoDealer: 0, sheetBankoFlat: [],
     openingMin: 0, pairsMin: 0, myHasOpened: false, myOpenMode: '', myPendingLeft: false, openMelds: [],
-    myHand: [], myShowedGosterge: false, myDiscardCount: 0,
+    myHand: [], myShowedGosterge: false, myDiscardCount: 0, myIslekHistory: [],
     disc0: [], disc1: [], disc2: [], disc3: [], players: [], winnerHand: [], logMessages: [],
     sheetFlat: [], sheetCount: 0,
   };

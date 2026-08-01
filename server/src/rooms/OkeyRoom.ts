@@ -269,9 +269,8 @@ export class OkeyRoom extends Room {
       text = String(text).slice(0, 120).trim();
       if (!text) return;
       if (!this.cfg?.rules?.teamMode) return;
-      const hs = this.humanSeats;
-      const partner = (hs.length >= 2 && hs.includes(seat)) ? (seat + 2) % 4 : null;
-      if (partner == null) return;
+      // Bot ortak olsa bile mesajı ilet; eğer ortak insan değilse sadece gönderene echo gider.
+      const partner = (seat + 2) % 4;
       for (const [sid, s] of this.seats) {
         if (s === partner || s === seat) {
           const c = this.clients.find((cl) => cl.sessionId === sid);

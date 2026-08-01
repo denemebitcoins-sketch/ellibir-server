@@ -279,10 +279,9 @@ export class EllibirRoom extends Room {
       text = String(text).slice(0, 120).trim();
       if (!text) return;
       if (!this.game?.rules?.teamMode) return;
-      const hs = this.humanSeats;
-      // Ortak = takım arkadaşı (seat+2)%4 → duo (0↔2, 1↔3) ve duo3 için de doğru. Yalnız EŞLİ (≥2 insan).
-      const partner = (hs.length >= 2 && hs.includes(seat)) ? (seat + 2) % 4 : null;
-      if (partner == null) return; // yalnız eşli + ortak koltuğu var (bot ortak → mesaj gösterilmez)
+      // Ortak = takım arkadaşı (seat+2)%4 → duo (0↔2, 1↔3) ve duo3 için de doğru.
+      // Bot ortak olsa bile mesajı ilet; eğer ortak insan değilse sadece gönderene echo gider.
+      const partner = (seat + 2) % 4;
       for (const [sid, s] of this.seats) {
         if (s === partner || s === seat) {
           const c = this.clients.find((cl) => cl.sessionId === sid);

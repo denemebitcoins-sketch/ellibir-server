@@ -1,0 +1,141 @@
+{
+  "url": "ws://127.0.0.1:2579",
+  "requestedRooms": 8,
+  "startedAt": "2026-07-10T00:14:45.746Z",
+  "durationSec": 15,
+  "rampSec": 2,
+  "dropRate": 0.2,
+  "roomsCreated": 8,
+  "clientsTarget": 18,
+  "clientsJoined": 18,
+  "joinErrors": 0,
+  "leaves": 18,
+  "drops": 0,
+  "reconnectAttempts": 0,
+  "views": 817,
+  "viewBytes": 2535212,
+  "commands": 186,
+  "commandErrors": 2,
+  "parseErrors": 0,
+  "byGame": {
+    "51-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 26,
+      "commands": 3,
+      "errors": 0
+    },
+    "51-solo-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 73,
+      "commands": 5,
+      "errors": 1
+    },
+    "51-duo-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 292,
+      "commands": 61,
+      "errors": 0
+    },
+    "okey-duz-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 21,
+      "commands": 5,
+      "errors": 0
+    },
+    "okey-101-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 228,
+      "commands": 44,
+      "errors": 1
+    },
+    "tavla-duo": {
+      "rooms": 1,
+      "clients": 2,
+      "joined": 2,
+      "views": 126,
+      "commands": 53,
+      "errors": 0
+    },
+    "okey-banko-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 24,
+      "commands": 4,
+      "errors": 0
+    },
+    "tavla-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 27,
+      "commands": 11,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "51-solo-4p:insufficientOpen:Açış için yeterli puanın yok.": 1,
+    "okey-101-4p:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 1
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 18,
+      "views": 118,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 49,
+      "heapMb": 12
+    },
+    {
+      "t": 10,
+      "joined": 18,
+      "views": 305,
+      "commands": 39,
+      "errors": 1,
+      "rssMb": 44,
+      "heapMb": 9
+    },
+    {
+      "t": 15,
+      "joined": 18,
+      "views": 652,
+      "commands": 142,
+      "errors": 2,
+      "rssMb": 45,
+      "heapMb": 10
+    },
+    {
+      "t": 18.3,
+      "joined": 18,
+      "views": 817,
+      "commands": 186,
+      "errors": 2,
+      "rssMb": 46,
+      "heapMb": 9
+    }
+  ],
+  "errors": [],
+  "finishedAt": "2026-07-10T00:15:04.096Z",
+  "elapsedSec": 18.35,
+  "viewsPerSec": 44.53,
+  "commandsPerSec": 10.14,
+  "avgViewBytes": 3103,
+  "latencyMs": {
+    "samples": 186,
+    "p50": 1,
+    "p90": 1,
+    "p95": 2,
+    "p99": 3
+  }
+}

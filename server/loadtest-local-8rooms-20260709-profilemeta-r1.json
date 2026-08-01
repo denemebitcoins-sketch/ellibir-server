@@ -1,0 +1,160 @@
+{
+  "url": "ws://localhost:2567",
+  "requestedRooms": 8,
+  "startedAt": "2026-07-09T18:43:54.482Z",
+  "durationSec": 20,
+  "rampSec": 4,
+  "dropRate": 0.05,
+  "roomsCreated": 8,
+  "clientsTarget": 18,
+  "clientsJoined": 18,
+  "joinErrors": 0,
+  "leaves": 18,
+  "drops": 0,
+  "reconnectAttempts": 0,
+  "views": 1161,
+  "viewBytes": 3806544,
+  "commands": 301,
+  "commandErrors": 6,
+  "parseErrors": 0,
+  "byGame": {
+    "51-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 36,
+      "commands": 7,
+      "errors": 0
+    },
+    "51-solo-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 348,
+      "commands": 76,
+      "errors": 1
+    },
+    "51-duo-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 208,
+      "commands": 41,
+      "errors": 1
+    },
+    "okey-duz-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 31,
+      "commands": 9,
+      "errors": 0
+    },
+    "okey-101-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 260,
+      "commands": 55,
+      "errors": 4
+    },
+    "tavla-duo": {
+      "rooms": 1,
+      "clients": 2,
+      "joined": 2,
+      "views": 212,
+      "commands": 96,
+      "errors": 0
+    },
+    "okey-banko-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 33,
+      "commands": 8,
+      "errors": 0
+    },
+    "tavla-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 33,
+      "commands": 9,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "okey-101-4p:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 4,
+    "51-duo-4p:pickupSame:Aldığın kartı geri atamazsın — GERİ BIRAK kullan.": 1,
+    "51-solo-4p:atisLocked:Rakip işlek/okey attı (ceza yedi) — bu kartı yerden alamazsın.": 1
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 18,
+      "views": 103,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 50,
+      "heapMb": 13
+    },
+    {
+      "t": 10,
+      "joined": 18,
+      "views": 288,
+      "commands": 28,
+      "errors": 0,
+      "rssMb": 46,
+      "heapMb": 10
+    },
+    {
+      "t": 15,
+      "joined": 18,
+      "views": 745,
+      "commands": 165,
+      "errors": 5,
+      "rssMb": 47,
+      "heapMb": 10
+    },
+    {
+      "t": 20,
+      "joined": 18,
+      "views": 1035,
+      "commands": 256,
+      "errors": 5,
+      "rssMb": 48,
+      "heapMb": 10
+    },
+    {
+      "t": 25,
+      "joined": 18,
+      "views": 1161,
+      "commands": 301,
+      "errors": 6,
+      "rssMb": 46,
+      "heapMb": 9
+    },
+    {
+      "t": 25.7,
+      "joined": 18,
+      "views": 1161,
+      "commands": 301,
+      "errors": 6,
+      "rssMb": 46,
+      "heapMb": 9
+    }
+  ],
+  "errors": [],
+  "finishedAt": "2026-07-09T18:44:20.167Z",
+  "elapsedSec": 25.68,
+  "viewsPerSec": 45.2,
+  "commandsPerSec": 11.72,
+  "avgViewBytes": 3279,
+  "latencyMs": {
+    "samples": 301,
+    "p50": 1,
+    "p90": 2,
+    "p95": 2,
+    "p99": 4
+  }
+}

@@ -1,0 +1,374 @@
+{
+  "url": "ws://localhost:2567",
+  "requestedRooms": 50,
+  "startedAt": "2026-07-09T17:41:18.485Z",
+  "durationSec": 90,
+  "rampSec": 25,
+  "dropRate": 0.1,
+  "roomsCreated": 50,
+  "clientsTarget": 166,
+  "clientsJoined": 166,
+  "joinErrors": 0,
+  "leaves": 166,
+  "drops": 0,
+  "reconnectAttempts": 0,
+  "views": 26038,
+  "viewBytes": 100902345,
+  "commands": 7443,
+  "commandErrors": 102,
+  "parseErrors": 0,
+  "byGame": {
+    "51-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 150,
+      "commands": 35,
+      "errors": 1
+    },
+    "51-solo-4p": {
+      "rooms": 9,
+      "clients": 36,
+      "joined": 36,
+      "views": 5837,
+      "commands": 1343,
+      "errors": 42
+    },
+    "51-duo-4p": {
+      "rooms": 4,
+      "clients": 16,
+      "joined": 16,
+      "views": 3211,
+      "commands": 745,
+      "errors": 19
+    },
+    "okey-duz-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 70,
+      "commands": 23,
+      "errors": 0
+    },
+    "okey-101-4p": {
+      "rooms": 4,
+      "clients": 16,
+      "joined": 16,
+      "views": 1038,
+      "commands": 207,
+      "errors": 9
+    },
+    "tavla-duo": {
+      "rooms": 11,
+      "clients": 22,
+      "joined": 22,
+      "views": 5997,
+      "commands": 2886,
+      "errors": 23
+    },
+    "okey-banko-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 147,
+      "commands": 50,
+      "errors": 0
+    },
+    "tavla-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 189,
+      "commands": 85,
+      "errors": 0
+    },
+    "okey-duz-duo-4p": {
+      "rooms": 4,
+      "clients": 16,
+      "joined": 16,
+      "views": 2028,
+      "commands": 449,
+      "errors": 3
+    },
+    "okey-101-duo-4p": {
+      "rooms": 4,
+      "clients": 16,
+      "joined": 16,
+      "views": 936,
+      "commands": 181,
+      "errors": 5
+    },
+    "okey-quad-4p": {
+      "rooms": 4,
+      "clients": 16,
+      "joined": 16,
+      "views": 2032,
+      "commands": 452,
+      "errors": 0
+    },
+    "okey-duz-4p": {
+      "rooms": 3,
+      "clients": 12,
+      "joined": 12,
+      "views": 1511,
+      "commands": 333,
+      "errors": 0
+    },
+    "okey-banko-4p": {
+      "rooms": 3,
+      "clients": 12,
+      "joined": 12,
+      "views": 2892,
+      "commands": 654,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "51-bot-table1:insufficientOpen:Açış için yeterli puanın yok.": 1,
+    "51-solo-4p:insufficientOpen:Açış için yeterli puanın yok.": 35,
+    "okey-101-4p:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 9,
+    "51-duo-4p:insufficientOpen:Açış için yeterli puanın yok.": 18,
+    "tavla-duo:rule:katlama cevabı bekleniyor": 8,
+    "tavla-duo:rule:zaten attın — hamleni oyna": 7,
+    "okey-101-duo-4p:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 5,
+    "51-duo-4p:not_your_turn:not_your_turn": 1,
+    "tavla-duo:rule:küp rakipte": 7,
+    "51-solo-4p:atisLocked:Rakip işlek/okey attı (ceza yedi) — bu kartı yerden alamazsın.": 4,
+    "51-solo-4p:pickupSame:Aldığın kartı geri atamazsın — GERİ BIRAK kullan.": 1,
+    "okey-duz-duo-4p:rule:sıra sende değil": 3,
+    "tavla-duo:rule:sıra sende değil": 1,
+    "51-solo-4p:phase:Şu an kart çekemezsin.": 1,
+    "51-solo-4p:not_your_turn:not_your_turn": 1
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 26,
+      "views": 132,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 53,
+      "heapMb": 11
+    },
+    {
+      "t": 10,
+      "joined": 60,
+      "views": 550,
+      "commands": 34,
+      "errors": 1,
+      "rssMb": 48,
+      "heapMb": 10
+    },
+    {
+      "t": 15,
+      "joined": 95,
+      "views": 1587,
+      "commands": 235,
+      "errors": 3,
+      "rssMb": 54,
+      "heapMb": 14
+    },
+    {
+      "t": 20,
+      "joined": 128,
+      "views": 3409,
+      "commands": 661,
+      "errors": 7,
+      "rssMb": 59,
+      "heapMb": 13
+    },
+    {
+      "t": 25,
+      "joined": 162,
+      "views": 5981,
+      "commands": 1314,
+      "errors": 17,
+      "rssMb": 68,
+      "heapMb": 19
+    },
+    {
+      "t": 30.1,
+      "joined": 166,
+      "views": 8896,
+      "commands": 2126,
+      "errors": 26,
+      "rssMb": 67,
+      "heapMb": 14
+    },
+    {
+      "t": 35.1,
+      "joined": 166,
+      "views": 11642,
+      "commands": 2968,
+      "errors": 40,
+      "rssMb": 69,
+      "heapMb": 19
+    },
+    {
+      "t": 40.1,
+      "joined": 166,
+      "views": 13537,
+      "commands": 3597,
+      "errors": 47,
+      "rssMb": 69,
+      "heapMb": 14
+    },
+    {
+      "t": 45.1,
+      "joined": 166,
+      "views": 15152,
+      "commands": 4115,
+      "errors": 52,
+      "rssMb": 70,
+      "heapMb": 19
+    },
+    {
+      "t": 50.1,
+      "joined": 166,
+      "views": 16385,
+      "commands": 4527,
+      "errors": 56,
+      "rssMb": 70,
+      "heapMb": 18
+    },
+    {
+      "t": 55.1,
+      "joined": 166,
+      "views": 17357,
+      "commands": 4865,
+      "errors": 63,
+      "rssMb": 71,
+      "heapMb": 20
+    },
+    {
+      "t": 60.1,
+      "joined": 166,
+      "views": 18287,
+      "commands": 5185,
+      "errors": 65,
+      "rssMb": 71,
+      "heapMb": 15
+    },
+    {
+      "t": 65.1,
+      "joined": 166,
+      "views": 19458,
+      "commands": 5559,
+      "errors": 69,
+      "rssMb": 70,
+      "heapMb": 16
+    },
+    {
+      "t": 70.1,
+      "joined": 166,
+      "views": 20537,
+      "commands": 5907,
+      "errors": 73,
+      "rssMb": 69,
+      "heapMb": 14
+    },
+    {
+      "t": 75.1,
+      "joined": 166,
+      "views": 21423,
+      "commands": 6176,
+      "errors": 78,
+      "rssMb": 71,
+      "heapMb": 17
+    },
+    {
+      "t": 80.1,
+      "joined": 166,
+      "views": 22011,
+      "commands": 6358,
+      "errors": 82,
+      "rssMb": 72,
+      "heapMb": 15
+    },
+    {
+      "t": 85.1,
+      "joined": 166,
+      "views": 22471,
+      "commands": 6490,
+      "errors": 85,
+      "rssMb": 71,
+      "heapMb": 17
+    },
+    {
+      "t": 90.1,
+      "joined": 166,
+      "views": 23053,
+      "commands": 6677,
+      "errors": 88,
+      "rssMb": 70,
+      "heapMb": 15
+    },
+    {
+      "t": 95.1,
+      "joined": 166,
+      "views": 23570,
+      "commands": 6834,
+      "errors": 91,
+      "rssMb": 72,
+      "heapMb": 17
+    },
+    {
+      "t": 100.1,
+      "joined": 166,
+      "views": 24217,
+      "commands": 6998,
+      "errors": 94,
+      "rssMb": 72,
+      "heapMb": 17
+    },
+    {
+      "t": 105.1,
+      "joined": 166,
+      "views": 24599,
+      "commands": 7100,
+      "errors": 98,
+      "rssMb": 72,
+      "heapMb": 18
+    },
+    {
+      "t": 110.1,
+      "joined": 166,
+      "views": 24980,
+      "commands": 7205,
+      "errors": 101,
+      "rssMb": 72,
+      "heapMb": 18
+    },
+    {
+      "t": 115.2,
+      "joined": 166,
+      "views": 25718,
+      "commands": 7406,
+      "errors": 102,
+      "rssMb": 72,
+      "heapMb": 19
+    },
+    {
+      "t": 117,
+      "joined": 166,
+      "views": 26038,
+      "commands": 7443,
+      "errors": 102,
+      "rssMb": 72,
+      "heapMb": 14
+    }
+  ],
+  "errors": [],
+  "finishedAt": "2026-07-09T17:43:15.438Z",
+  "elapsedSec": 116.95,
+  "viewsPerSec": 222.64,
+  "commandsPerSec": 63.64,
+  "avgViewBytes": 3875,
+  "latencyMs": {
+    "samples": 5000,
+    "p50": 1,
+    "p90": 1,
+    "p95": 2,
+    "p99": 13899
+  }
+}

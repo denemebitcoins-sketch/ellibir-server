@@ -1,0 +1,181 @@
+{
+  "url": "ws://localhost:2567",
+  "requestedRooms": 20,
+  "startedAt": "2026-07-09T17:14:36.738Z",
+  "durationSec": 45,
+  "rampSec": 8,
+  "dropRate": 0.12,
+  "roomsCreated": 20,
+  "clientsTarget": 26,
+  "clientsJoined": 26,
+  "joinErrors": 0,
+  "leaves": 26,
+  "drops": 0,
+  "reconnectAttempts": 0,
+  "views": 600,
+  "viewBytes": 891701,
+  "commands": 266,
+  "commandErrors": 5,
+  "parseErrors": 0,
+  "byGame": {
+    "51": {
+      "rooms": 6,
+      "clients": 8,
+      "joined": 8,
+      "views": 12,
+      "commands": 0,
+      "errors": 0
+    },
+    "okey-duz": {
+      "rooms": 3,
+      "clients": 4,
+      "joined": 4,
+      "views": 6,
+      "commands": 0,
+      "errors": 0
+    },
+    "okey-101": {
+      "rooms": 3,
+      "clients": 4,
+      "joined": 4,
+      "views": 6,
+      "commands": 0,
+      "errors": 0
+    },
+    "tavla": {
+      "rooms": 6,
+      "clients": 8,
+      "joined": 8,
+      "views": 574,
+      "commands": 266,
+      "errors": 5
+    },
+    "okey-banko": {
+      "rooms": 2,
+      "clients": 2,
+      "joined": 2,
+      "views": 2,
+      "commands": 0,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "tavla:rule:zaten attın — hamleni oyna": 2,
+    "tavla:rule:küp rakipte": 2,
+    "tavla:rule:sıra sende değil": 1
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 16,
+      "views": 28,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 49,
+      "heapMb": 12
+    },
+    {
+      "t": 10,
+      "joined": 26,
+      "views": 68,
+      "commands": 6,
+      "errors": 0,
+      "rssMb": 45,
+      "heapMb": 9
+    },
+    {
+      "t": 15,
+      "joined": 26,
+      "views": 152,
+      "commands": 44,
+      "errors": 0,
+      "rssMb": 46,
+      "heapMb": 10
+    },
+    {
+      "t": 20,
+      "joined": 26,
+      "views": 268,
+      "commands": 105,
+      "errors": 3,
+      "rssMb": 45,
+      "heapMb": 10
+    },
+    {
+      "t": 25,
+      "joined": 26,
+      "views": 294,
+      "commands": 119,
+      "errors": 4,
+      "rssMb": 46,
+      "heapMb": 10
+    },
+    {
+      "t": 30,
+      "joined": 26,
+      "views": 294,
+      "commands": 119,
+      "errors": 4,
+      "rssMb": 46,
+      "heapMb": 10
+    },
+    {
+      "t": 35,
+      "joined": 26,
+      "views": 319,
+      "commands": 131,
+      "errors": 4,
+      "rssMb": 45,
+      "heapMb": 10
+    },
+    {
+      "t": 40,
+      "joined": 26,
+      "views": 381,
+      "commands": 162,
+      "errors": 5,
+      "rssMb": 46,
+      "heapMb": 10
+    },
+    {
+      "t": 45.1,
+      "joined": 26,
+      "views": 464,
+      "commands": 204,
+      "errors": 5,
+      "rssMb": 46,
+      "heapMb": 10
+    },
+    {
+      "t": 50.1,
+      "joined": 26,
+      "views": 540,
+      "commands": 240,
+      "errors": 5,
+      "rssMb": 46,
+      "heapMb": 10
+    },
+    {
+      "t": 54.6,
+      "joined": 26,
+      "views": 600,
+      "commands": 266,
+      "errors": 5,
+      "rssMb": 46,
+      "heapMb": 10
+    }
+  ],
+  "errors": [],
+  "finishedAt": "2026-07-09T17:15:31.380Z",
+  "elapsedSec": 54.64,
+  "viewsPerSec": 10.98,
+  "commandsPerSec": 4.87,
+  "avgViewBytes": 1486,
+  "latencyMs": {
+    "samples": 263,
+    "p50": 1,
+    "p90": 1,
+    "p95": 1,
+    "p99": 3
+  }
+}

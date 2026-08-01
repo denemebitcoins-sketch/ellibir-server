@@ -988,3 +988,96 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.scores[0]).toBe(-101);
   });
 });
+
+describe('101 işlenen taş geri alma', () => {
+  function g101() {
+    const st = createOkeyGame({ seed: 101, dealerSeat: 0, rules: { variant: 'yuzbir', totalEls: 1 } as any });
+    st.gosterge = t('K', 12);
+    st.okeyColor = 'K';
+    st.okeyRank = 13 as OkeyRank;
+    st.phase = 'discard';
+    st.turn = 0;
+    return st;
+  }
+
+  it('açılmış per işlendikten sonra retrieveTile taşı geri verir', () => {
+    const st = g101();
+    const run = [t('R', 1), t('R', 2), t('R', 3)];
+    const extra = t('R', 4);
+    st.players[0]!.hand = [...run, extra];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.openMelds = [{ id: 'm1', ownerSeat: 0, kind: 'run', tiles: run, points: 6 }];
+
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: extra.id }).ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(4);
+    expect(st.players[0]!.hand).not.toContainEqual(expect.objectContaining({ id: extra.id }));
+
+    const undo = applyOkeyMove(st, 0, { t: 'retrieveTile' });
+    expect(undo.ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(3);
+    expect(st.players[0]!.hand).toContainEqual(expect.objectContaining({ id: extra.id }));
+    expect(st.islekHistory).toHaveLength(0);
+  });
+
+  it('geri alma okey kurtarma durumunda kurtarılan taşı da geri çeker', () => {
+    const st = g101();
+    // Okey K13 joker; R1-joker-R3 serisine R2 işlenince okey ele geri döner.
+    const joker = t('K', 13);
+    const r1 = t('R', 1), r2 = t('R', 2), r3 = t('R', 3);
+    st.players[0]!.hand = [r2];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.openMelds = [{ id: 'm1', ownerSeat: 0, kind: 'run', tiles: [r1, joker, r3], points: 6 }];
+
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: r2.id }).ok).toBe(true);
+    expect(st.openMelds[0]!.tiles.some((x) => x.id === r2.id)).toBe(true);
+    expect(st.players[0]!.hand.some((x) => x.id === joker.id)).toBe(true);
+
+    const undo = applyOkeyMove(st, 0, { t: 'retrieveTile' });
+    expect(undo.ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(3);
+    expect(st.players[0]!.hand).toContainEqual(expect.objectContaining({ id: r2.id }));
+    expect(st.players[0]!.hand).not.toContainEqual(expect.objectContaining({ id: joker.id }));
+  });
+
+  it('iki taş işlendikten sonra retrieveTile sırayla geri alır', () => {
+    const st = g101();
+    const run = [t('R', 1), t('R', 2), t('R', 3)];
+    const a = t('R', 4), b = t('R', 5);
+    st.players[0]!.hand = [a, b];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.openMelds = [{ id: 'm1', ownerSeat: 0, kind: 'run', tiles: run, points: 6 }];
+
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: a.id }).ok).toBe(true);
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: b.id }).ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(5);
+
+    expect(applyOkeyMove(st, 0, { t: 'retrieveTile' }).ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(4);
+    expect(st.players[0]!.hand).toContainEqual(expect.objectContaining({ id: b.id }));
+
+    expect(applyOkeyMove(st, 0, { t: 'retrieveTile' }).ok).toBe(true);
+    expect(st.openMelds[0]!.tiles).toHaveLength(3);
+    expect(st.players[0]!.hand).toContainEqual(expect.objectContaining({ id: a.id }));
+  });
+
+  it('sıra dışındaki oyuncu geri alamaz', () => {
+    const st = g101();
+    const run = [t('R', 1), t('R', 2), t('R', 3)];
+    const extra = t('R', 4);
+    st.players[0]!.hand = [...run, extra];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.openMelds = [{ id: 'm1', ownerSeat: 0, kind: 'run', tiles: run, points: 6 }];
+    st.turn = 1;
+
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: extra.id }).ok).toBe(false); // sıra 1'de
+    st.turn = 0;
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: extra.id }).ok).toBe(true);
+    st.turn = 1;
+    const undo = applyOkeyMove(st, 0, { t: 'retrieveTile' });
+    expect(undo.ok).toBe(false);
+  });
+});

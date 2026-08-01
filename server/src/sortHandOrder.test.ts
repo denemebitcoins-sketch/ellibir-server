@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_RULES } from '../../packages/engine/src/rules';
-import type { Card } from '../../packages/engine/src/types';
+import type { Card, NormalCard } from '../../packages/engine/src/types';
 import { sortHandOrder } from './clientView';
 
 describe('51 visual hand arrangement', () => {
@@ -22,5 +22,28 @@ describe('51 visual hand arrangement', () => {
     expect(order).toHaveLength(hand.length);
     expect(aceIndexes).toEqual([aceIndexes[0]!, aceIndexes[0]! + 1, aceIndexes[0]! + 2]);
     expect(runIndexes).toEqual([runIndexes[0]!, runIndexes[0]! + 1, runIndexes[0]! + 2, runIndexes[0]! + 3]);
+  });
+
+  it('groups duplicate-rank hands into two separate sets', () => {
+    const hand: Card[] = [
+      { id: 'c10a', joker: false, suit: 'C', rank: 10 },
+      { id: 'c10b', joker: false, suit: 'C', rank: 10 },
+      { id: 'd10a', joker: false, suit: 'D', rank: 10 },
+      { id: 'd10b', joker: false, suit: 'D', rank: 10 },
+      { id: 's10a', joker: false, suit: 'S', rank: 10 },
+      { id: 's10b', joker: false, suit: 'S', rank: 10 },
+    ];
+
+    const order = sortHandOrder(hand, DEFAULT_RULES, 'seri');
+    expect(order).toHaveLength(hand.length);
+    // solveHand arrange ile 2 ayrı 3'lü küt bulunmalı; her küt ardışık 3 indeks kaplar.
+    for (let i = 0; i < order.length; i += 3) {
+      const group = order.slice(i, i + 3);
+      expect(group).toHaveLength(3);
+      const ranks = new Set(group.map((id) => (hand.find((c) => c.id === id)! as NormalCard).rank));
+      const suits = new Set(group.map((id) => (hand.find((c) => c.id === id)! as NormalCard).suit));
+      expect(ranks.size).toBe(1);
+      expect(suits.size).toBe(3);
+    }
   });
 });

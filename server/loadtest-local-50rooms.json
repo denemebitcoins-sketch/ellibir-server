@@ -1,0 +1,316 @@
+{
+  "url": "ws://localhost:2567",
+  "requestedRooms": 50,
+  "startedAt": "2026-07-07T15:49:43.349Z",
+  "durationSec": 90,
+  "rampSec": 25,
+  "dropRate": 0.08,
+  "roomsCreated": 50,
+  "clientsTarget": 79,
+  "clientsJoined": 79,
+  "joinErrors": 0,
+  "leaves": 74,
+  "drops": 5,
+  "reconnectAttempts": 0,
+  "views": 10941,
+  "viewBytes": 37711154,
+  "commands": 3692,
+  "commandErrors": 50,
+  "parseErrors": 0,
+  "byGame": {
+    "51": {
+      "rooms": 14,
+      "clients": 19,
+      "joined": 19,
+      "views": 2370,
+      "commands": 539,
+      "errors": 22
+    },
+    "okey-duz": {
+      "rooms": 8,
+      "clients": 12,
+      "joined": 12,
+      "views": 1169,
+      "commands": 362,
+      "errors": 0
+    },
+    "okey-101": {
+      "rooms": 8,
+      "clients": 12,
+      "joined": 12,
+      "views": 507,
+      "commands": 138,
+      "errors": 6
+    },
+    "tavla": {
+      "rooms": 12,
+      "clients": 16,
+      "joined": 16,
+      "views": 4296,
+      "commands": 2017,
+      "errors": 22
+    },
+    "okey-banko": {
+      "rooms": 4,
+      "clients": 4,
+      "joined": 4,
+      "views": 511,
+      "commands": 170,
+      "errors": 0
+    },
+    "okey-quad": {
+      "rooms": 4,
+      "clients": 16,
+      "joined": 16,
+      "views": 2088,
+      "commands": 466,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "51:insufficientOpen:Açış için yeterli puanın yok.": 18,
+    "tavla:rule:katlama cevabı bekleniyor": 15,
+    "tavla:rule:küp rakipte": 2,
+    "okey-101:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 4,
+    "tavla:rule:zaten attın — hamleni oyna": 3,
+    "tavla:rule:sıra sende değil": 1,
+    "51:pickupSame:Aldığın kartı geri atamazsın — GERİ BIRAK kullan.": 2
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 14,
+      "views": 58,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 51,
+      "heapMb": 11
+    },
+    {
+      "t": 10,
+      "joined": 29,
+      "views": 224,
+      "commands": 12,
+      "errors": 0,
+      "rssMb": 48,
+      "heapMb": 9
+    },
+    {
+      "t": 15,
+      "joined": 46,
+      "views": 623,
+      "commands": 94,
+      "errors": 0,
+      "rssMb": 52,
+      "heapMb": 11
+    },
+    {
+      "t": 20,
+      "joined": 61,
+      "views": 1265,
+      "commands": 275,
+      "errors": 1,
+      "rssMb": 54,
+      "heapMb": 12
+    },
+    {
+      "t": 25,
+      "joined": 78,
+      "views": 2170,
+      "commands": 530,
+      "errors": 1,
+      "rssMb": 59,
+      "heapMb": 14
+    },
+    {
+      "t": 30,
+      "joined": 79,
+      "views": 3177,
+      "commands": 844,
+      "errors": 4,
+      "rssMb": 59,
+      "heapMb": 12
+    },
+    {
+      "t": 35,
+      "joined": 79,
+      "views": 4193,
+      "commands": 1179,
+      "errors": 8,
+      "rssMb": 59,
+      "heapMb": 11
+    },
+    {
+      "t": 40,
+      "joined": 79,
+      "views": 5086,
+      "commands": 1488,
+      "errors": 13,
+      "rssMb": 59,
+      "heapMb": 11
+    },
+    {
+      "t": 45.1,
+      "joined": 79,
+      "views": 5917,
+      "commands": 1779,
+      "errors": 17,
+      "rssMb": 60,
+      "heapMb": 13
+    },
+    {
+      "t": 50.1,
+      "joined": 79,
+      "views": 6540,
+      "commands": 1997,
+      "errors": 23,
+      "rssMb": 60,
+      "heapMb": 12
+    },
+    {
+      "t": 55.1,
+      "joined": 79,
+      "views": 7040,
+      "commands": 2195,
+      "errors": 25,
+      "rssMb": 61,
+      "heapMb": 13
+    },
+    {
+      "t": 60.1,
+      "joined": 79,
+      "views": 7605,
+      "commands": 2425,
+      "errors": 27,
+      "rssMb": 62,
+      "heapMb": 14
+    },
+    {
+      "t": 65.1,
+      "joined": 79,
+      "views": 8131,
+      "commands": 2634,
+      "errors": 31,
+      "rssMb": 60,
+      "heapMb": 12
+    },
+    {
+      "t": 70.1,
+      "joined": 79,
+      "views": 8581,
+      "commands": 2809,
+      "errors": 33,
+      "rssMb": 61,
+      "heapMb": 13
+    },
+    {
+      "t": 75.1,
+      "joined": 79,
+      "views": 8938,
+      "commands": 2945,
+      "errors": 35,
+      "rssMb": 60,
+      "heapMb": 12
+    },
+    {
+      "t": 80.1,
+      "joined": 79,
+      "views": 9267,
+      "commands": 3068,
+      "errors": 36,
+      "rssMb": 60,
+      "heapMb": 11
+    },
+    {
+      "t": 85.1,
+      "joined": 79,
+      "views": 9598,
+      "commands": 3209,
+      "errors": 41,
+      "rssMb": 61,
+      "heapMb": 13
+    },
+    {
+      "t": 90.1,
+      "joined": 79,
+      "views": 9919,
+      "commands": 3334,
+      "errors": 42,
+      "rssMb": 61,
+      "heapMb": 12
+    },
+    {
+      "t": 95.1,
+      "joined": 79,
+      "views": 10208,
+      "commands": 3450,
+      "errors": 43,
+      "rssMb": 61,
+      "heapMb": 13
+    },
+    {
+      "t": 100.1,
+      "joined": 79,
+      "views": 10515,
+      "commands": 3561,
+      "errors": 44,
+      "rssMb": 60,
+      "heapMb": 12
+    },
+    {
+      "t": 105.1,
+      "joined": 79,
+      "views": 10653,
+      "commands": 3610,
+      "errors": 47,
+      "rssMb": 53,
+      "heapMb": 12
+    },
+    {
+      "t": 110.1,
+      "joined": 79,
+      "views": 10790,
+      "commands": 3655,
+      "errors": 49,
+      "rssMb": 53,
+      "heapMb": 11
+    },
+    {
+      "t": 115.1,
+      "joined": 79,
+      "views": 10895,
+      "commands": 3689,
+      "errors": 50,
+      "rssMb": 53,
+      "heapMb": 12
+    },
+    {
+      "t": 116.8,
+      "joined": 79,
+      "views": 10941,
+      "commands": 3692,
+      "errors": 50,
+      "rssMb": 53,
+      "heapMb": 11
+    }
+  ],
+  "errors": [
+    "okey-101#1235127/0 roomError 0: WebSocket is not defined",
+    "tavla#1235123/0 roomError 0: WebSocket is not defined",
+    "51#1235100/1 roomError 0: WebSocket is not defined",
+    "okey-101#1235132/1 roomError 0: WebSocket is not defined",
+    "51#1235124/0 roomError 0: WebSocket is not defined"
+  ],
+  "finishedAt": "2026-07-07T15:51:40.195Z",
+  "elapsedSec": 116.83,
+  "viewsPerSec": 93.65,
+  "commandsPerSec": 31.6,
+  "avgViewBytes": 3447,
+  "latencyMs": {
+    "samples": 3681,
+    "p50": 1,
+    "p90": 1,
+    "p95": 2,
+    "p99": 50
+  }
+}

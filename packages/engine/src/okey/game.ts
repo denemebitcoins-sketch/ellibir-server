@@ -40,6 +40,18 @@ export interface OkeyPublicMeld {
   points: number;
 }
 
+export interface IslekHistoryItem {
+  seat: number;
+  meldId: string;
+  tileId: string;
+  tile: OkeyTile;           // işlenen taşın tam kopyası (geri vermek için)
+  rescuedTileId?: string;   // okey kurtarma ile işlendiyse kurtarılan gerçek taş
+  previousTiles: OkeyTile[];
+  previousPoints: number;
+  processKey: string;
+  isJokerReplace: boolean;
+}
+
 export interface OkeyGameState {
   rules: OkeyRuleConfig;
   seed: number;
@@ -73,6 +85,7 @@ export interface OkeyGameState {
   yuzbirMaxOpenPoints: number; // 101 katlamalı: masadaki en yüksek seri açış
   yuzbirMaxOpenPairs: number;  // 101 katlamalı: masadaki en yüksek çift açışı
   yuzbirMeldProcessCounts: Record<string, number>; // 101: aynı sırada oyuncu+per başına işlenen taş sayısı
+  islekHistory: IslekHistoryItem[]; // 101: bu el içinde işlenen taşlar (geri alma için)
   matchLog: string[];
 }
 
@@ -131,6 +144,7 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     yuzbirMaxOpenPoints: 0,
     yuzbirMaxOpenPairs: 0,
     yuzbirMeldProcessCounts: {},
+    islekHistory: [],
   };
   if (opts.dealFirst !== false) startNextEl(state);
   return state;
@@ -238,6 +252,7 @@ export function startNextEl(state: OkeyGameState): void {
   state.yuzbirMaxOpenPoints = 0;
   state.yuzbirMaxOpenPairs = 0;
   state.yuzbirMeldProcessCounts = {};
+  state.islekHistory = [];
   state.elStartScores = [...state.scores]; // yazboz delta tabanı
   // Taahhütler bu elde devreye girer (el DAĞITILMADAN söylenmişti).
   state.bankoThisEl = [...(state.bankoPending ?? [false, false, false, false])];
@@ -698,6 +713,8 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   const processCount = state.yuzbirMeldProcessCounts[processKey] ?? 0;
   if (processCount >= 2) return { ok: false, error: 'bu pere aynı sırada en fazla 2 taş işleyebilirsin' };
   const tile = p.hand[idx]!;
+  const previousTiles = meld.tiles.slice();
+  const previousPoints = meld.points;
   const replacement = buildYuzbirJokerReplacement(state, meld, tile);
   if (replacement) {
     meld.tiles = replacement.tiles;
@@ -717,8 +734,46 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   p.hand.splice(idx, 1);
   if (replacement) p.hand.push(replacement.rescued);
   state.yuzbirMeldProcessCounts[processKey] = processCount + 1;
+  state.islekHistory.push({
+    seat,
+    meldId,
+    tileId,
+    tile: JSON.parse(JSON.stringify(tile)) as OkeyTile,
+    rescuedTileId: replacement ? replacement.rescued.id : undefined,
+    previousTiles: previousTiles.map((t) => JSON.parse(JSON.stringify(t)) as OkeyTile),
+    previousPoints,
+    processKey,
+    isJokerReplace: !!replacement,
+  });
   clearPendingLeftIfUsed(p, [tileId]);
   state.matchLog.push(replacement ? `${p.name} OKEY'i alarak taş işledi` : `${p.name} taş işledi`);
+  return { ok: true };
+}
+
+function retrieveLastIslek(state: OkeyGameState, seat: number): OkeyMoveResult {
+  if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
+  if (state.phase !== 'discard') return { ok: false, error: 'geri almak için sıranda taş çekmiş olmalısın' };
+  if (state.turn !== seat) return { ok: false, error: 'sıra sende değil' };
+  const p = state.players[seat];
+  if (!p) return { ok: false, error: 'geçersiz koltuk' };
+  if (!p.hasOpened) return { ok: false, error: 'geri almak için önce açmalısın' };
+  const idx = state.islekHistory.map((h, i) => ({ h, i })).reverse().find(({ h }) => h.seat === seat);
+  if (!idx) return { ok: false, error: 'bu turda geri alınacak işlenen taş yok' };
+  const item = idx.h;
+  const meld = state.openMelds.find((m) => m.id === item.meldId);
+  if (!meld) return { ok: false, error: 'per bulunamadı' };
+  // Kurtarılan taş eldeyse çıkar; işlenen taşı geri ver.
+  if (item.rescuedTileId) {
+    const ridx = p.hand.findIndex((t) => t.id === item.rescuedTileId);
+    if (ridx >= 0) p.hand.splice(ridx, 1);
+  }
+  p.hand.push(item.tile);
+  meld.tiles = item.previousTiles;
+  meld.points = item.previousPoints;
+  state.yuzbirMeldProcessCounts[item.processKey] = (state.yuzbirMeldProcessCounts[item.processKey] ?? 1) - 1;
+  if (state.yuzbirMeldProcessCounts[item.processKey] <= 0) delete state.yuzbirMeldProcessCounts[item.processKey];
+  state.islekHistory.splice(idx.i, 1);
+  state.matchLog.push(`${p.name} işlenen taşı geri aldı`);
   return { ok: true };
 }
 
@@ -728,6 +783,7 @@ export type OkeyMove =
   | { t: 'open'; groups: string[][] }
   | { t: 'openPairs'; pairs: string[][] }
   | { t: 'extend'; meldId: string; tileId: string }
+  | { t: 'retrieveTile' }  // 101: bu turda işlenen son taşı geri al
   | { t: 'discard'; tileId: string }
   | { t: 'finish'; tileId: string }
   | { t: 'gosterge' }
@@ -781,6 +837,8 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       return openYuzbirPairs(state, seat, move.pairs);
     case 'extend':
       return extendYuzbirMeld(state, seat, move.meldId, move.tileId);
+    case 'retrieveTile':
+      return retrieveLastIslek(state, seat);
     case 'discard': {
       if (state.phase !== 'discard') return { ok: false, error: 'önce taş çekmelisin' };
       if (state.rules.variant === 'yuzbir' && p.yuzbirPendingLeftTileId)

@@ -1,0 +1,218 @@
+{
+  "url": "ws://localhost:2567",
+  "requestedRooms": 20,
+  "startedAt": "2026-07-10T12:36:07.534Z",
+  "durationSec": 25,
+  "rampSec": 6,
+  "dropRate": 0.12,
+  "roomsCreated": 20,
+  "clientsTarget": 60,
+  "clientsJoined": 60,
+  "joinErrors": 0,
+  "leaves": 60,
+  "drops": 0,
+  "reconnectAttempts": 0,
+  "views": 4640,
+  "viewBytes": 14892730,
+  "commands": 1265,
+  "commandErrors": 25,
+  "parseErrors": 0,
+  "byGame": {
+    "51-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 22,
+      "commands": 3,
+      "errors": 1
+    },
+    "51-solo-4p": {
+      "rooms": 3,
+      "clients": 12,
+      "joined": 12,
+      "views": 512,
+      "commands": 94,
+      "errors": 5
+    },
+    "51-duo-4p": {
+      "rooms": 2,
+      "clients": 8,
+      "joined": 8,
+      "views": 227,
+      "commands": 35,
+      "errors": 4
+    },
+    "okey-duz-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 41,
+      "commands": 13,
+      "errors": 0
+    },
+    "okey-101-4p": {
+      "rooms": 2,
+      "clients": 8,
+      "joined": 8,
+      "views": 464,
+      "commands": 91,
+      "errors": 3
+    },
+    "tavla-duo": {
+      "rooms": 4,
+      "clients": 8,
+      "joined": 8,
+      "views": 1112,
+      "commands": 520,
+      "errors": 6
+    },
+    "okey-banko-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 43,
+      "commands": 12,
+      "errors": 0
+    },
+    "tavla-bot-table1": {
+      "rooms": 1,
+      "clients": 1,
+      "joined": 1,
+      "views": 29,
+      "commands": 11,
+      "errors": 2
+    },
+    "okey-duz-duo-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 492,
+      "commands": 109,
+      "errors": 0
+    },
+    "okey-101-duo-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 252,
+      "commands": 50,
+      "errors": 3
+    },
+    "okey-quad-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 442,
+      "commands": 104,
+      "errors": 1
+    },
+    "okey-duz-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 536,
+      "commands": 122,
+      "errors": 0
+    },
+    "okey-banko-4p": {
+      "rooms": 1,
+      "clients": 4,
+      "joined": 4,
+      "views": 468,
+      "commands": 101,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "okey-101-4p:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 3,
+    "51-duo-4p:insufficientOpen:Açış için yeterli puanın yok.": 3,
+    "51-duo-4p:atisLocked:Rakip işlek/okey attı (ceza yedi) — bu kartı yerden alamazsın.": 1,
+    "51-solo-4p:insufficientOpen:Açış için yeterli puanın yok.": 5,
+    "51-bot-table1:insufficientOpen:Açış için yeterli puanın yok.": 1,
+    "tavla-duo:rule:zaten attın — hamleni oyna": 1,
+    "okey-101-duo-4p:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 3,
+    "tavla-bot-table1:rule:katlama cevabı bekleniyor": 1,
+    "tavla-bot-table1:rule:küp rakipte": 1,
+    "okey-quad-4p:rule:sıra sende değil": 1,
+    "tavla-duo:rule:katlama cevabı bekleniyor": 3,
+    "tavla-duo:rule:sıra sende değil": 2
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 48,
+      "views": 238,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 56,
+      "heapMb": 13
+    },
+    {
+      "t": 10,
+      "joined": 60,
+      "views": 702,
+      "commands": 52,
+      "errors": 0,
+      "rssMb": 49,
+      "heapMb": 11
+    },
+    {
+      "t": 15,
+      "joined": 60,
+      "views": 1865,
+      "commands": 373,
+      "errors": 9,
+      "rssMb": 51,
+      "heapMb": 11
+    },
+    {
+      "t": 20,
+      "joined": 60,
+      "views": 2870,
+      "commands": 688,
+      "errors": 14,
+      "rssMb": 51,
+      "heapMb": 11
+    },
+    {
+      "t": 25,
+      "joined": 60,
+      "views": 3624,
+      "commands": 941,
+      "errors": 18,
+      "rssMb": 53,
+      "heapMb": 11
+    },
+    {
+      "t": 30,
+      "joined": 60,
+      "views": 4370,
+      "commands": 1194,
+      "errors": 24,
+      "rssMb": 54,
+      "heapMb": 12
+    },
+    {
+      "t": 32.5,
+      "joined": 60,
+      "views": 4640,
+      "commands": 1265,
+      "errors": 25,
+      "rssMb": 55,
+      "heapMb": 12
+    }
+  ],
+  "errors": [],
+  "finishedAt": "2026-07-10T12:36:40.024Z",
+  "elapsedSec": 32.49,
+  "viewsPerSec": 142.82,
+  "commandsPerSec": 38.94,
+  "avgViewBytes": 3210,
+  "latencyMs": {
+    "samples": 1265,
+    "p50": 1,
+    "p90": 1,
+    "p95": 2,
+    "p99": 3
+  }
+}

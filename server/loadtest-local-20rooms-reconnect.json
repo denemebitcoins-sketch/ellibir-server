@@ -1,0 +1,191 @@
+{
+  "url": "ws://localhost:2567",
+  "requestedRooms": 20,
+  "startedAt": "2026-07-07T15:53:10.105Z",
+  "durationSec": 45,
+  "rampSec": 8,
+  "dropRate": 0.25,
+  "roomsCreated": 20,
+  "clientsTarget": 26,
+  "clientsJoined": 26,
+  "joinErrors": 0,
+  "leaves": 19,
+  "drops": 7,
+  "reconnectAttempts": 0,
+  "views": 1731,
+  "viewBytes": 4625862,
+  "commands": 599,
+  "commandErrors": 17,
+  "parseErrors": 0,
+  "byGame": {
+    "51": {
+      "rooms": 6,
+      "clients": 8,
+      "joined": 8,
+      "views": 368,
+      "commands": 74,
+      "errors": 7
+    },
+    "okey-duz": {
+      "rooms": 3,
+      "clients": 4,
+      "joined": 4,
+      "views": 296,
+      "commands": 91,
+      "errors": 1
+    },
+    "okey-101": {
+      "rooms": 3,
+      "clients": 4,
+      "joined": 4,
+      "views": 176,
+      "commands": 50,
+      "errors": 1
+    },
+    "tavla": {
+      "rooms": 6,
+      "clients": 8,
+      "joined": 8,
+      "views": 796,
+      "commands": 358,
+      "errors": 8
+    },
+    "okey-banko": {
+      "rooms": 2,
+      "clients": 2,
+      "joined": 2,
+      "views": 95,
+      "commands": 26,
+      "errors": 0
+    }
+  },
+  "errorKinds": {
+    "tavla:rule:katlama cevabı bekleniyor": 3,
+    "tavla:rule:küp rakipte": 2,
+    "okey-101:rule:soldan aldığın taşı açmadan/işlemeden taş atamazsın": 1,
+    "51:insufficientOpen:Açış için yeterli puanın yok.": 3,
+    "tavla:rule:zaten attın — hamleni oyna": 1
+  },
+  "snapshots": [
+    {
+      "t": 5,
+      "joined": 16,
+      "views": 70,
+      "commands": 0,
+      "errors": 0,
+      "rssMb": 52,
+      "heapMb": 12
+    },
+    {
+      "t": 10,
+      "joined": 26,
+      "views": 220,
+      "commands": 13,
+      "errors": 1,
+      "rssMb": 47,
+      "heapMb": 10
+    },
+    {
+      "t": 15,
+      "joined": 26,
+      "views": 454,
+      "commands": 85,
+      "errors": 3,
+      "rssMb": 48,
+      "heapMb": 10
+    },
+    {
+      "t": 20,
+      "joined": 26,
+      "views": 713,
+      "commands": 187,
+      "errors": 5,
+      "rssMb": 49,
+      "heapMb": 11
+    },
+    {
+      "t": 25,
+      "joined": 26,
+      "views": 940,
+      "commands": 283,
+      "errors": 8,
+      "rssMb": 48,
+      "heapMb": 10
+    },
+    {
+      "t": 30,
+      "joined": 26,
+      "views": 1162,
+      "commands": 375,
+      "errors": 9,
+      "rssMb": 49,
+      "heapMb": 10
+    },
+    {
+      "t": 35,
+      "joined": 26,
+      "views": 1369,
+      "commands": 461,
+      "errors": 13,
+      "rssMb": 49,
+      "heapMb": 10
+    },
+    {
+      "t": 40,
+      "joined": 26,
+      "views": 1482,
+      "commands": 508,
+      "errors": 14,
+      "rssMb": 49,
+      "heapMb": 10
+    },
+    {
+      "t": 45,
+      "joined": 26,
+      "views": 1569,
+      "commands": 539,
+      "errors": 17,
+      "rssMb": 49,
+      "heapMb": 10
+    },
+    {
+      "t": 50,
+      "joined": 26,
+      "views": 1639,
+      "commands": 561,
+      "errors": 17,
+      "rssMb": 49,
+      "heapMb": 10
+    },
+    {
+      "t": 54.6,
+      "joined": 26,
+      "views": 1731,
+      "commands": 599,
+      "errors": 17,
+      "rssMb": 49,
+      "heapMb": 11
+    }
+  ],
+  "errors": [
+    "51#910700/1 roomError 0: WebSocket is not defined",
+    "51#910707/0 roomError 0: WebSocket is not defined",
+    "tavla#910716/1 roomError 0: WebSocket is not defined",
+    "51#910712/1 roomError 0: WebSocket is not defined",
+    "tavla#910716/0 roomError 0: WebSocket is not defined",
+    "okey-duz#910714/0 roomError 0: WebSocket is not defined",
+    "51#910712/0 roomError 0: WebSocket is not defined"
+  ],
+  "finishedAt": "2026-07-07T15:54:04.683Z",
+  "elapsedSec": 54.58,
+  "viewsPerSec": 31.72,
+  "commandsPerSec": 10.98,
+  "avgViewBytes": 2672,
+  "latencyMs": {
+    "samples": 593,
+    "p50": 1,
+    "p90": 1,
+    "p95": 1,
+    "p99": 147
+  }
+}
