@@ -77,6 +77,15 @@ describe('tavla kurulum', () => {
     expect(st.turn).toBe(0);
     expect(st.openRoll).toEqual([0, 0]);
   });
+
+  it('başlama zarını ilk tur tamamlanınca temizler', () => {
+    const st = fresh(19);
+    const openingPlayer = st.turn;
+    autoTavlaMove(st, openingPlayer);
+    expect(st.openRoll).toEqual([0, 0]);
+    expect(st.phase).toBe('roll');
+    expect(st.turn).toBe(1 - openingPlayer);
+  });
 });
 
 describe('zar ve hamle', () => {

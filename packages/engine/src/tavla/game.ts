@@ -220,6 +220,8 @@ function barLocked(st: TavlaGameState, pl: number): boolean {
 
 function endTurn(st: TavlaGameState): void {
   st.movesLeft = [];
+  // Başlama atışı yalnız ilk turun görselidir; bir sonraki turda eski zarlar görünmez.
+  if (st.gameNumber === 1) st.openRoll = [0, 0];
   const next = 1 - st.turn;
   // KULLANICI KURALI: kırık + TÜM kapılar kapalıysa rakibe zar attırıp vakit kaybettirme —
   // sıra otomatik geri döner. (Emniyet: iki taraf birden kilitliyse normal devir → deadlock yok.)
