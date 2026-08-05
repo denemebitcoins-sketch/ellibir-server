@@ -147,8 +147,9 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
     const opc = p.openingPairs ?? 0;
     return {
       seat:           p.seat          ?? 0,
-      // Terk edilen koltuk BOT kimliği alır: isim "Bot (eskiAd)", isBot=true (UI bot gibi gösterir).
-      name:           abandonedArr.includes(p.seat ?? -1) ? ('Bot (' + (p.name || '?') + ')') : (p.name ?? ''),
+      // Terk edilen koltuk bot devraldığında eski oyuncunun adı taşınmaz.
+      // UI'da kim oynuyor sorusunun cevabı doğrudan ve tutarlı biçimde Bot'tur.
+      name:           abandonedArr.includes(p.seat ?? -1) ? 'Bot' : (p.name ?? ''),
       isBot:          (p.isBot ?? false) || abandonedArr.includes(p.seat ?? -1),
       abandoned:      abandonedArr.includes(p.seat ?? -1), // oyuncu düştü → bot devraldı
       handCount:      p.handCount     ?? 0,
@@ -377,7 +378,7 @@ export function clientViewForSpectator(state: GameState): Record<string, unknown
     const opc = p.openingPairs ?? 0;
     return {
       seat: p.seat ?? 0,
-      name: abandonedArr.includes(p.seat ?? -1) ? ('Bot (' + (p.name || '?') + ')') : (p.name ?? ''),
+      name: abandonedArr.includes(p.seat ?? -1) ? 'Bot' : (p.name ?? ''),
       isBot: (p.isBot ?? false) || abandonedArr.includes(p.seat ?? -1),
       abandoned: abandonedArr.includes(p.seat ?? -1),
       handCount: p.handCount ?? 0,

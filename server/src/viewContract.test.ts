@@ -63,4 +63,17 @@ describe('view DTO contract', () => {
       expect(view.okeyFinish).toBe(true);
     }
   });
+
+  it('shows a bot, not the departed player name, after bot takeover', () => {
+    const state = createGame({ seed: 52 }) as any;
+    state.abandoned = [1];
+
+    const playerView = clientViewFor(state, 0) as any;
+    const spectatorView = clientViewForSpectator(state) as any;
+
+    expect(playerView.seats[1].name).toBe('Bot');
+    expect(playerView.seats[1].isBot).toBe(true);
+    expect(spectatorView.seats[1].name).toBe('Bot');
+    expect(spectatorView.seats[1].isBot).toBe(true);
+  });
 });
