@@ -5,11 +5,11 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
-import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { okeyCanakChance } from '../canakPolicy';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
@@ -150,6 +150,8 @@ export class OkeyRoom extends Room {
       yuzbir: { ...DEFAULT_OKEY_RULES.yuzbir, ...(parsed?.yuzbir ?? {}) },
     };
     rules.variant = requestedVariant;
+    rules.totalEls = normalizeRoomOption(rules.totalEls, [1, 5, 9, 11], DEFAULT_OKEY_RULES.totalEls, 'okey_hands');
+    rules.turnTimerSeconds = normalizeRoomOption(rules.turnTimerSeconds, [30, 45, 60], DEFAULT_OKEY_RULES.turnTimerSeconds, 'okey_turn');
     // Biriktirme modelleri (banko + 101): 0'dan başlanır, sabit el, en düşük kazanır (kullanıcı kuralı).
     if (rules.variant === 'yuzbir' || rules.variant === 'banko') rules.scoring.startScore = 0;
     // DÜZ OKEY kaçtan-düş: yalnız izinli basamaklar (20/24/28/30); dışındaysa 24'e çek.
@@ -333,6 +335,20 @@ export class OkeyRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    const uid = authUserIdFromClient(client);
+    const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing) {
+      this.spectators.add(client.sessionId);
+      const meta = await resolveClientProfileMeta(uid, options, 'İzleyici');
+      this.spectatorNames.set(client.sessionId, meta.name);
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
+      client.send('seat', { seat: -1 });
+      client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
+      console.warn(`[OkeyRoom.onJoin] ayni uid ikinci koltuga alinmadi uid=${uid} existingSeat=${existing.seat} newSid=${client.sessionId}`);
+      this.pushViews();
+      return;
+    }
     const taken = new Set(this.seats.values());
     const spectate = options?.spectate === true || options?.spectate === 'true';
     const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
@@ -353,7 +369,6 @@ export class OkeyRoom extends Room {
       return;
     }
     this.seats.set(client.sessionId, seat);
-    const uid = authUserIdFromClient(client);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -368,6 +383,13 @@ export class OkeyRoom extends Room {
   private async trySit(client: Client, rawSeat: any, options: any) {
     if (this.seats.has(client.sessionId)) return;
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+    const uid = authUserIdFromClient(client);
+    const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing) {
+      client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
+      this.pushViews();
+      return;
+    }
     const taken = new Set(this.seats.values());
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
@@ -381,7 +403,6 @@ export class OkeyRoom extends Room {
     this.spectatorNames.delete(client.sessionId);
     this.spectatorMeta.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
-    const uid = authUserIdFromClient(client);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -814,45 +835,26 @@ export class OkeyRoom extends Room {
     }
   }
 
-  private async newMatch() {
+  private prepareRematchCountdown() {
     this.rematchVotes.clear();
-    if (this.seats.size < this.humanSeats.length) {
-      this.game = null;
-      this.settled = false;
-      this.settlePromise = null;
-      this.abandoned.clear();
-      this.pushViews();
-      return;
-    }
-
-    const entryUsers = new Map(this.seatUsers);
-    const entryHouse = entryHouseAmount({
-      bet: this.bet,
-      totalSeats: 4,
-      teamMode: !!this.cfg?.rules?.teamMode,
-      gameVariant: this.cfg?.rules?.variant,
-      realSeats: entryUsers.size,
-    });
-    const entry = await deductEntry(entryUsers, this.bet, 'okey', entryHouse);
-    if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-    this.entryCanakCharged = true;
-    this.refreshCanak();
-
-    const banko = this.cfg?.rules?.variant === 'banko';
-    const seed = Math.floor(Math.random() * 1_000_000_000);
-    this.game = createOkeyGame({ ...this.cfg, seed, dealFirst: !banko });
-    this.matchProgressionKey = `okey:${this.roomId}:${Date.now()}:${seed}`;
-    for (const [seat, name] of this.seatNames) {
-      const player = this.game.players[seat];
-      if (player && name) player.name = name;
-    }
+    this.clearTurnTimers();
+    if (this.startTimer) { clearTimeout(this.startTimer); this.startTimer = null; }
+    if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
+    this.startAt = 0;
+    this.preLog = ['Tüm hazır oyuncular onay verdi — yeni maç hazırlanıyor'];
+    this.game = null;
     this.settled = false;
     this.settlePromise = null;
+    this.entryCanakCharged = false;
     this.canakEl = -1;
-    this.refreshCanak();
-    this.game.matchLog.push('Tüm oyuncular hazır — yeni maç başladı');
-    if (banko) this.enterBankoPhase();
-    else this.afterChange();
+    this.abandoned.clear();
+    this.cfg.seed = Math.floor(Math.random() * 1_000_000_000);
+    this.startGameIfReady();
+    if (!this.startTimer && !this.game) this.pushViews();
+  }
+
+  private async newMatch() {
+    this.prepareRematchCountdown();
   }
 
   /* ── GÖRÜNÜM ── */

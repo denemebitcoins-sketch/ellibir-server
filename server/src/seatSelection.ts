@@ -4,6 +4,7 @@ export type JoinSeatDecision = {
 };
 
 export type OnlineGameKind = 'ellibir' | 'okey' | 'tavla';
+export type ExistingUserSeat = { sessionId: string; seat: number };
 
 /**
  * Online salon tables always start with real players. Bots are reserved for the
@@ -42,4 +43,16 @@ export function selectJoinSeat(
   }
 
   return { seat: humanSeats.find((seat) => !occupiedSeats.has(seat)) ?? null };
+}
+
+export function findExistingUserSeat(
+  seats: ReadonlyMap<string, number>,
+  seatUsers: ReadonlyMap<number, string>,
+  userId: string | null | undefined,
+): ExistingUserSeat | null {
+  if (!userId) return null;
+  for (const [sessionId, seat] of seats) {
+    if (seatUsers.get(seat) === userId) return { sessionId, seat };
+  }
+  return null;
 }

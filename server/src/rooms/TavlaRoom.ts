@@ -5,11 +5,11 @@ import {
 } from '../../../packages/engine/src/tavla';
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
-import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { tavlaCanakChance } from '../canakPolicy';
 
 /**
@@ -115,6 +115,8 @@ export class TavlaRoom extends Room {
       ...DEFAULT_TAVLA_RULES,
       ...(parsed && typeof parsed === 'object' ? parsed : {}),
     };
+    rules.targetScore = normalizeRoomOption(rules.targetScore, [1, 3, 5, 7], DEFAULT_TAVLA_RULES.targetScore, 'tavla_target');
+    rules.turnTimerSeconds = normalizeRoomOption(rules.turnTimerSeconds, [30, 45, 60], DEFAULT_TAVLA_RULES.turnTimerSeconds, 'tavla_turn');
 
     this.bet = normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'tavla');
     this.cfg = { seed, names, botSeats, rules };
@@ -275,6 +277,19 @@ export class TavlaRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    const uid = authUserIdFromClient(client);
+    const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing) {
+      this.spectators.add(client.sessionId);
+      const meta = await resolveClientProfileMeta(uid, options, 'İzleyici');
+      this.spectatorNames.set(client.sessionId, meta.name);
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      client.send('seat', { seat: -1 });
+      client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
+      console.warn(`[TavlaRoom.onJoin] ayni uid ikinci koltuga alinmadi uid=${uid} existingSeat=${existing.seat} newSid=${client.sessionId}`);
+      this.pushViews();
+      return;
+    }
     const taken = new Set(this.seats.values());
     const spectate = options?.spectate === true || options?.spectate === 'true';
     const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
@@ -295,7 +310,6 @@ export class TavlaRoom extends Room {
       return;
     }
     this.seats.set(client.sessionId, seat);
-    const uid = authUserIdFromClient(client);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -310,6 +324,13 @@ export class TavlaRoom extends Room {
   private async trySit(client: Client, rawSeat: any, options: any) {
     if (this.seats.has(client.sessionId)) return;
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+    const uid = authUserIdFromClient(client);
+    const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing) {
+      client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
+      this.pushViews();
+      return;
+    }
     const taken = new Set(this.seats.values());
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
@@ -323,7 +344,6 @@ export class TavlaRoom extends Room {
     this.spectatorNames.delete(client.sessionId);
     this.spectatorMeta.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
-    const uid = authUserIdFromClient(client);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -730,37 +750,26 @@ export class TavlaRoom extends Room {
     }
   }
 
-  private async newMatch() {
+  private prepareRematchCountdown() {
     this.rematchVotes.clear();
-    if (this.seats.size < this.humanSeats.length) {
-      this.game = null;
-      this.settled = false;
-      this.settlePromise = null;
-      this.abandoned.clear();
-      this.pushViews();
-      return;
-    }
-
-    const entryUsers = new Map(this.seatUsers);
-    const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 2, teamMode: false, realSeats: entryUsers.size });
-    const entry = await deductEntry(entryUsers, this.bet, 'tavla', entryHouse);
-    if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-    this.entryCanakCharged = true;
-    this.refreshCanak();
-
-    const seed = Date.now() % 2147483647;
-    this.game = createTavlaGame({ ...this.cfg, seed });
-    this.matchProgressionKey = `tavla:${this.roomId}:${Date.now()}:${seed}`;
-    for (const [seat, name] of this.seatNames) {
-      const player = this.game.players[seat];
-      if (player && name) player.name = name;
-    }
+    this.clearTurnTimers();
+    if (this.startTimer) { clearTimeout(this.startTimer); this.startTimer = null; }
+    if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
+    this.startAt = 0;
+    this.preLog = ['Tüm hazır oyuncular onay verdi — yeni maç hazırlanıyor'];
+    this.game = null;
     this.settled = false;
     this.settlePromise = null;
+    this.entryCanakCharged = false;
     this.canakGame = -1;
-    this.refreshCanak();
-    this.game.matchLog.push('Tüm oyuncular hazır — yeni maç başladı');
-    this.afterChange();
+    this.abandoned.clear();
+    this.cfg.seed = Date.now() % 2147483647;
+    this.startGameIfReady();
+    if (!this.startTimer && !this.game) this.pushViews();
+  }
+
+  private async newMatch() {
+    this.prepareRematchCountdown();
   }
 
   /* ── GÖRÜNÜM ── */

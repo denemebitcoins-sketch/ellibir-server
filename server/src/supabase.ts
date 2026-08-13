@@ -63,6 +63,14 @@ export function normalizeRoomBet(raw: unknown, allowed: readonly number[], label
   return n;
 }
 
+/** Client'tan gelen masa kuralı seçimini izinli listeye kilitle. */
+export function normalizeRoomOption(raw: unknown, allowed: readonly number[], fallback: number, label: string): number {
+  const n = Math.floor(Number(raw));
+  if (Number.isFinite(n) && allowed.includes(n)) return n;
+  if (onlineAuthRequired()) throw new Error(`${label}_option_not_allowed`);
+  return fallback;
+}
+
 export function safeClientRole(raw: unknown): string {
   const v = String(raw ?? 'normal').trim().toLowerCase();
   return v === 'vip' ? 'vip' : 'normal';

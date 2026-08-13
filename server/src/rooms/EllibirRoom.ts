@@ -3,11 +3,11 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
-import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { ellibirCanakChance } from '../canakPolicy';
 
 /**
@@ -124,6 +124,9 @@ export class EllibirRoom extends Room {
     catch { parsed = null; }
     const rules: any = { ...DEFAULT_RULES, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
     rules.teamMode = mode === 'duo' || mode === 'duo3'; // takım: 0&2 / 1&3
+    rules.totalHands = normalizeRoomOption(rules.totalHands, [1, 3, 5, 7, 9, 11], DEFAULT_RULES.totalHands, 'elliBir_hands');
+    rules.turnTimerSeconds = normalizeRoomOption(rules.turnTimerSeconds, [15, 20, 25, 35, 40, 45], DEFAULT_RULES.turnTimerSeconds, 'elliBir_turn');
+    rules.openingMinPoints = normalizeRoomOption(rules.openingMinPoints, [51, 81], DEFAULT_RULES.openingMinPoints, 'elliBir_opening');
 
     this.bet = normalizeRoomBet(options?.bet, [100, 250, 500, 1000, 2500, 5000], 'elliBir');
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
@@ -332,6 +335,20 @@ export class EllibirRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    const uid = authUserIdFromClient(client);
+    const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing) {
+      this.spectators.add(client.sessionId);
+      const meta = await resolveClientProfileMeta(uid, options, 'İzleyici');
+      this.spectatorNames.set(client.sessionId, meta.name);
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
+      client.send('seat', { seat: -1 });
+      client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
+      console.warn(`[EllibirRoom.onJoin] ayni uid ikinci koltuga alinmadi uid=${uid} existingSeat=${existing.seat} newSid=${client.sessionId}`);
+      this.pushViews();
+      return;
+    }
     const taken = new Set(this.seats.values());
     // İZLE ile gelen (spectate:true) → koltuk boş OLSA BİLE oturtma; izleyici kalır.
     // Oturmak için sonradan 'sit' mesajı gönderilir. (HEMEN OYNA/davet-kabul spectate yollamaz → otomatik oturur.)
@@ -356,7 +373,6 @@ export class EllibirRoom extends Room {
       return;
     }
     this.seats.set(client.sessionId, seat);
-    const uid = authUserIdFromClient(client);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -372,6 +388,13 @@ export class EllibirRoom extends Room {
   private async trySit(client: Client, rawSeat: any, options: any) {
     if (this.seats.has(client.sessionId)) return; // zaten oturuyor
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+    const uid = authUserIdFromClient(client);
+    const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing) {
+      client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
+      this.pushViews();
+      return;
+    }
     const taken = new Set(this.seats.values());
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
@@ -390,7 +413,6 @@ export class EllibirRoom extends Room {
     this.spectatorNames.delete(client.sessionId);
     this.spectatorMeta.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
-    const uid = authUserIdFromClient(client);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -782,6 +804,25 @@ export class EllibirRoom extends Room {
     }
   }
 
+  private prepareRematchCountdown() {
+    this.rematchVotes.clear();
+    this.clearSorguTimer();
+    this.clearTurnTimer();
+    if (this.handEndTimer) { clearTimeout(this.handEndTimer); this.handEndTimer = null; }
+    if (this.startTimer) { clearTimeout(this.startTimer); this.startTimer = null; }
+    if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
+    this.startAt = 0;
+    this.game = null;
+    this.settled = false;
+    this.settlePromise = null;
+    this.entryCanakCharged = false;
+    this.canakHand = -1;
+    this.forceBotSeat = null;
+    this.cfg.seed = Math.floor(Math.random() * 1_000_000_000);
+    this.startGameIfReady();
+    if (!this.startTimer && !this.game) this.pushViews();
+  }
+
   /** Aktif sorgu varsa kararın hangi koltukta olduğunu döndür (stepOnce ile aynı mantık). */
   private sorguDeciderSeat(): number | null {
     const sg = this.game?.sorgu;
@@ -866,33 +907,10 @@ export class EllibirRoom extends Room {
     }, this.turnMs());
   }
 
-  /// Aynı masada yeni maç: kartlar toplanır, yazboz/olaylar sıfırlanır, masa ayarı korunur.
-  /// Oyuncu eksikse (biri çıktıysa) bekleme moduna geçer (game=null → "rakip bekleniyor").
+  /// Aynı masada yeni maç: önce bekleme/geri sayım durumuna döner. Giriş ücreti,
+  /// çanak payı ve oyun kurulumu ilk masa açılışındaki startGameIfReady yolundan geçer.
   private async newMatch() {
-    this.rematchVotes.clear();
-    if (this.seats.size + this.adminBots.size < this.humanSeats.length) { this.game = null; this.pushViews(); return; }
-    const entryUsers = new Map(this.seatUsers);
-    const rules: any = this.cfg?.rules ?? {};
-    const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
-    const entry = await deductEntry(entryUsers, this.bet, '51', entryHouse);
-    if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-    this.entryCanakCharged = true;
-    this.refreshCanak();
-    const seed = Math.floor(Math.random() * 1_000_000_000);
-    this.game = createGame({ ...this.cfg, seed });
-    this.matchProgressionKey = `51:${this.roomId}:${Date.now()}:${seed}`;
-    for (const [seat, name] of this.seatNames) {
-      const p = this.game.players.find((pl: any) => pl.seat === seat);
-      if (p && name) p.name = name;
-    }
-    this.settled = false;
-    this.settlePromise = null;
-    this.canakHand = -1;   // yeni maç: el sayacı sıfırdan — patlama kontrolü kilitlenmesin
-    this.refreshCanak();
-    this.resetHandOrder();
-    console.log('[EllibirRoom] yeni maç başladı (aynı masa)');
-    this.pushViews();
-    this.runEngine();
+    this.prepareRematchCountdown();
   }
 
   private continueHand() {

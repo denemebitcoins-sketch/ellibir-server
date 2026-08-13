@@ -39,7 +39,7 @@ describe('RULES.md §4 config sabitleri (Paket 2)', () => {
     expect(R.turSecenekleri).toEqual([25, 20, 15]); // TUR_SURELERI
     expect(R.turSecenekleri).toContain(R.turnTimerSeconds); // varsayılan 20 listeden
     expect(R.turnTimerSeconds).toBe(20);
-    expect(R.elSecenekleri).toEqual([3, 5, 7, 9, 11]); // EL_SAYILARI
+    expect(R.elSecenekleri).toEqual([1, 3, 5, 7, 9, 11]); // EL_SAYILARI
     expect(R.elSecenekleri).toContain(R.totalHands);
     expect(R.otopilotEsigi).toBe(3); // OTOPILOT_ESIGI (ardışık tur)
     expect(R.botDevralmaSn).toBe(10); // BOT_DEVRALMA_SN

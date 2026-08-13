@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { onlineHumanSeats, selectJoinSeat } from './seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from './seatSelection';
 
 describe('absolute room seat selection', () => {
   const humanSeats = [0, 1, 2, 3];
@@ -38,5 +38,22 @@ describe('online room human-seat policy', () => {
     expect(onlineHumanSeats('ellibir')).toEqual([0, 1, 2, 3]);
     expect(onlineHumanSeats('okey')).toEqual([0, 1, 2, 3]);
     expect(onlineHumanSeats('tavla')).toEqual([0, 1]);
+  });
+});
+
+describe('same-account room seat guard', () => {
+  it('finds the already seated seat for a verified user id', () => {
+    const seats = new Map<string, number>([['sid-a', 0], ['sid-b', 3]]);
+    const users = new Map<number, string>([[0, 'user-a'], [3, 'user-b']]);
+
+    expect(findExistingUserSeat(seats, users, 'user-b')).toEqual({ sessionId: 'sid-b', seat: 3 });
+  });
+
+  it('ignores missing and unknown user ids', () => {
+    const seats = new Map<string, number>([['sid-a', 0]]);
+    const users = new Map<number, string>([[0, 'user-a']]);
+
+    expect(findExistingUserSeat(seats, users, null)).toBeNull();
+    expect(findExistingUserSeat(seats, users, 'other')).toBeNull();
   });
 });

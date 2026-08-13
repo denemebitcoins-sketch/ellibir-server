@@ -1,9 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = path.resolve(process.cwd(), '..');
-const unityRoot = path.resolve(repoRoot, '..', '51-unity');
+const unityRoot = [
+  process.env.UNITY_ROOT,
+  path.resolve(repoRoot, '..', '51-unity-3agustos-kurtarma-aday-20260806'),
+  path.resolve(repoRoot, '..', '51-unity'),
+].filter(Boolean).find((candidate) => existsSync(candidate as string)) as string;
 
 function readFromRepo(rel: string): string {
   return readFileSync(path.resolve(repoRoot, rel), 'utf8');
@@ -46,6 +50,17 @@ describe('reconnect contract smoke', () => {
     expect(src).toContain('PlayerPrefs.SetString(RC_ROOM');
     expect(src).toContain('PlayerPrefs.SetString(RC_TOKEN');
   });
+
+  it.each(unityNetFiles)('%s Unity net honors explicit salon seat clicks over saved reconnect tokens', (_game, file) => {
+    const src = readFromUnity(file);
+
+    expect(src).toContain('{ "requestedSeat", RequestedSeat }');
+    expect(src).toMatch(/int\s+rcSeat\s*=\s*PlayerPrefs\.GetInt\(RC_SEAT,\s*-1\)/);
+    expect(src).toContain('bool explicitDifferentSeat = RequestedSeat >= 0 && rcSeat >= 0 && RequestedSeat != rcSeat');
+    expect(src).toContain('if (sameTable && explicitDifferentSeat) sameTable = false');
+    expect(src).toMatch(/if\s*\(!sameTable\)\s*ClearReconnect\(\)/);
+  });
+
   it.each(roomFiles)('%s room releases the waiting countdown interval on dispose', (_game, file) => {
     const src = readFromRepo(file);
 

@@ -233,7 +233,7 @@ export const DEFAULT_RULES: RuleConfig = {
   // RULES.md 1.9: 60 sn KALDIRILDI; seçenekler 25/20/15, şimdilik varsayılan 20.
   turnTimerSeconds: 20,
   turSecenekleri: [25, 20, 15],
-  elSecenekleri: [3, 5, 7, 9, 11],
+  elSecenekleri: [1, 3, 5, 7, 9, 11],
   otopilotEsigi: 3,
 
   botDevralmaSn: 10,
