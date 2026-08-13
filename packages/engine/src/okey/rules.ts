@@ -8,6 +8,7 @@ export interface OkeyYuzbirConfig {
   katlamali: boolean;       // masadaki en yüksek açışın bir üstü gerekir
   unopenedPenalty: number;  // hiç açamayan oyuncu cezası
   winnerBonus: number;      // bitiren oyuncu delta'sı (klasik: -101)
+  kafaX: number;            // kimse açmadan direkt bitiş çarpanı
   pairPenaltyX: number;     // çift bitiş/çift açmış oyuncu ceza çarpanı
   okeyFinishX: number;      // okey atarak bitiş çarpanı
   islekDiscardPenalty: number; // açık taşlara işleyebilen taş atma cezası
@@ -40,6 +41,7 @@ export const DEFAULT_OKEY_RULES: OkeyRuleConfig = {
     katlamali: true,
     unopenedPenalty: 202,
     winnerBonus: -101,
+    kafaX: 2,
     pairPenaltyX: 2,
     okeyFinishX: 2,
     islekDiscardPenalty: 101,

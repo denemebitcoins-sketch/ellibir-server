@@ -94,6 +94,24 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
     if (targets.length === 0) throw new CmdError('no_legal_target');
     state = applyMove(state, { type: 'extend', meldId: targets[0], cardId: cmd.cardId });
 
+  } else if (cmd.t === 'processAllIslek') {
+    turnGuard();
+    if (!Array.isArray(cmd.cards)) throw new CmdError('invalid_move');
+    // Komut anındaki kartları dondur: işleme sırasında ele dönen joker bu turda
+    // kendiliğinden yeniden işlenmez.
+    const frozenIds = [...new Set(cmd.cards.filter((id: unknown) => typeof id === 'string'))] as string[];
+    for (const cardId of frozenIds) {
+      const player = state.players?.find((p: any) => p.seat === seat);
+      if (!player?.hand?.some((c: any) => c.id === cardId)) continue;
+      const targets = legalExtendTargets(state, seat, cardId);
+      if (targets.length === 0) continue;
+      state = applyMove(state, { type: 'extend', meldId: targets[0], cardId });
+    }
+
+  } else if (cmd.t === 'undoIslek') {
+    turnGuard();
+    state = applyMove(state, { type: 'undoIslek' });
+
   } else if (cmd.t === 'autoOpenSeri' || cmd.t === 'autoOpenCift') {
     turnGuard();
     const player = state.players?.find((p: any) => p.seat === seat);

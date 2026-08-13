@@ -9,7 +9,7 @@ describe('post-match ready contract', () => {
     const source = room(name);
     expect(source).toMatch(/rematchVotes/);
     expect(source).toMatch(/required\.every\(\(.*\) => this\.rematchVotes\.has/);
-    expect(source).toMatch(/if \(this\.seats\.size < this\.humanSeats\.length\)/);
+    expect(source).toMatch(/if \(this\.seats\.size(?: \+ this\.adminBots\.size)? < this\.humanSeats\.length\)/);
     expect(source).not.toMatch(/seat_left_before_(?:new_match|rematch)/);
   });
 

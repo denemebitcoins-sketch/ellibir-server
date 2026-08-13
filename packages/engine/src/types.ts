@@ -168,6 +168,8 @@ export interface GameState {
    * Kart atılınca (turn ilerleyince) anlamını yitirir.
    */
   openSnapshot?: GameState | null;
+  /** Bu turdaki ilk işlekten önceki durum; kart atılana kadar geri alınabilir. */
+  islekSnapshot?: GameState | null;
   /**
    * GÖSTERGE (kullanıcı kuralı): destenin en alt kartı, AÇIK gösterilir (1 tane, yalnız İLK EL).
    * Çift giden oyuncu, ilk el KART ÇEKMEDEN göstergenin eşini göstererek hak kazanır;
@@ -258,6 +260,8 @@ export type Move =
   | { type: 'extend'; meldId: string; cardId: CardId }
   /** Jokeri temsil ettiği gerçek kartla değiştirip ele alma. */
   | { type: 'retrieveJoker'; meldId: string; cardId: CardId }
+  /** Bu turda yapılan işlekleri topluca geri al. */
+  | { type: 'undoIslek' }
   | { type: 'discard'; cardId: CardId }
   /** GÖSTERGE GÖSTER: ilk el, kart çekmeden, göstergenin eşini (cardId) göstererek hak kazan. */
   | { type: 'gostergeGoster'; cardId: CardId }
@@ -293,6 +297,8 @@ export interface PlayerView {
   isCift: boolean;
   /** Açmış çiftçinin bu turki tek işlek hakkı kullanıldı mı. */
   ciftIslekUsed: boolean;
+  /** Aynı turdaki işlekler geri alınabilir mi. */
+  canUndoIslek: boolean;
   /** Şu anki etkin per açma sınırı (çift 101'i ve katlamalı çıtası dahil). */
   currentOpeningMin: number;
   /** Şu anki etkin çift açma adedi (katlamalıda son çift açışı +1 olabilir). */
@@ -321,6 +327,10 @@ export interface PlayerView {
   gostergeKart?: Card | null;
   /** Bu oyuncu göstergenin eşini gösterip hak kazandı mı. */
   gostergeShown?: boolean;
+  /** Gösterge bu elde alındı mı; eldeki eş rozetini kapatmak için istemciye gider. */
+  gostergeTaken?: boolean;
+  /** Elde gösterge eşi uyarısı çizilsin mi (ilk dağıtım hakkı veya gösterilmiş hak). */
+  gostergeMark?: boolean;
   /** Bu oyuncu ŞU AN göstergeyi GÖSTEREBİLİR mi (ilk el, çekmeden, elinde eşi var, kilitsiz). */
   gostergeCanShow?: boolean;
   /** Bu oyuncu ŞU AN göstergeyi ALABİLİR mi (hak kazandı + 4+ çift + çekme fazı). */

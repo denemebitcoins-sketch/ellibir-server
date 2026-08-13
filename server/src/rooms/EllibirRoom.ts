@@ -177,6 +177,10 @@ export class EllibirRoom extends Room {
         return;
       }
       try {
+        if (cmd?.t === 'continue' && this.handEndTimer) {
+          clearTimeout(this.handEndTimer);
+          this.handEndTimer = null;
+        }
         const r = applyClientCommand(this.game, cmd, seat);
         this.game = r.state;
         this.pushViews();                       // insan hamlesi anında yansır
@@ -847,7 +851,7 @@ export class EllibirRoom extends Room {
   /// Oyuncu eksikse (biri çıktıysa) bekleme moduna geçer (game=null → "rakip bekleniyor").
   private async newMatch() {
     this.rematchVotes.clear();
-    if (this.seats.size < this.humanSeats.length) { this.game = null; this.pushViews(); return; }
+    if (this.seats.size + this.adminBots.size < this.humanSeats.length) { this.game = null; this.pushViews(); return; }
     const entryUsers = new Map(this.seatUsers);
     const rules: any = this.cfg?.rules ?? {};
     const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
@@ -871,6 +875,10 @@ export class EllibirRoom extends Room {
   }
 
   private continueHand() {
+    if (this.handEndTimer) {
+      clearTimeout(this.handEndTimer);
+      this.handEndTimer = null;
+    }
     if (this.game.phase !== 'handEnded') return;
     try { this.game = startNextHand(this.game); }
     catch (e: any) { console.error('[continueHand] hata:', e?.message); return; }

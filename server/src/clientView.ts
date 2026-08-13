@@ -256,6 +256,8 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
     // GÖSTERGE (ilk el, açık deste dibi kartı)
     gostergeKart:      v.gostergeKart ? mapCard(v.gostergeKart) : null,
     gostergeShown:     v.gostergeShown   ?? false,
+    gostergeTaken:     v.gostergeTaken   ?? false,
+    gostergeMark:      v.gostergeMark    ?? false,
     gostergeCanShow:   v.gostergeCanShow ?? false,
     gostergeCanTake:   v.gostergeCanTake ?? false,
     sheet:             Array.isArray((state as any).sheet)
@@ -415,6 +417,8 @@ export function clientViewForSpectator(state: GameState): Record<string, unknown
     logMessages: Array.isArray((state as any).matchLog) ? (state as any).matchLog.slice() : [],
     gostergeKart: v?.gostergeKart ? mapCard(v.gostergeKart) : null,
     gostergeShown: v?.gostergeShown ?? false,
+    gostergeTaken: v?.gostergeTaken ?? false,
+    gostergeMark: v?.gostergeMark ?? false,
     sheet: Array.isArray((state as any).sheet)
       ? (state as any).sheet.map((e: any) => ({ hand: e.hand ?? 0, seat: e.seat ?? 0, kind: e.kind ?? '', amount: e.amount ?? 0 }))
       : [],
@@ -436,7 +440,7 @@ function emptyView(seat: number): Record<string, unknown> {
     canPickupLockedTop: false, sorguActive: false, sorguAskerSeat: -1,
     sorguSorulanSeat: -1, sorguAsama: '', sorguPartnerSeat: -1, sorguPartnerGorus: '', sorguCard: null,
     logMessages: [],
-    gostergeKart: null, gostergeShown: false, gostergeCanShow: false, gostergeCanTake: false, sheet: [], dizMode: 'none',
+    gostergeKart: null, gostergeShown: false, gostergeTaken: false, gostergeMark: false, gostergeCanShow: false, gostergeCanTake: false, sheet: [], dizMode: 'none',
     myArrangedMeldPoints: 0, myArrangedPairCount: 0, handBlockKinds: [],
   };
 }

@@ -489,6 +489,31 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     st.turn = 0;
     return st;
   }
+  function kafaRun21() {
+    return [
+      t('R', 1), t('R', 2), t('R', 3),
+      t('R', 4), t('R', 5), t('R', 6),
+      t('R', 7), t('R', 8), t('R', 9),
+      t('R', 10), t('R', 11), t('R', 12),
+      t('Y', 1), t('Y', 2), t('Y', 3),
+      t('Y', 4), t('Y', 5), t('Y', 6),
+      t('Y', 7), t('Y', 8), t('Y', 9),
+    ];
+  }
+  function kafaPairs20() {
+    return [
+      [t('R', 1), t('R', 1)],
+      [t('Y', 2), t('Y', 2)],
+      [t('B', 3), t('B', 3)],
+      [t('K', 4), t('K', 4)],
+      [t('R', 5), t('R', 5)],
+      [t('Y', 6), t('Y', 6)],
+      [t('B', 7), t('B', 7)],
+      [t('K', 8), t('K', 8)],
+      [t('R', 9), t('R', 9)],
+      [t('Y', 10), t('Y', 10)],
+    ].flat();
+  }
 
   it('101 masası 22/21 taşla başlar ve stok normal okey gibi kalmaz', () => {
     const st = createOkeyGame({ seed: 2026, dealerSeat: 0, rules: { variant: 'yuzbir', totalEls: 1 } as any });
@@ -949,24 +974,52 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.matchEnded).toBe(true);
   });
 
-  it('101 elden bitişte 21 kalan taş tamamen perlere yatabiliyorsa el biter', () => {
+  it('101 kafa atarak bitişte bitiren -202 alır, açmayan rakipler 404 ceza yer', () => {
     const st = g101();
-    const win21 = [
-      t('R', 1), t('R', 2), t('R', 3),
-      t('R', 4), t('R', 5), t('R', 6),
-      t('R', 7), t('R', 8), t('R', 9),
-      t('R', 10), t('R', 11), t('R', 12),
-      t('Y', 1), t('Y', 2), t('Y', 3),
-      t('Y', 4), t('Y', 5), t('Y', 6),
-      t('Y', 7), t('Y', 8), t('Y', 9),
-    ];
+    const win21 = kafaRun21();
     const throwaway = t('K', 4);
     st.players[0]!.hand = [...win21, throwaway];
     const r = applyOkeyMove(st, 0, { t: 'finish', tileId: throwaway.id });
     expect(r.ok).toBe(true);
     expect(st.elEnded).toBe(true);
-    expect(st.scores[0]).toBe(-101);
-    expect(st.scores[1]).toBe(202);
+    expect((st as any).kafaFinish).toBe(true);
+    expect(st.scores).toEqual([-202, 404, 404, 404]);
+    expect(st.matchLog.some((line) => line.includes('kafa'))).toBe(true);
+  });
+
+  it('101 kafa + okey bitişte kafa ve okey çarpanları birlikte uygulanır', () => {
+    const st = g101();
+    const finishOkey = t('K', 13);
+    st.players[0]!.hand = [...kafaRun21(), finishOkey];
+    const r = applyOkeyMove(st, 0, { t: 'finish', tileId: finishOkey.id });
+    expect(r.ok).toBe(true);
+    expect(st.finishKind).toBe('okey');
+    expect((st as any).kafaFinish).toBe(true);
+    expect(st.scores).toEqual([-404, 808, 808, 808]);
+  });
+
+  it('101 kafa + çifte bitişte kafa ve çift çarpanları birlikte uygulanır', () => {
+    const st = g101();
+    const stray = t('B', 12);
+    const throwaway = t('K', 4);
+    st.players[0]!.hand = [...kafaPairs20(), stray, throwaway];
+    const r = applyOkeyMove(st, 0, { t: 'finish', tileId: throwaway.id });
+    expect(r.ok).toBe(true);
+    expect(st.finishKind).toBe('pairs');
+    expect((st as any).kafaFinish).toBe(true);
+    expect(st.scores).toEqual([-404, 808, 808, 808]);
+  });
+
+  it('101 kafa + çifte + okey bitişte üç çarpan birlikte uygulanır', () => {
+    const st = g101();
+    const stray = t('B', 12);
+    const finishOkey = t('K', 13);
+    st.players[0]!.hand = [...kafaPairs20(), stray, finishOkey];
+    const r = applyOkeyMove(st, 0, { t: 'finish', tileId: finishOkey.id });
+    expect(r.ok).toBe(true);
+    expect(st.finishKind).toBe('pairsOkey');
+    expect((st as any).kafaFinish).toBe(true);
+    expect(st.scores).toEqual([-808, 1616, 1616, 1616]);
   });
 
   it('101de açılmış oyuncu son taşı iskartaya atınca deste boş olsa da el biter', () => {
@@ -1061,6 +1114,27 @@ describe('101 işlenen taş geri alma', () => {
     expect(applyOkeyMove(st, 0, { t: 'retrieveTile' }).ok).toBe(true);
     expect(st.openMelds[0]!.tiles).toHaveLength(3);
     expect(st.players[0]!.hand).toContainEqual(expect.objectContaining({ id: a.id }));
+  });
+
+  it('taş atınca aynı turdaki işleme geri alma hakkı kapanır', () => {
+    const st = g101();
+    const run = [t('R', 1), t('R', 2), t('R', 3)];
+    const extra = t('R', 4);
+    const discard = t('B', 9);
+    st.players[0]!.hand = [extra, discard];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.openMelds = [{ id: 'm1', ownerSeat: 0, kind: 'run', tiles: run, points: 6 }];
+
+    expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: extra.id }).ok).toBe(true);
+    expect(st.islekHistory).toHaveLength(1);
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: discard.id }).ok).toBe(true);
+    expect(st.islekHistory).toHaveLength(0);
+
+    st.turn = 0;
+    st.phase = 'discard';
+    const undo = applyOkeyMove(st, 0, { t: 'retrieveTile' });
+    expect(undo.ok).toBe(false);
   });
 
   it('sıra dışındaki oyuncu geri alamaz', () => {

@@ -69,6 +69,7 @@ export interface OkeyGameState {
   matchEnded: boolean;
   elWinner: number | null;   // -1 = berabere (deste bitti)
   finishKind: OkeyFinishKind | null;
+  kafaFinish: boolean;       // 101: kimse açmadan direkt bitiş
   scores: number[];          // koltuk başına CEZA birikimi (0'dan başlar, düşük iyi; kazanan eksiye düşer)
   elDeltas: number[][];      // YAZBOZ: el başına puan değişimi (gösterge dahil)
   elStartScores: number[];   // el başı skor (delta tabanı)
@@ -128,7 +129,7 @@ export function createOkeyGame(opts: OkeyCreateOptions): OkeyGameState {
     stock: [], discards: [[], [], [], []],
     gosterge: null as unknown as NormalOkeyTile, okeyColor: 'R', okeyRank: 1,
     turn: dealerSeat, phase: 'discard',
-    elEnded: false, matchEnded: false, elWinner: null, finishKind: null,
+    elEnded: false, matchEnded: false, elWinner: null, finishKind: null, kafaFinish: false,
     scores: [rules.scoring.startScore, rules.scoring.startScore, rules.scoring.startScore, rules.scoring.startScore], // DÜŞME: 0'a inen kazanır
     matchLog: [],
     elDeltas: [],
@@ -247,6 +248,7 @@ export function startNextEl(state: OkeyGameState): void {
   state.elEnded = false;
   state.elWinner = null;
   state.finishKind = null;
+  state.kafaFinish = false;
   state.openMelds = [];
   state.nextMeldId = 1;
   state.yuzbirMaxOpenPoints = 0;
@@ -389,6 +391,12 @@ function canLayAllRemaining(tiles: OkeyTile[], state: OkeyGameState, mode: 'meld
     return groups.reduce((n, g) => n + g.length, 0) === tiles.length;
   }
   return bestMeldCoverage(tiles, state) === tiles.length;
+}
+
+function canLayYuzbirPairFinish(tiles: OkeyTile[], state: OkeyGameState): boolean {
+  const covered = pairGroupsFor(tiles, state).reduce((n, g) => n + g.length, 0);
+  if (covered === tiles.length) return true;
+  return tiles.length % 2 === 1 && covered === tiles.length - 1;
 }
 
 export function pairGroupsFor(tiles: readonly OkeyTile[], state: OkeyGameState): OkeyTile[][] {
@@ -851,6 +859,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       if (state.rules.variant === 'yuzbir') {
         const islekDiscard = isYuzbirIslekDiscard(state, tile);
         state.yuzbirMeldProcessCounts = {};
+        state.islekHistory = state.islekHistory.filter((h) => h.seat !== seat);
         const penalty = state.rules.yuzbir.islekDiscardPenalty ?? 101;
         if (islekDiscard && penalty > 0) {
           state.scores[seat] = state.scores[seat]! + penalty;
@@ -884,21 +893,23 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       const remaining = p.hand.filter((_, i) => i !== idx);
       let melds = canFinishMelds(remaining, state.okeyColor, state.okeyRank);
       let pairs = !melds && canFinishPairs(remaining, state.okeyColor, state.okeyRank);
+      let kafa = false;
       if (state.rules.variant === 'yuzbir') {
         if (p.hasOpened) {
           melds = p.openMode !== 'pairs' && canLayAllRemaining(remaining, state, 'melds');
-          pairs = !melds && p.openMode === 'pairs' && canLayAllRemaining(remaining, state, 'pairs');
+          pairs = !melds && p.openMode === 'pairs' && canLayYuzbirPairFinish(remaining, state);
         } else {
-          // 101 elden bitiş: atılan taştan sonra kalan 21 taş tamamen perlere yatmalı.
+          // 101 kafa/elden bitiş: kimse açmadan elde kalan taşlar tamamen yatmalı.
           melds = canLayAllRemaining(remaining, state, 'melds');
-          pairs = false;
+          pairs = !melds && canLayYuzbirPairFinish(remaining, state);
+          kafa = state.players.every((pl) => !pl.hasOpened) && state.openMelds.length === 0;
         }
       }
       if (!melds && !pairs) return { ok: false, error: 'el bitmiyor — taşlar geçerli perlere dizilemiyor' };
       p.hand.splice(idx, 1);
       const okeyThrown = isOkeyTile(thrown, state.okeyColor, state.okeyRank);
       const kind: OkeyFinishKind = pairs ? (okeyThrown ? 'pairsOkey' : 'pairs') : (okeyThrown ? 'okey' : 'normal');
-      endElWin(state, seat, kind);
+      endElWin(state, seat, kind, kafa);
       return { ok: true };
     }
   }
@@ -931,10 +942,11 @@ function applyElPoints(state: OkeyGameState, winnerSeat: number, points: number)
   }
 }
 
-function yuzbirFinishMultiplier(state: OkeyGameState, kind: OkeyFinishKind): number {
+function yuzbirFinishMultiplier(state: OkeyGameState, kind: OkeyFinishKind, kafa = false): number {
   const cfg = state.rules.yuzbir;
   return (kind === 'pairs' || kind === 'pairsOkey' ? cfg.pairPenaltyX : 1)
-    * (kind === 'okey' || kind === 'pairsOkey' ? cfg.okeyFinishX : 1);
+    * (kind === 'okey' || kind === 'pairsOkey' ? cfg.okeyFinishX : 1)
+    * (kafa ? cfg.kafaX : 1);
 }
 
 function yuzbirLeftPenalty(state: OkeyGameState, seat: number): number {
@@ -945,9 +957,9 @@ function yuzbirLeftPenalty(state: OkeyGameState, seat: number): number {
   return sum * (p.openMode === 'pairs' ? cfg.pairPenaltyX : 1);
 }
 
-function endElWinYuzbir(state: OkeyGameState, seat: number, kind: OkeyFinishKind): void {
+function endElWinYuzbir(state: OkeyGameState, seat: number, kind: OkeyFinishKind, kafa = false): void {
   const cfg = state.rules.yuzbir;
-  const mult = yuzbirFinishMultiplier(state, kind);
+  const mult = yuzbirFinishMultiplier(state, kind, kafa);
   for (let s = 0; s < 4; s++) {
     if (s === seat) {
       state.scores[s] = state.scores[s]! + cfg.winnerBonus * mult;
@@ -960,7 +972,7 @@ function endElWinYuzbir(state: OkeyGameState, seat: number, kind: OkeyFinishKind
     state.scores[s] = state.scores[s]! + yuzbirLeftPenalty(state, s) * mult;
   }
   const kindTxt = kind === 'pairsOkey' ? 'çift + okey' : kind === 'pairs' ? 'çiften' : kind === 'okey' ? 'okey atarak' : 'seri';
-  state.matchLog.push(`${state.players[seat]!.name} 101 elini ${kindTxt} bitirdi (çarpan ×${mult})`);
+  state.matchLog.push(`${state.players[seat]!.name} 101 elini ${kafa ? 'kafa atarak ' : ''}${kindTxt} bitirdi (çarpan ×${mult})`);
 }
 
 /** El kapanırken YAZBOZ satırı: bu eldeki toplam puan değişimi (gösterge dahil). */
@@ -1070,22 +1082,24 @@ function pushBankoRow(state: OkeyGameState, winnerSeat: number): void {
   state.bankoRows.push(row);
 }
 
-function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): void {
+function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind, kafa = false): void {
   const sc = state.rules.scoring;
   if (state.rules.variant === 'banko') {
     endElWinBanko(state, seat, kind);
     state.elEnded = true;
     state.elWinner = seat;
     state.finishKind = kind;
+    state.kafaFinish = false;
     pushElDelta(state);
     maybeEndMatchBanko(state);
     return;
   }
   if (state.rules.variant === 'yuzbir') {
-    endElWinYuzbir(state, seat, kind);
+    endElWinYuzbir(state, seat, kind, kafa);
     state.elEnded = true;
     state.elWinner = seat;
     state.finishKind = kind;
+    state.kafaFinish = kafa;
     pushElDelta(state);
     maybeEndMatchYuzbir(state);
     return;
@@ -1097,6 +1111,7 @@ function endElWin(state: OkeyGameState, seat: number, kind: OkeyFinishKind): voi
   state.elEnded = true;
   state.elWinner = seat;
   state.finishKind = kind;
+  state.kafaFinish = false;
   const kindTxt = kind === 'pairsOkey' ? 'ÇİFT + OKEY atarak' : kind === 'pairs' ? 'ÇİFTTEN' : kind === 'okey' ? 'OKEY atarak' : 'düz';
   state.matchLog.push(`${state.players[seat]!.name} eli ${kindTxt} bitirdi (kendisi -${points})`);
   pushElDelta(state);
@@ -1107,6 +1122,7 @@ function endElDraw(state: OkeyGameState): void {
   state.elEnded = true;
   state.elWinner = -1;
   state.finishKind = null;
+  state.kafaFinish = false;
   if (state.rules.variant === 'yuzbir') {
     for (let s2 = 0; s2 < 4; s2++) state.scores[s2] = state.scores[s2]! + yuzbirLeftPenalty(state, s2);
     state.matchLog.push('Taşlar bitti — 101 yazbozda herkes elde kalanını ödedi');

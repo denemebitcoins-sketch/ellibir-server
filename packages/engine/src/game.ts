@@ -664,6 +664,8 @@ export function applyMove(state: GameState, move: Move): GameState {
       return applyExtend(logged, move.meldId, move.cardId);
     case 'retrieveJoker':
       return applyRetrieveJoker(logged, move.meldId, move.cardId);
+    case 'undoIslek':
+      return applyUndoIslek(logged);
     case 'discard':
       return applyDiscard(logged, move.cardId);
     case 'gostergeGoster':
@@ -743,6 +745,7 @@ function applyPickupDiscard(state: GameState): GameState {
     players: state.players.map((p) =>
       p.seat === player.seat ? { ...p, hand: [...p.hand, card] } : p,
     ),
+    ...lockGosterge(state, player.seat), // yerden aldı/denedi → gösterge hakkı iptal
   };
 }
 
@@ -768,6 +771,7 @@ function applyPickupLocked(state: GameState): GameState {
     players: state.players.map((p) =>
       p.seat === player.seat ? { ...p, hand: [...p.hand, card], isCift: true } : p,
     ),
+    ...lockGosterge(state, player.seat), // kilitli kartı aldı → gösterge hakkı iptal
   };
 }
 
@@ -1155,8 +1159,10 @@ function applyExtend(state: GameState, meldId: string, cardId: CardId): GameStat
   if (!analysis) throw new MoveError('invalidExtend', 'Bu kart bu perdeye uymuyor.');
 
   const used = new Set([cardId]);
+  const islekSnapshot = state.islekSnapshot ?? { ...state, islekSnapshot: null };
   return {
     ...state,
+    islekSnapshot,
     ciftIslekUsed: state.ciftIslekUsed || isCiftci,
     melds: state.melds.map((m) => (m.id === meldId ? { ...m, cards: analysis.cards } : m)),
     matchLog: addLog(state, `${nameOf(state, player.seat)} perdeye kart işledi`),
@@ -1184,9 +1190,11 @@ function applyRetrieveJoker(state: GameState, meldId: string, cardId: CardId): G
   const joker = meld.cards.find((c) => c.id === jokerId)!;
   const newCards = meld.cards.map((c) => (c.id === jokerId ? replacement : c));
   const used = new Set([cardId]);
+  const islekSnapshot = state.islekSnapshot ?? { ...state, islekSnapshot: null };
 
   return {
     ...state,
+    islekSnapshot,
     ciftIslekUsed: state.ciftIslekUsed || isCiftci,
     melds: state.melds.map((m) => (m.id === meldId ? { ...m, cards: newCards } : m)),
     matchLog: addLog(state, `${nameOf(state, player.seat)} OKEY'i perdeden kurtardı`),
@@ -1194,6 +1202,16 @@ function applyRetrieveJoker(state: GameState, meldId: string, cardId: CardId): G
       p.seat === player.seat ? { ...p, hand: [...removeFromHand(p.hand, used), joker] } : p,
     ),
   };
+}
+
+function applyUndoIslek(state: GameState): GameState {
+  requirePhase(state, 'action', 'İşlemeyi geri almak için tur sürüyor olmalı.');
+  if (!state.islekSnapshot) throw new MoveError('cannotUndoIslek', 'Geri alınacak işleme yok.');
+  return state.islekSnapshot;
+}
+
+export function canUndoIslek(state: GameState, seat: number): boolean {
+  return state.phase === 'action' && state.currentSeat === seat && state.islekSnapshot != null;
 }
 
 function applyDiscard(state: GameState, cardId: CardId): GameState {
@@ -1319,6 +1337,7 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
             : null;
   const next: GameState = {
     ...state,
+    ...lockGosterge(state, player.seat), // ilk atış/iskarta da gösterge penceresini kapatır
     log,
     sheet,
     discard: [...state.discard, card],
@@ -1349,7 +1368,7 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
 /* GÖSTERGE (kullanıcı kuralı)                                          */
 /* ------------------------------------------------------------------ */
 
-/** Oyuncu ŞU AN çekme öncesi (ilk turunda) mı — gösterge göster/al buna bağlı. */
+/** Oyuncu ŞU AN çekme öncesi (ilk turunda) mı — yalnız gösterge GÖSTERME buna bağlı. */
 function gostergeDrawWindow(state: GameState, seat: number): boolean {
   if (state.phase === 'draw') return true;
   // Dağıtıcı çekmez ('action' ile başlar); ilk hamlesini yapmadıysa pencere açık.
@@ -1381,25 +1400,38 @@ function applyGostergeGoster(state: GameState, cardId: CardId): GameState {
   };
 }
 
-/** GÖSTERGE AL: hak kazanmış + 4+ çift; elden bir kart verip göstergeyi al, DİREKT ÇİFT ol. */
+/** GÖSTERGE AL: önce göstermiş + eşi elde + 4+ çift; çift dışı bir kart verip göstergeyi al. */
 function applyGostergeAl(state: GameState, cardId: CardId): GameState {
   const g = state.gostergeKart;
   if (!g || state.gostergeTaken)
     throw new MoveError('gosterge', 'Gösterge yok.');
+  if (!isNormalCard(g))
+    throw new MoveError('gosterge', 'Gösterge kartı geçersiz.');
   const seat = state.currentSeat;
   if (!(state.gostergeShown ?? []).includes(seat))
     throw new MoveError('gosterge', 'Önce göstergeyi göstermeliydin.');
-  // Alma = YER DEĞİŞTİRME (kart ver, gösterge al; net 0). Çekmeden de çektikten sonra da
-  // yapılabilir — faz şartı YOK (15-1+1=15, fazlalık eklemez).
+  // Alma = YER DEĞİŞTİRME (kart ver, gösterge al; net 0). Gösterme ilk elde yapılır;
+  // takas hakkı, gösterge eşi elde tutulduğu sürece el boyunca kullanılabilir.
   const player = state.players[seat]!;
+  const mate = player.hand.find((c) => isNormalCard(c) && c.rank === g.rank && c.suit === g.suit);
+  if (!mate)
+    throw new MoveError('gosterge', 'Gösterge eşini elinde tutmalısın.');
   // ÇİFT sayısı UI'daki "Puan-çift" (myPairCount) ile AYNI hesap — OKEY (joker) dahil.
-  if (analyzeHand(player.hand, state.rules).pairCount < 4)
+  const pairBefore = analyzeHand(player.hand, state.rules).pairCount;
+  if (pairBefore < 4)
     throw new MoveError('gosterge', 'Göstergeyi almak için en az 4 çiftin olmalı.');
   const verilen = player.hand.find((c) => c.id === cardId);
   if (!verilen) throw new MoveError('notInHand', 'Kart elde değil.');
+  if (verilen.id === mate.id)
+    throw new MoveError('gosterge', 'Gösterge eşini veremezsin; çift olmayan başka bir kart bırakmalısın.');
+  const withoutGiven = player.hand.filter((c) => c.id !== cardId);
+  if (analyzeHand(withoutGiven, state.rules).pairCount !== pairBefore)
+    throw new MoveError('gosterge', 'Gösterge için çift olmayan bir kart bırakmalısın.');
+  const newHand = [...withoutGiven, g];
+  if (analyzeHand(newHand, state.rules).pairCount < 5)
+    throw new MoveError('gosterge', 'Gösterge eşi elinde kalmalı; gösterge 5. çiftini tamamlamalı.');
   // Gösterge ele gelir; verilen kart destenin dibine (stock[0]) gider VE artık gösterge
   // pozisyonunda AÇIK görünür (yeni deste dibi). Alan DİREKT ÇİFT olur. Tekrar alınamaz (taken).
-  const newHand = [...player.hand.filter((c) => c.id !== cardId), g];
   const newStock = [verilen, ...state.stock.slice(1)];
   return {
     ...state,
@@ -1432,6 +1464,7 @@ function advanceTurn(state: GameState): GameState {
     ciftIslekUsed: false, // çiftçinin işlek hakkı her tur yenilenir
     turnCount: state.turnCount + 1,
     openSnapshot: null, // açış geri-alma penceresi tur ilerleyince kapanır
+    islekSnapshot: null,
   };
 }
 
@@ -1503,6 +1536,7 @@ export function viewFor(state: GameState, seat: number): PlayerView {
     openMode: me.openMode,
     isCift: me.isCift,
     ciftIslekUsed: state.ciftIslekUsed,
+    canUndoIslek: canUndoIslek(state, seat),
     currentOpeningMin: openingThreshold(state),
     currentPairsMin: pairsOpeningMin(state),
     // AÇIŞ GİZLİLİĞİ: açan oyuncu kart atana kadar (openSnapshot var) perleri SADECE kendisi görür
@@ -1533,6 +1567,12 @@ export function viewFor(state: GameState, seat: number): PlayerView {
     // (yerine konan kart açık durur); alınamaz olması canTake/canShow ile kontrol edilir.
     gostergeKart: gosterge,
     gostergeShown: (state.gostergeShown ?? []).includes(seat),
+    gostergeTaken: !!state.gostergeTaken,
+    gostergeMark:
+      !!gosterge &&
+      !state.gostergeTaken &&
+      hasGostergeMate &&
+      ((state.gostergeShown ?? []).includes(seat) || !(state.gostergeLocked ?? []).includes(seat)),
     gostergeCanShow:
       !!gosterge &&
       !state.gostergeTaken &&
@@ -1545,7 +1585,9 @@ export function viewFor(state: GameState, seat: number): PlayerView {
       !!gosterge &&
       !state.gostergeTaken &&
       state.currentSeat === seat &&
-      (state.gostergeShown ?? []).includes(seat) && // gösterdiyse + 4 çiftle her faz (yer değiştirme)
+      (state.phase === 'draw' || state.phase === 'action') &&
+      (state.gostergeShown ?? []).includes(seat) &&
+      hasGostergeMate &&
       analyzeHand(me.hand, state.rules).pairCount >= 4,
     players: state.players.map((p) => ({
       seat: p.seat,
