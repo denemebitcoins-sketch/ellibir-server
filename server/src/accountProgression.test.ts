@@ -24,6 +24,15 @@ describe('account progression XP policy', () => {
     expect(supabaseBridge).toMatch(/result\?\.ok\s*!==\s*true/);
   });
 
+  it('does not gate progression behind paid-bet economy settlement', () => {
+    const settleBlock = supabaseBridge.slice(supabaseBridge.indexOf('export async function settleMatch'));
+    expect(settleBlock).toMatch(/if \(!supabaseConfigured\(\) \|\| !Number\.isFinite\(winnerSeat\)\) return \[\];/);
+    expect(settleBlock).toContain('const economyBet = Math.max(0, Math.floor(bet));');
+    expect(settleBlock).toMatch(/if \(economyBet > 0\)[\s\S]*rpc\('add_chips'/);
+    expect(settleBlock).toMatch(/grantMatchProgression\(uid, true,[\s\S]*bet: economyBet/);
+    expect(settleBlock).not.toMatch(/bet <= 0\) return/);
+  });
+
   it.each(['EllibirRoom.ts', 'OkeyRoom.ts', 'TavlaRoom.ts'])(
     '%s keeps a per-match progression idempotency key',
     (name) => {

@@ -517,6 +517,15 @@ export function matchProgressionBaseXp(opts: {
   return xp;
 }
 
+export type MatchProgressionAward = {
+  seat: number;
+  userId: string;
+  xp: number;
+  won: boolean;
+  levelBefore: number;
+  levelAfter: number;
+};
+
 async function grantMatchProgression(uid: string, won: boolean, opts: {
   progressionKey?: string;
   game?: string;
@@ -526,11 +535,11 @@ async function grantMatchProgression(uid: string, won: boolean, opts: {
   teamMode: boolean;
   totalSeats?: number;
   realSeats: number;
-}): Promise<void> {
-  if (!uid || !supabaseConfigured()) return;
+}): Promise<Omit<MatchProgressionAward, 'seat'> | null> {
+  if (!uid || !supabaseConfigured()) return null;
   if (!opts.progressionKey) {
     console.warn('[progression] progressionKey yok; XP atlandi');
-    return;
+    return null;
   }
   const baseXp = matchProgressionBaseXp({
     won,
@@ -558,9 +567,20 @@ async function grantMatchProgression(uid: string, won: boolean, opts: {
     });
     if (result?.ok !== true) {
       console.warn(`[progression] XP yazilamadi uid=${uid.slice(0, 8)} key=${opts.progressionKey} result=${JSON.stringify(result)}`);
+      return null;
     }
+    const xp = Math.max(0, Math.floor(Number(result?.xp_awarded ?? 0)));
+    if (xp <= 0) return null;
+    return {
+      userId: uid,
+      xp,
+      won,
+      levelBefore: Math.max(1, Math.floor(Number(result?.level_before ?? 1))),
+      levelAfter: Math.max(1, Math.floor(Number(result?.level_after ?? 1))),
+    };
   } catch (e: any) {
     console.warn(`[progression] XP RPC hata uid=${uid.slice(0, 8)} key=${opts.progressionKey}:`, e?.message);
+    return null;
   }
 }
 
@@ -576,9 +596,9 @@ export async function settleMatch(opts: {
   openedSeats?: Iterable<number>; // legacy: eski final-el açan filtresi; 101 payout artık toplam maç sıralamasını esas alır
   entryHousePaid?: boolean;       // komisyon/çanak payı maç başında işlendi; settle tekrar eklemesin
   progressionKey?: string;        // XP idempotency key for this authoritative match
-}): Promise<void> {
+}): Promise<MatchProgressionAward[]> {
   const { seatUsers, winnerSeat, bet, teamMode } = opts;
-  if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
+  if (!supabaseConfigured() || !Number.isFinite(winnerSeat)) return [];
 
   // Tek hesap / tek cüzdan: pot = totalSeats × bet; %10 komisyon (çanağın yarısı + yanma),
   // kalanın tamamı kazanan tarafa gider. Eşli modda kazanan takım arasında eşit bölünür.
@@ -587,55 +607,65 @@ export async function settleMatch(opts: {
   const teamOf = (s: number) => s % 2;
   const isWinner = (s: number) => (teamMode ? teamOf(s) === teamOf(winnerSeat) : s === winnerSeat);
 
-  const winners: string[] = [];
-  const losers: string[] = [];
-  for (const [seat, uid] of seatUsers) (isWinner(seat) ? winners : losers).push(uid);
-  if (winners.length === 0 && losers.length === 0) return;
+  const winners: Array<{ seat: number; uid: string }> = [];
+  const losers: Array<{ seat: number; uid: string }> = [];
+  for (const [seat, uid] of seatUsers) (isWinner(seat) ? winners : losers).push({ seat, uid });
+  if (winners.length === 0 && losers.length === 0) return [];
 
   // EKONOMİ (ECONOMY.md §4): pot = KOLTUK×bet; bot bahisleri SANAL pota girer (sink korunur).
   // PEŞİN model: kazanan taraf üyesi BRÜT perWinner alır (net = perWinner − peşin bet);
   // kaybedene EK kesinti yok (peşini masada kaldı).
   const seats = opts.totalSeats ?? 4;
   const winSide = teamMode ? 2 : 1;                // kazanan taraf üye sayısı (bot dahil)
-  const pot = seats * bet;
+  const economyBet = Math.max(0, Math.floor(bet));
+  const pot = seats * economyBet;
   const prizePool = pot - Math.floor(pot * 0.1);   // %10 komisyon
-  const perWinner = Math.floor(prizePool / winSide);
+  const perWinner = economyBet > 0 ? Math.floor(prizePool / winSide) : 0;
 
-  for (const uid of winners) await rpc('add_chips', { p_user_id: uid, p_amount: perWinner });
+  if (economyBet > 0)
+    for (const { uid } of winners) await rpc('add_chips', { p_user_id: uid, p_amount: perWinner });
 
   // ÇANAK: komisyonun %50'si ilgili oyunun çanağına birikir (kalan %50 yakılır — ECONOMY §4).
-  if (opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(pot - prizePool));
+  if (economyBet > 0 && opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(pot - prizePool));
 
   // İSTATİSTİK: oynanan maç (matches) HER gerçek oyuncuda +1; galibiyet (wins) yalnız
   // kazananlarda +1. Ayrıca kazanan serisi (cur_streak/best_streak) ve toplam kazanç
   // (total_won) güncellenir. Bot koltukları seatUsers'ta YOK → yalnız insanlar sayılır.
   // record_match_stats RPC tek atomik UPDATE yapar (winrate = wins/matches buradan doğru çıkar).
-  for (const uid of winners)
-    await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: Math.max(0, perWinner - bet) });
-  for (const uid of losers)
+  for (const { uid } of winners)
+    await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: Math.max(0, perWinner - economyBet) });
+  for (const { uid } of losers)
     await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
-  for (const uid of winners) questMatchEvent(uid, true, opts.game);
-  for (const uid of losers) questMatchEvent(uid, false, opts.game);
-  for (const uid of winners) await grantMatchProgression(uid, true, {
-    progressionKey: opts.progressionKey,
-    game: opts.game,
-    gameVariant: opts.gameVariant,
-    bet,
-    winnerSeat,
-    teamMode,
-    totalSeats: seats,
-    realSeats: winners.length + losers.length,
-  });
-  for (const uid of losers) await grantMatchProgression(uid, false, {
-    progressionKey: opts.progressionKey,
-    game: opts.game,
-    gameVariant: opts.gameVariant,
-    bet,
-    winnerSeat,
-    teamMode,
-    totalSeats: seats,
-    realSeats: winners.length + losers.length,
-  });
+  for (const { uid } of winners) questMatchEvent(uid, true, opts.game);
+  for (const { uid } of losers) questMatchEvent(uid, false, opts.game);
+  const progressionAwards: MatchProgressionAward[] = [];
+  for (const { seat, uid } of winners) {
+    const award = await grantMatchProgression(uid, true, {
+      progressionKey: opts.progressionKey,
+      game: opts.game,
+      gameVariant: opts.gameVariant,
+      bet: economyBet,
+      winnerSeat,
+      teamMode,
+      totalSeats: seats,
+      realSeats: winners.length + losers.length,
+    });
+    if (award) progressionAwards.push({ ...award, seat });
+  }
+  for (const { seat, uid } of losers) {
+    const award = await grantMatchProgression(uid, false, {
+      progressionKey: opts.progressionKey,
+      game: opts.game,
+      gameVariant: opts.gameVariant,
+      bet: economyBet,
+      winnerSeat,
+      teamMode,
+      totalSeats: seats,
+      realSeats: winners.length + losers.length,
+    });
+    if (award) progressionAwards.push({ ...award, seat });
+  }
 
   console.log(`[settle] PESIN winners=${winners.length} losers=${losers.length} seats=${seats} pot=${pot} perWinner(brut)=${perWinner}`);
+  return progressionAwards;
 }

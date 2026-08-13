@@ -6,6 +6,7 @@ import {
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
+import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { onlineHumanSeats, selectJoinSeat } from '../seatSelection';
@@ -684,8 +685,23 @@ export class TavlaRoom extends Room {
       game: 'tavla', // çanak hedefi
       entryHousePaid: this.entryCanakCharged,
       progressionKey: this.matchProgressionKey,
-    }).then(() => this.refreshCanak()) // maç sonu sonrası masa içi çanak göstergesi tazelensin
+    }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
+  }
+
+  private broadcastProgression(awards: MatchProgressionAward[] | void) {
+    if (!Array.isArray(awards) || awards.length === 0) return;
+    for (const a of awards) {
+      if (!a || !a.userId || a.xp <= 0) continue;
+      this.broadcast('progression', {
+        seat: a.seat,
+        user_id: a.userId,
+        xp: a.xp,
+        won: a.won,
+        level_before: a.levelBefore,
+        level_after: a.levelAfter,
+      });
+    }
   }
 
   private async handleReady(seat: number) {
