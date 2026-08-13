@@ -51,6 +51,7 @@ export class EllibirRoom extends Room {
   private settled = false;                     // çift settle koruması
   private entryCanakCharged = false;           // komisyon/çanak payı maç başında işlendi
   private settlePromise: Promise<void> | null = null;
+  private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private rematchVotes = new Set<number>();    // maç sonu TEKRAR OYNA diyen insan koltukları
   private rematchStarting = false;             // çift ücret/yeni-maç başlangıcı koruması
 
@@ -421,6 +422,7 @@ export class EllibirRoom extends Room {
       // Yönetici botları motorun bot koltuklarına eklenir (runEngine onları oynatır).
       this.cfg.botSeats = [...this.adminBots.keys()];
       this.game = createGame(this.cfg);
+      this.matchProgressionKey = `51:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players.find((pl: any) => pl.seat === seat);
         if (p && name) p.name = name;
@@ -725,6 +727,7 @@ export class EllibirRoom extends Room {
         scores: new Map(this.game.players.map((p: any) => [p.seat, p.totalScore])), // kademeli sıralama için
         game: '51', // çanak hedefi
         entryHousePaid: this.entryCanakCharged,
+        progressionKey: this.matchProgressionKey,
       }).then(() => this.refreshCanak()) // maç sonu sonrası masa içi çanak göstergesi tazelensin
         .catch((e) => console.error('[settle] hata:', e?.message));
     }
@@ -859,7 +862,9 @@ export class EllibirRoom extends Room {
     if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
     this.entryCanakCharged = true;
     this.refreshCanak();
-    this.game = createGame({ ...this.cfg, seed: Math.floor(Math.random() * 1_000_000_000) });
+    const seed = Math.floor(Math.random() * 1_000_000_000);
+    this.game = createGame({ ...this.cfg, seed });
+    this.matchProgressionKey = `51:${this.roomId}:${Date.now()}:${seed}`;
     for (const [seat, name] of this.seatNames) {
       const p = this.game.players.find((pl: any) => pl.seat === seat);
       if (p && name) p.name = name;

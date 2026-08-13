@@ -501,6 +501,69 @@ function questMatchEvent(uid: string, won: boolean, game?: string): void {
       .catch((e) => console.warn('[quest] win:', e?.message));
 }
 
+export function matchProgressionBaseXp(opts: {
+  won: boolean;
+  realSeats: number;
+  totalSeats?: number;
+  teamMode?: boolean;
+  game?: string;
+}): number {
+  let xp = 25; // completed online match
+  if (opts.won) xp += 35;
+  if ((opts.realSeats ?? 0) >= Math.min(opts.totalSeats ?? 4, 4)) xp += 10; // full human table bonus
+  else if ((opts.realSeats ?? 0) >= 2) xp += 5; // at least real opposition / teammate
+  if (opts.teamMode) xp += 5;
+  if (opts.game === 'tavla') xp += 5; // shorter 1v1 matches still feel worthwhile
+  return xp;
+}
+
+async function grantMatchProgression(uid: string, won: boolean, opts: {
+  progressionKey?: string;
+  game?: string;
+  gameVariant?: string;
+  bet: number;
+  winnerSeat: number;
+  teamMode: boolean;
+  totalSeats?: number;
+  realSeats: number;
+}): Promise<void> {
+  if (!uid || !supabaseConfigured()) return;
+  if (!opts.progressionKey) {
+    console.warn('[progression] progressionKey yok; XP atlandi');
+    return;
+  }
+  const baseXp = matchProgressionBaseXp({
+    won,
+    realSeats: opts.realSeats,
+    totalSeats: opts.totalSeats,
+    teamMode: opts.teamMode,
+    game: opts.game,
+  });
+  try {
+    const result = await rpcService('grant_account_xp', {
+      p_user_id: uid,
+      p_source: 'match',
+      p_event_key: opts.progressionKey,
+      p_base_xp: baseXp,
+      p_game: opts.game ?? null,
+      p_context: {
+        won,
+        bet: opts.bet,
+        winnerSeat: opts.winnerSeat,
+        teamMode: opts.teamMode,
+        totalSeats: opts.totalSeats ?? 4,
+        realSeats: opts.realSeats,
+        variant: opts.gameVariant ?? null,
+      },
+    });
+    if (result?.ok !== true) {
+      console.warn(`[progression] XP yazilamadi uid=${uid.slice(0, 8)} key=${opts.progressionKey} result=${JSON.stringify(result)}`);
+    }
+  } catch (e: any) {
+    console.warn(`[progression] XP RPC hata uid=${uid.slice(0, 8)} key=${opts.progressionKey}:`, e?.message);
+  }
+}
+
 export async function settleMatch(opts: {
   seatUsers: Map<number, string>;
   winnerSeat: number;
@@ -512,6 +575,7 @@ export async function settleMatch(opts: {
   gameVariant?: string;          // okey: 'duz' | 'banko' | 'yuzbir'
   openedSeats?: Iterable<number>; // legacy: eski final-el açan filtresi; 101 payout artık toplam maç sıralamasını esas alır
   entryHousePaid?: boolean;       // komisyon/çanak payı maç başında işlendi; settle tekrar eklemesin
+  progressionKey?: string;        // XP idempotency key for this authoritative match
 }): Promise<void> {
   const { seatUsers, winnerSeat, bet, teamMode } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat) || bet <= 0) return;
@@ -552,6 +616,26 @@ export async function settleMatch(opts: {
     await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
   for (const uid of winners) questMatchEvent(uid, true, opts.game);
   for (const uid of losers) questMatchEvent(uid, false, opts.game);
+  for (const uid of winners) await grantMatchProgression(uid, true, {
+    progressionKey: opts.progressionKey,
+    game: opts.game,
+    gameVariant: opts.gameVariant,
+    bet,
+    winnerSeat,
+    teamMode,
+    totalSeats: seats,
+    realSeats: winners.length + losers.length,
+  });
+  for (const uid of losers) await grantMatchProgression(uid, false, {
+    progressionKey: opts.progressionKey,
+    game: opts.game,
+    gameVariant: opts.gameVariant,
+    bet,
+    winnerSeat,
+    teamMode,
+    totalSeats: seats,
+    realSeats: winners.length + losers.length,
+  });
 
   console.log(`[settle] PESIN winners=${winners.length} losers=${losers.length} seats=${seats} pot=${pot} perWinner(brut)=${perWinner}`);
 }

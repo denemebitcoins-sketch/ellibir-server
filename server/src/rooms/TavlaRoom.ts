@@ -47,6 +47,7 @@ export class TavlaRoom extends Room {
   private settled = false;
   private entryCanakCharged = false;
   private settlePromise: Promise<void> | null = null;
+  private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private cfg: any = null;
   private rematchVotes = new Set<number>(); // maç sonu TEKRAR OYNA oyları (koltuk)
   private rematchStarting = false;
@@ -350,6 +351,7 @@ export class TavlaRoom extends Room {
       this.refreshCanak();
       this.cfg.botSeats = [...this.adminBots.keys()]; // yönetici botları motorun bot koltukları
       this.game = createTavlaGame(this.cfg);
+      this.matchProgressionKey = `tavla:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players[seat];
         if (p && name) p.name = name;
@@ -681,6 +683,7 @@ export class TavlaRoom extends Room {
       totalSeats: 2, // tavla 1v1 — pot = 2×bet (bot bahsi sanal; ECONOMY §4)
       game: 'tavla', // çanak hedefi
       entryHousePaid: this.entryCanakCharged,
+      progressionKey: this.matchProgressionKey,
     }).then(() => this.refreshCanak()) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
   }
@@ -729,7 +732,9 @@ export class TavlaRoom extends Room {
     this.entryCanakCharged = true;
     this.refreshCanak();
 
-    this.game = createTavlaGame({ ...this.cfg, seed: Date.now() % 2147483647 });
+    const seed = Date.now() % 2147483647;
+    this.game = createTavlaGame({ ...this.cfg, seed });
+    this.matchProgressionKey = `tavla:${this.roomId}:${Date.now()}:${seed}`;
     for (const [seat, name] of this.seatNames) {
       const player = this.game.players[seat];
       if (player && name) player.name = name;

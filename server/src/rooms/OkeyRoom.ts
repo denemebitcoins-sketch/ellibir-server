@@ -74,6 +74,7 @@ export class OkeyRoom extends Room {
   private settled = false;
   private entryCanakCharged = false;
   private settlePromise: Promise<void> | null = null;
+  private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private cfg: any = null;
   private rematchVotes = new Set<number>();
   private rematchStarting = false;
@@ -415,6 +416,7 @@ export class OkeyRoom extends Room {
       const banko = this.cfg?.rules?.variant === 'banko';
       this.cfg.botSeats = [...this.adminBots.keys()]; // yönetici botları motorun bot koltukları
       this.game = createOkeyGame({ ...this.cfg, dealFirst: !banko });
+      this.matchProgressionKey = `okey:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players[seat];
         if (p && name) p.name = name;
@@ -765,6 +767,7 @@ export class OkeyRoom extends Room {
       openedSeats,
       game: 'okey', // çanak hedefi (düz + banko ortak çanak)
       entryHousePaid: this.entryCanakCharged,
+      progressionKey: this.matchProgressionKey,
     }).then(() => this.refreshCanak()) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
   }
@@ -820,7 +823,9 @@ export class OkeyRoom extends Room {
     this.refreshCanak();
 
     const banko = this.cfg?.rules?.variant === 'banko';
-    this.game = createOkeyGame({ ...this.cfg, seed: Math.floor(Math.random() * 1_000_000_000), dealFirst: !banko });
+    const seed = Math.floor(Math.random() * 1_000_000_000);
+    this.game = createOkeyGame({ ...this.cfg, seed, dealFirst: !banko });
+    this.matchProgressionKey = `okey:${this.roomId}:${Date.now()}:${seed}`;
     for (const [seat, name] of this.seatNames) {
       const player = this.game.players[seat];
       if (player && name) player.name = name;
