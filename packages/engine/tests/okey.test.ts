@@ -243,6 +243,28 @@ describe('oyun akışı', () => {
     expect(g.discards[0]!.length).toBe(0);
   });
 
+  it('düz ve bankolu okeyde soldan alınan taş atıştan önce geri bırakılabilir', () => {
+    for (const variant of ['duz', 'banko'] as const) {
+      const g = createOkeyGame({ seed: 71, dealerSeat: 0, rules: { variant, totalEls: 1 } as any });
+      g.phase = 'draw';
+      g.turn = 0;
+      const left = t('R', 11);
+      g.discards[3]!.push(left);
+      const beforeHand = g.players[0]!.hand.length;
+
+      expect(applyOkeyMove(g, 0, { t: 'draw', from: 'left' }).ok).toBe(true);
+      expect(g.players[0]!.yuzbirPendingLeftTileId).toBe(left.id);
+      expect(g.players[0]!.hand.length).toBe(beforeHand + 1);
+      expect(g.discards[3]).toHaveLength(0);
+
+      expect(applyOkeyMove(g, 0, { t: 'returnLeft' }).ok).toBe(true);
+      expect(g.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
+      expect(g.players[0]!.hand.some((x) => x.id === left.id)).toBe(false);
+      expect(g.discards[3]![g.discards[3]!.length - 1]?.id).toBe(left.id);
+      expect(g.phase).toBe('draw');
+    }
+  });
+
   it('geçersiz bitiş reddedilir; puanlar değişmez', () => {
     const g = createOkeyGame({ seed: 11, dealerSeat: 0 });
     const anyTile = g.players[0]!.hand[3]!;

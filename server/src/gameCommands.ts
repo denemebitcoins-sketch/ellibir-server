@@ -76,10 +76,10 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
     const player = state.players?.find((p: any) => p.seat === seat);
     const card = player?.hand?.find((c: any) => c.id === cmd.cardId);
     if (!meld || !card) throw new CmdError('invalid_move');
-    if (canExtend(meld, card, state.rules) != null) {
-      state = applyMove(state, { type: 'extend', meldId: cmd.meldId, cardId: cmd.cardId });
-    } else if (canRetrieveJoker(meld, card, state.rules) != null) {
+    if (canRetrieveJoker(meld, card, state.rules) != null) {
       state = applyMove(state, { type: 'retrieveJoker', meldId: cmd.meldId, cardId: cmd.cardId });
+    } else if (canExtend(meld, card, state.rules) != null) {
+      state = applyMove(state, { type: 'extend', meldId: cmd.meldId, cardId: cmd.cardId });
     } else throw new CmdError('illegal_play');
 
   } else if (cmd.t === 'extend') {
@@ -90,9 +90,17 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
   } else if (cmd.t === 'isle') {
     turnGuard();
     if (typeof cmd.cardId !== 'string') throw new CmdError('invalid_move');
-    const targets = legalExtendTargets(state, seat, cmd.cardId);
-    if (targets.length === 0) throw new CmdError('no_legal_target');
-    state = applyMove(state, { type: 'extend', meldId: targets[0], cardId: cmd.cardId });
+    const player = state.players?.find((p: any) => p.seat === seat);
+    const card = player?.hand?.find((c: any) => c.id === cmd.cardId);
+    if (!card) throw new CmdError('invalid_move');
+    const jokerMeld = (state.melds ?? []).find((m: any) => canRetrieveJoker(m, card, state.rules) != null);
+    if (jokerMeld) {
+      state = applyMove(state, { type: 'retrieveJoker', meldId: jokerMeld.id, cardId: cmd.cardId });
+    } else {
+      const targets = legalExtendTargets(state, seat, cmd.cardId);
+      if (targets.length === 0) throw new CmdError('no_legal_target');
+      state = applyMove(state, { type: 'extend', meldId: targets[0], cardId: cmd.cardId });
+    }
 
   } else if (cmd.t === 'processAllIslek') {
     turnGuard();
@@ -101,11 +109,20 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
     // kendiliğinden yeniden işlenmez.
     const frozenIds = [...new Set(cmd.cards.filter((id: unknown) => typeof id === 'string'))] as string[];
     for (const cardId of frozenIds) {
-      const player = state.players?.find((p: any) => p.seat === seat);
-      if (!player?.hand?.some((c: any) => c.id === cardId)) continue;
-      const targets = legalExtendTargets(state, seat, cardId);
-      if (targets.length === 0) continue;
-      state = applyMove(state, { type: 'extend', meldId: targets[0], cardId });
+      try {
+        const player = state.players?.find((p: any) => p.seat === seat);
+        const card = player?.hand?.find((c: any) => c.id === cardId);
+        if (!card) continue;
+        const jokerMeld = (state.melds ?? []).find((m: any) => canRetrieveJoker(m, card, state.rules) != null);
+        if (jokerMeld) {
+          state = applyMove(state, { type: 'retrieveJoker', meldId: jokerMeld.id, cardId });
+          continue;
+        }
+        const targets = legalExtendTargets(state, seat, cardId);
+        if (targets.length > 0) state = applyMove(state, { type: 'extend', meldId: targets[0], cardId });
+      } catch {
+        // Toplu işlemde geçersizleşen tek kart akışı bozmasın; kalan kartlar denenir.
+      }
     }
 
   } else if (cmd.t === 'undoIslek') {

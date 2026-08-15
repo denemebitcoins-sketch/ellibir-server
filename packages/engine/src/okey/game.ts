@@ -27,7 +27,7 @@ export interface OkeyPlayer {
   openMode: 'melds' | 'pairs' | null; // 101: seri/küt mü, çift mi açtı
   openingPoints: number;   // 101: açtığı seri/küt toplamı
   openingPairs: number;    // 101: açtığı çift sayısı
-  yuzbirPendingLeftTileId?: string; // 101: soldan alınan taş bu tur açma/işlemede kullanılmalı
+  yuzbirPendingLeftTileId?: string; // tüm varyantlarda son soldan alınan taş; 101'de ek kullanım kilidi
 }
 
 export type OkeyPublicMeldKind = 'run' | 'set' | 'pair';
@@ -608,8 +608,7 @@ export function canTakeYuzbirLeft(state: OkeyGameState, seat: number, tile: Okey
   return canOpenAdditionalWithTile(state, seat, tile);
 }
 
-function returnYuzbirLeft(state: OkeyGameState, seat: number): OkeyMoveResult {
-  if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu hamle yalnız 101 masasında kullanılır' };
+function returnLeft(state: OkeyGameState, seat: number): OkeyMoveResult {
   if (state.phase !== 'discard') return { ok: false, error: 'geri bırakmak için soldan taş almış olmalısın' };
   const p = state.players[seat]!;
   const pendingId = p.yuzbirPendingLeftTileId;
@@ -827,7 +826,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
         if (!top) return { ok: false, error: 'solda atılmış taş yok' };
         leftPile.pop();
         p.hand.push(top);
-        if (state.rules.variant === 'yuzbir') p.yuzbirPendingLeftTileId = top.id;
+        p.yuzbirPendingLeftTileId = top.id;
       } else {
         const top = state.stock.pop();
         if (!top) { endElDraw(state); return { ok: true }; } // deste bitti → berabere
@@ -838,7 +837,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       return { ok: true };
     }
     case 'returnLeft':
-      return returnYuzbirLeft(state, seat);
+      return returnLeft(state, seat);
     case 'open':
       return openYuzbirMelds(state, seat, move.groups);
     case 'openPairs':
@@ -856,6 +855,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       const tile = p.hand.splice(idx, 1)[0]!;
       state.discards[seat]!.push(tile);
       p.discardCount++;
+      p.yuzbirPendingLeftTileId = undefined;
       if (state.rules.variant === 'yuzbir') {
         const islekDiscard = isYuzbirIslekDiscard(state, tile);
         state.yuzbirMeldProcessCounts = {};
