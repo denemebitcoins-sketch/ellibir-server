@@ -86,7 +86,7 @@ export function safeClientName(raw: unknown, fallback: string): string {
   return n || fallback;
 }
 
-export type ClientProfileMeta = { name: string; gender: string; role: string };
+export type ClientProfileMeta = { name: string; gender: string; role: string; adminBadgeHidden: boolean };
 
 export function authUserIdFromClient(client: any): string | null {
   const auth = client?.auth;
@@ -108,6 +108,10 @@ function trustedProfileRole(row: any): string {
   return 'normal';
 }
 
+export function displayProfileRole(role: string, adminBadgeHidden: boolean): string {
+  return role === 'admin' && adminBadgeHidden ? 'admin_hidden' : role;
+}
+
 export async function resolveClientProfileMeta(
   userId: string | null | undefined,
   options: any,
@@ -117,21 +121,24 @@ export async function resolveClientProfileMeta(
     name: safeClientName(options?.playerName, fallbackName),
     gender: safeClientGender(options?.gender),
     role: userId && supabaseConfigured() ? 'normal' : safeClientRole(options?.role),
+    adminBadgeHidden: false,
   };
   if (!userId || !supabaseConfigured()) return fallback;
   try {
     const r = await fetch(
-      `${URL}/rest/v1/profiles?id=eq.${userId}&select=name,gender,role,vip_until`,
+      `${URL}/rest/v1/profiles?id=eq.${userId}&select=name,gender,role,vip_until,admin_badge_hidden`,
       { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
     );
     if (!r.ok) return fallback;
     const rows: any = await r.json();
     const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
     if (!row) return fallback;
+    const role = trustedProfileRole(row);
     return {
       name: safeClientName(row?.name, fallback.name),
       gender: safeClientGender(row?.gender),
-      role: trustedProfileRole(row),
+      role,
+      adminBadgeHidden: role === 'admin' && row?.admin_badge_hidden === true,
     };
   } catch (e: any) {
     console.error('[supabase] resolveClientProfileMeta:', e?.message);

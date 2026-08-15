@@ -67,6 +67,7 @@ export interface ClientView {
   openMode: string;   // 'melds' | 'pairs' | '' (açış tarzım)
   canSor: boolean;
   canCancelPickup: boolean;
+  canUndoIslek: boolean;
   /** ELİMDEKİ açış potansiyeli: en iyi seri puanı + ulaşılabilir çift adedi. */
   myMeldPoints: number;
   myPairCount: number;
@@ -149,6 +150,7 @@ export function toClientView(
     openMode: v.openMode ?? '',
     canSor,
     canCancelPickup: pk != null && !pk.committed && !pk.zorunlu,
+    canUndoIslek: v.canUndoIslek,
     myMeldPoints: insight.meldPoints,
     myPairCount: insight.pairCount,
   };

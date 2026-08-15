@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
@@ -49,8 +49,8 @@ export class OkeyRoom extends Room {
   private seats = new Map<string, number>();
   private spectators = new Set<string>();
   private spectatorNames = new Map<string, string>();
-  private spectatorMeta = new Map<string, { gender: string; role: string }>();
-  private seatMeta = new Map<number, { gender: string; role: string }>();
+  private spectatorMeta = new Map<string, { gender: string; role: string; adminBadgeHidden: boolean }>();
+  private seatMeta = new Map<number, { gender: string; role: string; adminBadgeHidden: boolean }>();
   private humanSeats: number[] = [];
   private seatUsers = new Map<number, string>();
   private seatNames = new Map<number, string>();
@@ -341,7 +341,7 @@ export class OkeyRoom extends Room {
       this.spectators.add(client.sessionId);
       const meta = await resolveClientProfileMeta(uid, options, 'İzleyici');
       this.spectatorNames.set(client.sessionId, meta.name);
-      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
       this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
       client.send('seat', { seat: -1 });
       client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
@@ -357,7 +357,7 @@ export class OkeyRoom extends Room {
       this.spectators.add(client.sessionId);
       const meta = await resolveClientProfileMeta(authUserIdFromClient(client), options, 'İzleyici');
       this.spectatorNames.set(client.sessionId, meta.name);
-      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
       this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
       client.send('seat', { seat: -1 });
       if (decision.error) {
@@ -373,7 +373,7 @@ export class OkeyRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
     client.send('seat', { seat });
     console.log(`[OkeyRoom.onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();
@@ -407,7 +407,7 @@ export class OkeyRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
     client.send('seat', { seat });
     this.startGameIfReady();
     this.pushViews();
@@ -872,13 +872,16 @@ export class OkeyRoom extends Room {
     }));
     const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
     const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
-    const specRoles = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.role ?? 'normal');
+    const specRoles = specClients.map((c) => {
+      const m = this.spectatorMeta.get(c.sessionId);
+      return displayProfileRole(m?.role ?? 'normal', m?.adminBadgeHidden === true);
+    });
     const specGenders = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.gender ?? '');
     const decorate = (v: any) => {
       if (Array.isArray(v.players))
         for (const s of v.players) {
           const m = this.seatMeta.get(s.seat);
-          if (m) { s.role = m.role; s.gender = m.gender; }
+          if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; }
           s.uid = this.seatUsers.get(s.seat) ?? ''; // profil tıklaması (public kimlik)
           s.abandoned = this.abandoned.has(s.seat);
           if (s.abandoned) s.isBot = true;

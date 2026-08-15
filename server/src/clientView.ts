@@ -2,7 +2,7 @@
  * TS PlayerView → C# ClientView DTO formatına dönüştürür (ClientViewBuilder ile PARITY).
  * C# JsonUtility'nin beklediği alan adları (myHand, seats, vb.) kullanılır.
  */
-import { viewFor, isIslekCard, canSor, canCancelOpen, legalExtendTargets, canRetrieveJoker } from '../../packages/engine/src/game';
+import { viewFor, isIslekCard, canSor, canCancelOpen, canUndoIslek, legalExtendTargets, canRetrieveJoker } from '../../packages/engine/src/game';
 import { analyzeHand } from '../../packages/engine/src/insight';
 import { meldPoints, analyzeCards, analyzePair } from '../../packages/engine/src/melds';
 import { solveHand } from '../../packages/engine/src/solver';
@@ -239,6 +239,7 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
     canSor:            safeCanSor(state, seat),
     canCancelPickup:   !!pk && !pk.committed && !pk.zorunlu,
     canCancelOpen:     safeCanCancelOpen(state, seat),
+    canUndoIslek:      safeCanUndoIslek(state, seat),
     myMeldPoints:      ins2.meldPoints  ?? 0,
     myPairCount:       ins2.pairCount   ?? 0,
     canSeeDiscardPile: v.discardPileForCift != null,
@@ -332,6 +333,10 @@ function safeCanSor(state: any, seat: number): boolean {
 
 function safeCanCancelOpen(state: GameState, seat: number): boolean {
   try { return canCancelOpen(state, seat); } catch { return false; }
+}
+
+function safeCanUndoIslek(state: GameState, seat: number): boolean {
+  try { return canUndoIslek(state, seat); } catch { return false; }
 }
 
 /** sorgu kartını el/discard/perler içinde id ile çöz (SorguState yalnız cardId tutar). */
@@ -435,7 +440,7 @@ function emptyView(seat: number): Record<string, unknown> {
     hasDiscard: false, discardTop: null, discardCount: 0, stockCount: 0,
     matchWinnerSeat: -1, handWinnerSeat: -1, handFinish: false, pairFinish: false, okeyFinish: false,
     hasOpened: false, openMode: '',
-    canSor: false, canCancelPickup: false, canCancelOpen: false, myMeldPoints: 0, myPairCount: 0,
+    canSor: false, canCancelPickup: false, canCancelOpen: false, canUndoIslek: false, myMeldPoints: 0, myPairCount: 0,
     canSeeDiscardPile: false, discardPile: [], discardLocked: false,
     canPickupLockedTop: false, sorguActive: false, sorguAskerSeat: -1,
     sorguSorulanSeat: -1, sorguAsama: '', sorguPartnerSeat: -1, sorguPartnerGorus: '', sorguCard: null,

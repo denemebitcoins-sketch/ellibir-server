@@ -10,8 +10,8 @@ const sql = readFileSync(
 describe('VIP direct-message quota', () => {
   it('creates a daily usage table and exposes VIP/admin expanded limits', () => {
     expect(sql).toMatch(/create\s+table\s+if\s+not\s+exists\s+public\.direct_message_daily_usage/i);
-    expect(sql).toMatch(/then\s+500/i);
-    expect(sql).toMatch(/else\s+50/i);
+    expect(sql).toMatch(/then\s+5000/i);
+    expect(sql).toMatch(/else\s+20/i);
     expect(sql).toMatch(/p\.role\s*=\s*'admin'/i);
     expect(sql).toMatch(/p\.vip_until\s+is\s+not\s+null\s+and\s+p\.vip_until\s*>\s*now\(\)/i);
   });

@@ -1,5 +1,6 @@
 -- Online Kahvem - VIP/normal direct-message quota (2026-07-17)
--- Normal uyeler gunluk makul DM kotasinda kalir; VIP/admin sosyal tarafta daha genis alana sahip olur.
+-- Normal uyeler gunluk makul DM kotasinda kalir; VIP/admin urun dilinde sinirsizdir.
+-- Guvenlik icin VIP/admin tarafinda da gorunmez yuksek bir anti-spam tavani tutulur.
 
 begin;
 
@@ -29,8 +30,8 @@ as $$
       select 1 from public.profiles p
        where p.id::text = auth.uid()::text
          and (p.role = 'admin' or (p.vip_until is not null and p.vip_until > now()))
-    ) then 500
-    else 50
+    ) then 5000
+    else 20
   end;
 $$;
 

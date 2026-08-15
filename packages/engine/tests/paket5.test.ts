@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyMove, canRetrieveJoker, createGame, meldBarajTokens } from '../src/game';
+import { applyMove, canRetrieveJoker, canUndoIslek, createGame, meldBarajTokens } from '../src/game';
 import { DEFAULT_RULES } from '../src/rules';
 import type { Card, GameState, Meld } from '../src/types';
 import { c, joker } from './helpers';
@@ -113,6 +113,49 @@ describe('C3 — açmış çiftçi tur başına TEK işlek', () => {
     // Okey + 8♥ = yeni çift (indirme işlek DEĞİLDİR, serbest).
     const next = applyMove(state, { type: 'meld', cards: [twin.id, jk.id] });
     expect(next.melds.filter((m) => m.type === 'pair')).toHaveLength(1);
+  });
+});
+
+describe('C3B — işlenen kart geri alma penceresi', () => {
+  function islekReadyState(): GameState {
+    return rig(createGame({ seed: 1, dealerSeat: 3 }), {
+      currentSeat: 0,
+      phase: 'action',
+      openedMelds: [0],
+      melds: [
+        meld('seri1', 'run', [c('D', 4), c('D', 5), c('D', 6)], 2),
+      ],
+      hands: { 0: [c('D', 7), c('S', 2), c('H', 8)] },
+    });
+  }
+
+  it('kart atılmadan önce işleme geri alınabilir ve el/per eski haline döner', () => {
+    const initial = islekReadyState();
+    const seven = initial.players[0]!.hand[0]!;
+
+    const extended = applyMove(initial, { type: 'extend', meldId: 'seri1', cardId: seven.id });
+
+    expect(canUndoIslek(extended, 0)).toBe(true);
+    expect(extended.players[0]!.hand.some((card) => card.id === seven.id)).toBe(false);
+    expect(extended.melds[0]!.cards.some((card) => card.id === seven.id)).toBe(true);
+
+    const undone = applyMove(extended, { type: 'undoIslek' });
+
+    expect(canUndoIslek(undone, 0)).toBe(false);
+    expect(undone.players[0]!.hand.some((card) => card.id === seven.id)).toBe(true);
+    expect(undone.melds[0]!.cards.some((card) => card.id === seven.id)).toBe(false);
+  });
+
+  it('kart atılıp tur tamamlanınca işleme geri alma penceresi kapanır', () => {
+    const initial = islekReadyState();
+    const seven = initial.players[0]!.hand[0]!;
+
+    const extended = applyMove(initial, { type: 'extend', meldId: 'seri1', cardId: seven.id });
+    const done = applyMove(extended, { type: 'discard', cardId: extended.players[0]!.hand[0]!.id });
+
+    expect(canUndoIslek(done, 0)).toBe(false);
+    expect(done.islekSnapshot).toBeNull();
+    expect(() => applyMove(done, { type: 'undoIslek' })).toThrowError();
   });
 });
 

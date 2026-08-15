@@ -3,7 +3,7 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
@@ -23,8 +23,8 @@ export class EllibirRoom extends Room {
   private seats = new Map<string, number>();   // sessionId → koltuk
   private spectators = new Set<string>();      // sessionId → izleyici (koltuksuz, seat=-1)
   private spectatorNames = new Map<string, string>(); // sessionId → izleyici görünen ad (yazboz paneli için)
-  private spectatorMeta = new Map<string, { gender: string; role: string }>(); // izleyici cinsiyet/rol (isim rengi/rozet için)
-  private seatMeta = new Map<number, { gender: string; role: string }>();        // koltuk → cinsiyet/rol (yazboz sol panel zengin gösterim)
+  private spectatorMeta = new Map<string, { gender: string; role: string; adminBadgeHidden: boolean }>(); // izleyici cinsiyet/rol (isim rengi/rozet için)
+  private seatMeta = new Map<number, { gender: string; role: string; adminBadgeHidden: boolean }>();        // koltuk → cinsiyet/rol (yazboz sol panel zengin gösterim)
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
   private startTimer: NodeJS.Timeout | null = null;
@@ -341,7 +341,7 @@ export class EllibirRoom extends Room {
       this.spectators.add(client.sessionId);
       const meta = await resolveClientProfileMeta(uid, options, 'İzleyici');
       this.spectatorNames.set(client.sessionId, meta.name);
-      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
       this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
       client.send('seat', { seat: -1 });
       client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
@@ -360,7 +360,7 @@ export class EllibirRoom extends Room {
       this.spectators.add(client.sessionId);
       const meta = await resolveClientProfileMeta(authUserIdFromClient(client), options, 'İzleyici');
       this.spectatorNames.set(client.sessionId, meta.name);
-      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role });
+      this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
       this.logEvent(`${meta.name} izleyici olarak masaya katıldı`); // client farklı renk verir
       client.send('seat', { seat: -1 });
       if (decision.error) {
@@ -377,7 +377,7 @@ export class EllibirRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
@@ -417,7 +417,7 @@ export class EllibirRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
     client.send('seat', { seat });
     console.log(`[sit] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();
@@ -942,11 +942,14 @@ export class EllibirRoom extends Room {
     // AKTİF izleyiciler: koltuksuz (seat yok) bağlı client'lar → adları (çıkan izleyici otomatik düşer).
     const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
     const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
-    const specRoles = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.role ?? 'normal');
+    const specRoles = specClients.map((c) => {
+      const m = this.spectatorMeta.get(c.sessionId);
+      return displayProfileRole(m?.role ?? 'normal', m?.adminBadgeHidden === true);
+    });
     const specGenders = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.gender ?? '');
     // Koltuk listesine cinsiyet/rol + UID enjekte et (isim rengi/rozet + masa-içi MiniProfile:
     // profil kartından MESAJ/ARKADAŞ akışı uid ister — okey/tavla ile parite).
-    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; } s.uid = this.seatUsers.get(s.seat) ?? ''; } };
+    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; } s.uid = this.seatUsers.get(s.seat) ?? ''; } };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) {
