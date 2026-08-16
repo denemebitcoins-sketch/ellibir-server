@@ -8,6 +8,8 @@ const monetization = readFileSync(join(root, 'src', 'monetization.ts'), 'utf8');
 
 describe('training rewarded access authority', () => {
   it('uses a dedicated SSV-backed training session table and RPCs', () => {
+    expect(migration).toMatch(/create table if not exists public\.training_access_windows/i);
+    expect(migration).toMatch(/function public\.get_training_access_state\(\)/i);
     expect(migration).toMatch(/create table if not exists public\.training_rewarded_ad_sessions/i);
     expect(migration).toMatch(/function public\.begin_training_rewarded_ad\(p_device_hash text\)/i);
     expect(migration).toMatch(/function public\.get_training_rewarded_ad_state\(p_session_id uuid\)/i);
@@ -17,8 +19,10 @@ describe('training rewarded access authority', () => {
   });
 
   it('does not let authenticated clients directly grant training access', () => {
+    expect(migration).toMatch(/to_regprocedure\('public\.grant_training_access\(text,text\)'\)/i);
     expect(migration).toMatch(/revoke execute on function public\.grant_training_access\(text, text\) from public, anon, authenticated/i);
     expect(migration).not.toMatch(/grant execute on function public\.grant_training_access\(text, text\) to authenticated/i);
+    expect(migration).toMatch(/grant execute on function public\.get_training_access_state\(\) to authenticated/i);
     expect(migration).toMatch(/grant execute on function public\.begin_training_rewarded_ad\(text\) to authenticated/i);
   });
 

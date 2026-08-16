@@ -1,5 +1,56 @@
 begin;
 
+create table if not exists public.training_access_windows (
+  user_id text primary key,
+  device_hash text,
+  access_until timestamptz not null,
+  source text not null default 'ad',
+  updated_at timestamptz not null default now()
+);
+
+alter table public.training_access_windows enable row level security;
+revoke all on public.training_access_windows from anon, authenticated;
+
+drop policy if exists training_access_select_own on public.training_access_windows;
+create policy training_access_select_own on public.training_access_windows
+for select to authenticated
+using (user_id = auth.uid()::text);
+
+create or replace function public.get_training_access_state()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid text := auth.uid()::text;
+  v_until timestamptz;
+  v_remaining int := 0;
+begin
+  if auth.uid() is null then
+    return jsonb_build_object('ok', false, 'error', 'auth_required', 'access_until', 0, 'remaining_seconds', 0);
+  end if;
+
+  if public.is_current_user_admin() or public.is_current_user_vip() then
+    v_until := now() + interval '365 days';
+  else
+    select access_until into v_until
+      from public.training_access_windows
+     where user_id = v_uid;
+  end if;
+
+  if v_until is not null then
+    v_remaining := greatest(0, floor(extract(epoch from (v_until - now())))::int);
+  end if;
+
+  return jsonb_build_object(
+    'ok', true,
+    'access_until', coalesce(floor(extract(epoch from v_until))::bigint, 0),
+    'remaining_seconds', v_remaining
+  );
+end;
+$$;
+
 create table if not exists public.training_rewarded_ad_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -190,10 +241,18 @@ exception when unique_violation then
 end;
 $$;
 
-revoke execute on function public.grant_training_access(text, text) from public, anon, authenticated;
+do $$
+begin
+  if to_regprocedure('public.grant_training_access(text,text)') is not null then
+    revoke execute on function public.grant_training_access(text, text) from public, anon, authenticated;
+  end if;
+end $$;
+
+revoke execute on function public.get_training_access_state() from public, anon;
 revoke execute on function public.begin_training_rewarded_ad(text) from public, anon;
 revoke execute on function public.get_training_rewarded_ad_state(uuid) from public, anon;
 revoke execute on function public.finalize_training_rewarded_ad(uuid, text, text, text, numeric) from public, anon, authenticated;
+grant execute on function public.get_training_access_state() to authenticated;
 grant execute on function public.begin_training_rewarded_ad(text) to authenticated;
 grant execute on function public.get_training_rewarded_ad_state(uuid) to authenticated;
 grant execute on function public.finalize_training_rewarded_ad(uuid, text, text, text, numeric) to service_role;
