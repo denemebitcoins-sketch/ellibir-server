@@ -59,13 +59,21 @@ export async function handleAdMobSsv(req: Request): Promise<Record<string, unkno
   const transactionId = params.get('transaction_id') || '';
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('ssv_session_invalid');
   if (!transactionId) throw new Error('ssv_transaction_missing');
-  return await rpcService('finalize_rewarded_ad', {
+  const args = {
     p_session_id: sessionId,
     p_transaction_id: transactionId,
     p_ad_unit: params.get('ad_unit') || '',
     p_reward_item: params.get('reward_item') || '',
     p_reward_amount: Number(params.get('reward_amount') || 0),
-  });
+  };
+  let training: any = null;
+  try {
+    training = await rpcService('finalize_training_rewarded_ad', args);
+  } catch (error: any) {
+    if (!String(error?.message || '').includes('finalize_training_rewarded_ad_http_404')) throw error;
+  }
+  if (training && (training.ok || training.error !== 'session_not_found')) return training;
+  return await rpcService('finalize_rewarded_ad', args);
 }
 
 function parseUnifiedReceipt(raw: string): any {

@@ -32,11 +32,15 @@ export function computeHandResult(
   const handPoints = (player: GameState['players'][number]): number =>
     player.hand.reduce((sum, c) => sum + handCardPenalty(c, rules), 0);
 
-  // KELLE CEZASI (kullanıcı kuralı): kapalı oyuncunun tabanı — KAFA (hiç kimse
-  // açmadı/çift yok) → 200; en az biri açtıysa/çiftse → 100. Bitiş şeklinden
-  // (biri bitirdi / deste tükendi) ve moddan (tekli/eşli) BAĞIMSIZ tek kural.
-  const anyCommitted = state.players.some((p) => p.hasOpened || p.isCift);
-  const closedBase = anyCommitted ? 100 : rules.scoring.basePenalty; // 100 / 200 (KAFA)
+  // KELLE CEZASI (kullanıcı kuralı): kapalı oyuncunun tabanı.
+  // - Bitiren yoksa: masada daha önce açan/çift taahhüdü varsa 100, yoksa 200.
+  // - Bitiren varsa: bitirenden ÖNCE açılmış/çift taahhütlü biri varsa 100.
+  //   Bitiren aynı tur ilk kez açıp bitirdiyse bu "elden/kafa"dır; kapalı taban 200 kalır.
+  const committedBeforeFinish = winnerSeat === null
+    ? state.players.some((p) => p.hasOpened || p.isCift)
+    : state.players.some((p) => p.seat !== winnerSeat && (p.hasOpened || p.isCift))
+      || (!handFinish && !!state.players[winnerSeat] && (state.players[winnerSeat]!.hasOpened || state.players[winnerSeat]!.isCift));
+  const closedBase = committedBeforeFinish ? 100 : rules.scoring.basePenalty; // 100 / 200
 
   if (winnerSeat !== null) {
     const winnerTeam = rules.teamMode ? teamOf(winnerSeat) : null;

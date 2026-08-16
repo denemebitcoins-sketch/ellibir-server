@@ -7,7 +7,7 @@ import {
   openingThreshold,
   prevActiveSeat,
 } from '../src/game';
-import { sheetTeamTotals, sheetTotals, teamOf } from '../src/scoring';
+import { computeHandResult, sheetTeamTotals, sheetTotals, teamOf } from '../src/scoring';
 import { DEFAULT_RULES, makeRules } from '../src/rules';
 import type { Card, GameState, PublicEvent } from '../src/types';
 import { c, ids, joker } from './helpers';
@@ -172,6 +172,89 @@ describe('SABİT BİRİM ceza modeli — kabul örnekleri', () => {
     const handRows = ended.sheet.filter((e) => e.kind === 'penalty');
     expect(handRows.some((e) => e.seat === 0)).toBe(false);
     expect(handRows.map((e) => e.amount).sort((a, b) => a - b)).toEqual([200, 200, 400]);
+  });
+
+  it('elden/kafa bitişte bitiren ilk kez açıp bitirdiyse kapalı oyuncular 200 taban yer', () => {
+    let state = createGame({ seed: 1, dealerSeat: 0 });
+    state = rig(state, {
+      currentSeat: 0,
+      phase: 'action',
+      turnCount: 8,
+      opened: [0],
+      hands: { 0: [], 1: [c('S', 2)], 2: [c('H', 4)], 3: [c('D', 6)] },
+    });
+    state.players = state.players.map((p) =>
+      p.seat === 0 ? { ...p, openedOnTurn: state.turnCount } : p,
+    );
+    const result = computeHandResult(state, 0, true, false);
+    expect(result.penalties).toEqual([0, 200, 200, 200]);
+    expect(result.breakdown.every((b) => b.base === 200)).toBe(true);
+  });
+
+  it('biri daha önce açtıysa normal bitişte kapalı oyuncular 100 taban yer', () => {
+    let state = createGame({ seed: 1, dealerSeat: 0 });
+    state = rig(state, {
+      currentSeat: 0,
+      phase: 'action',
+      turnCount: 8,
+      opened: [0, 2],
+      hands: { 0: [], 1: [c('S', 2)], 2: [c('H', 4), c('C', 5)], 3: [c('D', 6)] },
+    });
+    state.players = state.players.map((p) =>
+      p.seat === 0 ? { ...p, openedOnTurn: 2 } : p,
+    );
+    const result = computeHandResult(state, 0, false, false);
+    expect(result.penalties[1]).toBe(100);
+    expect(result.penalties[3]).toBe(100);
+    expect(result.breakdown.find((b) => b.seat === 2)!.baseKind).toBe('hand');
+  });
+
+  it.each([
+    ['normal bitiş', false, false, [0, 100, 100, 100]],
+    ['normal okey', true, false, [0, 200, 200, 200]],
+    ['normal çifte bitiş', false, true, [0, 200, 200, 200]],
+    ['normal çifte + okey', true, true, [0, 400, 400, 400]],
+  ])('%s: daha önce açılmış elde kapalı taban 100 üstünden çarpılır', (_name, okeyFinish, pairFinish, expected) => {
+    let state = createGame({ seed: 1, dealerSeat: 0 });
+    state = rig(state, {
+      currentSeat: 0,
+      phase: 'action',
+      turnCount: 8,
+      opened: [0],
+      hands: { 0: [], 1: [c('S', 2)], 2: [c('H', 4)], 3: [c('D', 6)] },
+    });
+    state.players = state.players.map((p) =>
+      p.seat === 0
+        ? { ...p, openedOnTurn: 2, openMode: pairFinish ? ('pairs' as const) : ('melds' as const) }
+        : p,
+    );
+    const result = computeHandResult(state, 0, false, okeyFinish);
+    expect(result.penalties).toEqual(expected);
+    expect(result.breakdown.every((b) => b.base === 100)).toBe(true);
+  });
+
+  it.each([
+    ['elden bitiş', false, false, [0, 200, 200, 200]],
+    ['elden okey', true, false, [0, 400, 400, 400]],
+    ['elden çifte bitiş', false, true, [0, 400, 400, 400]],
+    ['elden çifte + okey', true, true, [0, 800, 800, 800]],
+  ])('%s: kimse önce açmadıysa kapalı taban 200 üstünden çarpılır', (_name, okeyFinish, pairFinish, expected) => {
+    let state = createGame({ seed: 1, dealerSeat: 0 });
+    state = rig(state, {
+      currentSeat: 0,
+      phase: 'action',
+      turnCount: 8,
+      opened: [0],
+      hands: { 0: [], 1: [c('S', 2)], 2: [c('H', 4)], 3: [c('D', 6)] },
+    });
+    state.players = state.players.map((p) =>
+      p.seat === 0
+        ? { ...p, openedOnTurn: state.turnCount, openMode: pairFinish ? ('pairs' as const) : ('melds' as const) }
+        : p,
+    );
+    const result = computeHandResult(state, 0, true, okeyFinish);
+    expect(result.penalties).toEqual(expected);
+    expect(result.breakdown.every((b) => b.base === 200)).toBe(true);
   });
 
   it('C6 EŞLİ: bitirenin ortağı CEZA YEMEZ; karşı takım sütununa 400+200=600 yazılır', () => {

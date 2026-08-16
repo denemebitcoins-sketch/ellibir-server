@@ -171,8 +171,8 @@ describe('çiftten bitme skorlaması', () => {
     const ended = applyMove(state, { type: 'discard', cardId: lastCard.id });
     expect(ended.phase === 'handEnded' || ended.phase === 'matchEnded').toBe(true);
     expect(ended.lastHandResult).toMatchObject({ winnerSeat: 0, pairFinish: true });
-    // Biri açtı (committed) → kapalı rakipler: 100 x2 (çiftten) = 200 (elden bitme çarpan değildir).
-    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 200, 200]);
+    // Bitiren aynı tur ilk kez çift açıp bitti: kapalı taban 200, çiftten bitiş x2.
+    expect(ended.lastHandResult?.penalties).toEqual([0, 400, 400, 400]);
   });
 
   it('normal (per) bitişte pairFinish=false olur', () => {

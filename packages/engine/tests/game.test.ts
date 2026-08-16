@@ -222,9 +222,9 @@ describe('skorlama', () => {
     const ended = applyMove(state, { type: 'discard', cardId: hand[9]!.id });
     expect(ended.phase).toBe('handEnded');
     expect(ended.lastHandResult).toMatchObject({ winnerSeat: 0, handFinish: true });
-    // Biri açtı (committed) → kapalılar kelle başı 100 (elden bitme çarpan getirmez).
-    expect(ended.lastHandResult?.penalties).toEqual([0, 100, 100, 100]);
-    expect(ended.players[1]!.totalScore).toBe(100);
+    // Bitiren aynı tur ilk kez açıp bitti: önceki açış yoksa kapalı taban 200 kalır.
+    expect(ended.lastHandResult?.penalties).toEqual([0, 200, 200, 200]);
+    expect(ended.players[1]!.totalScore).toBe(200);
   });
 
   it('normal bitişte kapalı rakipler taban 100 öder (biri açtıysa)', () => {
