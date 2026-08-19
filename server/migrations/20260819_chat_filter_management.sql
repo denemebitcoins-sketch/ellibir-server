@@ -173,7 +173,9 @@ begin
        set term = v_term, match_mode = v_mode, active = coalesce(p_active, true), updated_at = now()
      where id = p_id
      returning id into v_id;
-  else
+  end if;
+
+  if v_id is null then
     insert into public.chat_banned_words(term, match_mode, active, created_by)
     values (v_term, v_mode, coalesce(p_active, true), auth.uid())
     on conflict (term) do update
@@ -181,6 +183,14 @@ begin
           active = excluded.active,
           updated_at = now()
     returning id into v_id;
+  end if;
+
+  if v_id is null then
+    select id
+      into v_id
+      from public.chat_banned_words
+     where term = v_term
+     limit 1;
   end if;
 
   return jsonb_build_object('ok', v_id is not null, 'id', v_id);

@@ -13,6 +13,8 @@ import { TavlaRoom } from './rooms/TavlaRoom';
 import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
 import { startPushWorker } from './pushWorker';
 import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth';
+import { createPinAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
+import { submitPreAuthSupport } from './preAuthSupport';
 
 const port = Number(process.env.PORT) || 2567;
 
@@ -46,6 +48,57 @@ app.post('/auth/email/verify-code', async (req, res) => {
     const status = message === 'auth_required' ? 401
       : message === 'email_provider_not_configured' || message === 'server_not_configured' || message === 'email_send_timeout' ? 503
       : 400;
+    res.status(status).json({ ok: false, error: message });
+  }
+});
+function recoveryStatusCode(message: string): number {
+  if (message === 'auth_required') return 401;
+  if (message === 'server_not_configured') return 503;
+  if (message === 'email_already_used' || message === 'name_taken' || message === 'device_registered') return 409;
+  if (message === 'credentials_invalid') return 401;
+  return 400;
+}
+app.post('/auth/recovery/create', async (req, res) => {
+  try {
+    res.json(await createPinAccount(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'account_create_failed');
+    res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/auth/recovery/setup', async (req, res) => {
+  try {
+    res.json(await setupPinRecovery(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'account_setup_failed');
+    res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/auth/recovery/login', async (req, res) => {
+  try {
+    res.json(await loginPinRecovery(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'account_login_failed');
+    res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.get('/auth/recovery/status', async (req, res) => {
+  try {
+    res.json(await pinRecoveryStatus(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'account_status_failed');
+    res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/support/preauth/report', async (req, res) => {
+  try {
+    res.json(await submitPreAuthSupport(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'support_failed');
+    const status = message === 'too_many_requests' ? 429
+      : message === 'server_not_configured' ? 503
+      : message === 'email_invalid' || message === 'message_required' ? 400
+      : 500;
     res.status(status).json({ ok: false, error: message });
   }
 });

@@ -24,6 +24,7 @@ describe('central chat filter schema', () => {
   it('exposes admin-only list, upsert and delete RPCs', () => {
     expect(migration).toMatch(/function\s+public\.admin_list_chat_filter_words\(\)/i);
     expect(migration).toMatch(/function\s+public\.admin_upsert_chat_filter_word\(/i);
+    expect(migration).toMatch(/select\s+id[\s\S]*from\s+public\.chat_banned_words[\s\S]*where\s+term\s+=\s+v_term/i);
     expect(migration).toMatch(/function\s+public\.admin_delete_chat_filter_word\(p_id\s+bigint\)/i);
     expect(migration).toMatch(/not\s+public\.is_current_user_admin\(\)/i);
     expect(migration).toMatch(/grant\s+execute\s+on\s+function\s+public\.admin_list_chat_filter_words\(\)\s+to\s+authenticated/i);
