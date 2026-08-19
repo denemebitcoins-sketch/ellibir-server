@@ -3,12 +3,13 @@ import { createGame, startNextHand, applySorguTimeout } from '../../../packages/
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
 import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterChatText, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntryOnce, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { ellibirCanakChance } from '../canakPolicy';
+import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -218,13 +219,16 @@ export class EllibirRoom extends Room {
       const uid = this.seatUsers.get(seat);
       // Auth'lı oyuncu için chat-ban kontrolü (async; banlıysa yayınlama, gönderene bilgi ver).
       if (uid) {
-        isChatBanned(uid).then((banned) => {
+        isChatBanned(uid).then(async (banned) => {
           if (banned) { client.send('chatBlocked', { reason: 'Konuşman yasaklı.' }); return; }
-          this.broadcast('chat', { seat, name, text });
+          const filtered = await filterChatText(text);
+          this.broadcast('chat', { seat, name, text: filtered });
         }).catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
         return;
       }
-      this.broadcast('chat', { seat, name, text });
+      filterChatText(text)
+        .then((filtered) => this.broadcast('chat', { seat, name, text: filtered }))
+        .catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
     });
 
     // Oyun-içi HEDİYE: {to_seats, gift_id}. Tek istek, tek atomik bakiye kesintisi.
@@ -438,10 +442,11 @@ export class EllibirRoom extends Room {
       const entryUsers = new Map(this.seatUsers);
       const rules: any = this.cfg?.rules ?? {};
       const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
-      const entry = await deductEntry(entryUsers, this.bet, '51', entryHouse);
+      const oneHandEntry = shouldDeferEntryHouse(rules.totalHands);
+      const entry = await deductEntry(entryUsers, this.bet, oneHandEntry ? undefined : '51', entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-      this.entryCanakCharged = true;
-      this.refreshCanak();
+      this.entryCanakCharged = !oneHandEntry;
+      if (!oneHandEntry) this.refreshCanak();
       // Yönetici botları motorun bot koltuklarına eklenir (runEngine onları oynatır).
       this.cfg.botSeats = [...this.adminBots.keys()];
       this.game = createGame(this.cfg);
@@ -740,8 +745,21 @@ export class EllibirRoom extends Room {
     if (this.game.phase === 'matchEnded' && !this.settled) {
       this.settled = true;
       this.rematchVotes.clear();
-      this.maybeCanak(); // son el matchEnded'e atlar — çanak kontrolü kaçmasın
       const r: any = this.game.rules ?? {};
+      const scoreValues = this.game.players.map((p: any) => Number(p.totalScore));
+      if (isOneRoundNoContest({
+        totalRounds: r.totalHands,
+        handWinnerSeat: this.game.lastHandResult?.winnerSeat,
+        scores: scoreValues,
+      })) {
+        const key = `51:no-contest:${this.matchProgressionKey || this.roomId}`;
+        this.logEvent('1 ellik maç sonuçsuz bitti — giriş ücretleri iade edildi');
+        this.settlePromise = refundEntryOnce(this.seatUsers, this.bet, key, 'one_hand_no_contest')
+          .then(() => this.refreshCanak())
+          .catch((e) => console.error('[settle-no-contest] hata:', e?.message));
+        return;
+      }
+      this.maybeCanak(); // son el matchEnded'e atlar — çanak kontrolü kaçmasın
       this.settlePromise = settleMatch({
         seatUsers: this.seatUsers,
         winnerSeat: Number(this.game.matchWinnerSeat),

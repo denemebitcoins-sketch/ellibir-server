@@ -209,6 +209,71 @@ export async function isChatBanned(userId: string | null | undefined): Promise<b
   }
 }
 
+export type ChatFilterWord = { term: string; match_mode?: 'word' | 'contains'; active?: boolean };
+
+let chatFilterCache: { expires: number; words: ChatFilterWord[] } = { expires: 0, words: [] };
+
+const CHAT_FILTER_TTL_MS = 60_000;
+const CHAT_WORD_CHARS = '0-9A-Za-zÇĞİÖŞÜçğıöşü_';
+
+export function normalizeChatFilterText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLocaleLowerCase('tr-TR')
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function applyChatWordFilter(text: string, words: ChatFilterWord[]): string {
+  let out = String(text ?? '');
+  if (!out || !Array.isArray(words) || words.length === 0) return out;
+
+  for (const word of words) {
+    if (word?.active === false) continue;
+    const term = normalizeChatFilterText(word?.term);
+    if (term.length < 2) continue;
+    const escaped = escapeRegExp(term);
+    const mode = word?.match_mode === 'contains' ? 'contains' : 'word';
+    const pattern = mode === 'contains'
+      ? new RegExp(escaped, 'giu')
+      : new RegExp(`(^|[^${CHAT_WORD_CHARS}])(${escaped})(?=$|[^${CHAT_WORD_CHARS}])`, 'giu');
+    out = out.replace(pattern, mode === 'contains' ? '***' : '$1***');
+  }
+
+  return out;
+}
+
+async function fetchChatFilterWords(): Promise<ChatFilterWord[]> {
+  if (!supabaseConfigured()) return [];
+  const now = Date.now();
+  if (chatFilterCache.expires > now) return chatFilterCache.words;
+  try {
+    const r = await fetch(
+      `${URL}/rest/v1/chat_banned_words?active=eq.true&select=term,match_mode,active&order=term.asc`,
+      { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
+    );
+    if (!r.ok) throw new Error(`chat_filter_http_${r.status}`);
+    const rows = (await r.json()) as ChatFilterWord[];
+    chatFilterCache = {
+      expires: now + CHAT_FILTER_TTL_MS,
+      words: Array.isArray(rows) ? rows : [],
+    };
+  } catch (e: any) {
+    console.error('[supabase] chat filter fetch:', e?.message);
+    chatFilterCache.expires = now + 10_000;
+  }
+  return chatFilterCache.words;
+}
+
+export async function filterChatText(text: string): Promise<string> {
+  const words = await fetchChatFilterWords();
+  return applyChatWordFilter(text, words);
+}
+
 /**
  * DÜŞEN/REZERVE koltuğun salon görünürlüğü (P2): oyuncu kopunca client heartbeat'i durur →
  * 60s sonra presence satırı salon listesinden düşer → koltuk "boş/OTUR" görünür. Server, koltuk
@@ -362,6 +427,28 @@ export async function refundEntry(seatUsers: Map<number, string>, bet: number, r
     if (!ok) console.error(`[entry] iade başarısız uid=${uid} amount=${bet} reason=${reason}`);
   }
   if (seatUsers.size > 0) console.log(`[entry] bahis iade edildi: ${seatUsers.size} oyuncu × ${bet} reason=${reason}`);
+}
+
+export async function refundEntryOnce(
+  seatUsers: Map<number, string>,
+  bet: number,
+  refundKey: string,
+  reason = 'one_hand_no_contest',
+): Promise<void> {
+  if (!supabaseConfigured() || bet <= 0 || seatUsers.size === 0) return;
+  const key = String(refundKey ?? '').trim();
+  if (!key) throw new Error('refund_key_required');
+  const userIds = [...seatUsers.values()].filter((uid) => typeof uid === 'string' && uid.trim().length > 0);
+  if (userIds.length === 0) return;
+  const result = await rpcService('refund_match_entry_once', {
+    p_refund_key: key,
+    p_reason: reason,
+    p_user_ids: userIds,
+    p_amount: Math.floor(bet),
+  });
+  if (result?.ok !== true) throw new Error(`refund_match_entry_once_failed:${result?.error ?? 'unknown'}`);
+  const marker = result?.already_refunded ? 'zaten işlendi' : `${Number(result?.refunded_count ?? 0)} oyuncu`;
+  console.log(`[entry] tek seferlik bahis iadesi: ${marker} × ${bet} reason=${reason} key=${key}`);
 }
 
 /* ── ÇANAK (ilerleyen jackpot; BÖLÜM 33) ─────────────────────────────────────

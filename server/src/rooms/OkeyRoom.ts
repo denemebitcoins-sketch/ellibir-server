@@ -5,12 +5,13 @@ import {
 } from '../../../packages/engine/src/okey';
 import type { OkeyGameState, OkeyRuleConfig } from '../../../packages/engine/src/okey';
 import { okeyViewFor } from '../okeyView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterChatText, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntryOnce, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { okeyCanakChance } from '../canakPolicy';
+import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
 
@@ -207,13 +208,16 @@ export class OkeyRoom extends Room {
       const name = this.seatNames.get(seat) ?? `Oyuncu ${seat + 1}`;
       const uid = this.seatUsers.get(seat);
       if (uid) {
-        isChatBanned(uid).then((banned) => {
+        isChatBanned(uid).then(async (banned) => {
           if (banned) { client.send('chatBlocked', { reason: 'Konuşman yasaklı.' }); return; }
-          this.broadcast('chat', { seat, name, text });
+          const filtered = await filterChatText(text);
+          this.broadcast('chat', { seat, name, text: filtered });
         }).catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
         return;
       }
-      this.broadcast('chat', { seat, name, text });
+      filterChatText(text)
+        .then((filtered) => this.broadcast('chat', { seat, name, text: filtered }))
+        .catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
     });
 
     this.onMessage('gift', async (client, raw) => {
@@ -431,10 +435,11 @@ export class OkeyRoom extends Room {
         gameVariant: this.cfg?.rules?.variant,
         realSeats: entryUsers.size,
       });
-      const entry = await deductEntry(entryUsers, this.bet, 'okey', entryHouse);
+      const oneHandEntry = shouldDeferEntryHouse(this.cfg?.rules?.totalEls);
+      const entry = await deductEntry(entryUsers, this.bet, oneHandEntry ? undefined : 'okey', entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-      this.entryCanakCharged = true;
-      this.refreshCanak();
+      this.entryCanakCharged = !oneHandEntry;
+      if (!oneHandEntry) this.refreshCanak();
       const banko = this.cfg?.rules?.variant === 'banko';
       this.cfg.botSeats = [...this.adminBots.keys()]; // yönetici botları motorun bot koltukları
       this.game = createOkeyGame({ ...this.cfg, dealFirst: !banko });
@@ -636,7 +641,7 @@ export class OkeyRoom extends Room {
   }
 
   private afterChange() {
-    if (this.game && (this.game.elEnded || this.game.matchEnded)) this.maybeCanak();
+    if (this.game && (this.game.elEnded || this.game.matchEnded) && !this.isOneHandNoContest()) this.maybeCanak();
     // SIRA ÖNEMLİ: önce zamanlayıcı (turnDeadlineAt) KURULUR, sonra push edilir — aksi halde
     // view ESKİ deadline ile gider: insan sırasında turnMs=0 (sayaç hiç çıkmaz), bot sırasındaki
     // push önceki insanın kalıntı süresini taşır (sayaç yanlış koltukta görünür bug'ı).
@@ -772,6 +777,15 @@ export class OkeyRoom extends Room {
     this.settled = true;
     const scores = new Map<number, number>();
     for (let s = 0; s < 4; s++) scores.set(s, this.game.scores[s]!);
+    if (this.isOneHandNoContest()) {
+      this.rematchVotes.clear();
+      const key = `okey:no-contest:${this.matchProgressionKey || this.roomId}`;
+      this.logEvent('1 ellik maç sonuçsuz bitti — giriş ücretleri iade edildi');
+      this.settlePromise = refundEntryOnce(this.seatUsers, this.bet, key, 'one_hand_no_contest')
+        .then(() => this.refreshCanak())
+        .catch((e) => console.error('[OkeyRoom.noContest] hata:', e?.message));
+      return;
+    }
     const openedSeats = new Set<number>();
     if (this.game.rules.variant === 'yuzbir')
       for (let s = 0; s < 4; s++) if (this.game.players[s]!.hasOpened) openedSeats.add(s);
@@ -792,6 +806,15 @@ export class OkeyRoom extends Room {
       progressionKey: this.matchProgressionKey,
     }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
+  }
+
+  private isOneHandNoContest(): boolean {
+    if (!this.game) return false;
+    return isOneRoundNoContest({
+      totalRounds: this.game.rules.totalEls,
+      handWinnerSeat: this.game.elWinner,
+      scores: this.game.scores,
+    });
   }
 
   private broadcastProgression(awards: MatchProgressionAward[] | void) {

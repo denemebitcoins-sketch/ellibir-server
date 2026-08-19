@@ -5,7 +5,7 @@ import {
 } from '../../../packages/engine/src/tavla';
 import type { TavlaGameState, TavlaRuleConfig } from '../../../packages/engine/src/tavla';
 import { tavlaViewFor } from '../tavlaView';
-import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
+import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterChatText, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
@@ -162,13 +162,16 @@ export class TavlaRoom extends Room {
       const name = this.seatNames.get(seat) ?? `Oyuncu ${seat + 1}`;
       const uid = this.seatUsers.get(seat);
       if (uid) {
-        isChatBanned(uid).then((banned) => {
+        isChatBanned(uid).then(async (banned) => {
           if (banned) { client.send('chatBlocked', { reason: 'Konuşman yasaklı.' }); return; }
-          this.broadcast('chat', { seat, name, text });
+          const filtered = await filterChatText(text);
+          this.broadcast('chat', { seat, name, text: filtered });
         }).catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
         return;
       }
-      this.broadcast('chat', { seat, name, text });
+      filterChatText(text)
+        .then((filtered) => this.broadcast('chat', { seat, name, text: filtered }))
+        .catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
     });
 
     // MASA REAKSİYONU: {kind} — masadaki TÜM insanlara (+ gönderene echo) broadcast.
