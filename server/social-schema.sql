@@ -708,7 +708,7 @@ grant  execute on function public.admin_set_avatar_status(text, text) to authent
 -- ─────────────────────────────────────────────────────────────────────
 alter table public.reports drop constraint if exists reports_type_check;
 alter table public.reports add constraint reports_type_check
-  check (type in ('istek','sikayet','oneri','bug'));
+  check (type in ('istek','sikayet','oneri','bug','baglanti'));
 
 create index if not exists reports_from_idx on public.reports (from_user, created_at desc);
 
@@ -1513,6 +1513,11 @@ set search_path = public
 as $$
 declare v_name text;
 begin
+  if new.from_user is null then
+    new.name := coalesce(nullif(trim(new.name), ''), 'Giriş Desteği');
+    return new;
+  end if;
+
   select coalesce(nullif(p.name, ''), 'Oyuncu') into v_name
     from public.profiles p where p.id::text = new.from_user::text;
   new.name := coalesce(v_name, 'Oyuncu');

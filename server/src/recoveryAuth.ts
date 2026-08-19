@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import { verifyToken } from './supabase';
+import { isDeletedDevice } from './accountDeletion';
 
 const URL = process.env.SUPABASE_URL ?? '';
 const ANON = process.env.SUPABASE_ANON_KEY ?? '';
@@ -280,6 +281,7 @@ export async function createPinAccount(req: Request): Promise<Record<string, unk
   if (!validPin(pin)) throw new Error('pin_invalid');
   if (!validName(name)) throw new Error('name_invalid');
   if (!gender) throw new Error('gender_invalid');
+  if (await isDeletedDevice(deviceHash)) throw new Error('device_deleted');
   if (await recoveryByEmail(email)) throw new Error('email_already_used');
   if (await profileNameTaken(name)) throw new Error('name_taken');
 

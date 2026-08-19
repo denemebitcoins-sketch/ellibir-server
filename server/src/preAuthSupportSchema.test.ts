@@ -10,6 +10,7 @@ const source = readFileSync(join(root, 'src', 'preAuthSupport.ts'), 'utf8');
 describe('pre-auth support reports', () => {
   it('allows reports without an authenticated sender', () => {
     expect(migration).toMatch(/alter\s+table\s+public\.reports[\s\S]*alter\s+column\s+from_user\s+drop\s+not\s+null/i);
+    expect(migration).toMatch(/reports_type_check[\s\S]*baglanti/i);
   });
 
   it('exposes an unauthenticated support endpoint with rate limiting', () => {

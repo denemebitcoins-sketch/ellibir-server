@@ -15,6 +15,7 @@ import { startPushWorker } from './pushWorker';
 import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth';
 import { createPinAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
 import { submitPreAuthSupport } from './preAuthSupport';
+import { deleteAccount } from './accountDeletion';
 
 const port = Number(process.env.PORT) || 2567;
 
@@ -54,7 +55,7 @@ app.post('/auth/email/verify-code', async (req, res) => {
 function recoveryStatusCode(message: string): number {
   if (message === 'auth_required') return 401;
   if (message === 'server_not_configured') return 503;
-  if (message === 'email_already_used' || message === 'name_taken' || message === 'device_registered') return 409;
+  if (message === 'email_already_used' || message === 'name_taken' || message === 'device_registered' || message === 'device_deleted') return 409;
   if (message === 'credentials_invalid') return 401;
   return 400;
 }
@@ -88,6 +89,18 @@ app.get('/auth/recovery/status', async (req, res) => {
   } catch (error: any) {
     const message = String(error?.message || 'account_status_failed');
     res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/auth/account/delete', async (req, res) => {
+  try {
+    res.json(await deleteAccount(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'account_delete_failed');
+    const status = message === 'auth_required' ? 401
+      : message === 'server_not_configured' ? 503
+      : message === 'pin_invalid' || message === 'pin_not_configured' ? 401
+      : 400;
+    res.status(status).json({ ok: false, error: message });
   }
 });
 app.post('/support/preauth/report', async (req, res) => {
