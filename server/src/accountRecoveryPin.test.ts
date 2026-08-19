@@ -39,4 +39,10 @@ describe('mail + pin account recovery', () => {
     expect(_test.sameHash(a, a)).toBe(true);
     expect(_test.sameHash(a, b)).toBe(false);
   });
+
+  it('does not report generic profile id duplicates as username conflicts', () => {
+    expect(_test.profileWriteErrorToCode(409, 'profiles_name_lower_uniq')).toBe('name_taken');
+    expect(_test.profileWriteErrorToCode(409, 'duplicate key value violates unique constraint "profiles_pkey"'))
+      .toBe('profile_insert_409');
+  });
 });

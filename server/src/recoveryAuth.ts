@@ -216,10 +216,15 @@ async function bindDevice(userId: string, deviceHash: string, allowReassign: boo
   if (!response.ok) throw new Error(`device_bind_${response.status}`);
 }
 
-async function insertProfile(userId: string, name: string, gender: string): Promise<void> {
-  const response = await serviceFetch('/rest/v1/profiles', {
+function profileWriteErrorToCode(status: number, text: string): string {
+  if (/profiles_name_lower_uniq/i.test(text)) return 'name_taken';
+  return `profile_insert_${status}`;
+}
+
+async function upsertProfile(userId: string, name: string, gender: string): Promise<void> {
+  const response = await serviceFetch('/rest/v1/profiles?on_conflict=id', {
     method: 'POST',
-    headers: { Prefer: 'return=minimal' },
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify({
       id: userId,
       name,
@@ -236,8 +241,7 @@ async function insertProfile(userId: string, name: string, gender: string): Prom
   });
   if (!response.ok) {
     const text = await response.text();
-    if (/profiles_name_lower_uniq|duplicate|23505/i.test(text)) throw new Error('name_taken');
-    throw new Error(`profile_insert_${response.status}`);
+    throw new Error(profileWriteErrorToCode(response.status, text));
   }
 }
 
@@ -283,7 +287,7 @@ export async function createPinAccount(req: Request): Promise<Record<string, unk
   let userId = '';
   try {
     userId = await createAuthUser(email, password);
-    await insertProfile(userId, name, gender);
+    await upsertProfile(userId, name, gender);
     await upsertRecovery(userId, email, pin);
     await bindDevice(userId, deviceHash, true);
     const session = await passwordSession(email, password);
@@ -348,4 +352,4 @@ export async function pinRecoveryStatus(req: Request): Promise<Record<string, un
   return { ok: true, secured: !!email, email };
 }
 
-export const _test = { normalizeEmail, validEmail, cleanPin, validPin, normalizeName, validName, normalizeGender, derivedPassword, pinHash, sameHash };
+export const _test = { normalizeEmail, validEmail, cleanPin, validPin, normalizeName, validName, normalizeGender, derivedPassword, pinHash, sameHash, profileWriteErrorToCode };
