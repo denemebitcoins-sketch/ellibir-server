@@ -29,7 +29,8 @@ begin
 
   select count(*)::integer into v_count from public.lobby_chat;
 
-  delete from public.lobby_chat;
+  delete from public.lobby_chat
+   where id is not null;
 
   insert into public.lobby_chat_clear_audit(admin_user, cleared_count, reason)
   values (v_admin, v_count, 'admin_clear_lobby_chat');

@@ -21,8 +21,9 @@ describe('recovered Unity client contracts', () => {
     expect(splash).not.toContain('SupabaseProfile.EnsureProfile');
     expect(beta).toContain('ProfileStore.HasCompletedRequiredInfo()');
     expect(setup).toContain('SupabaseProfile.IsNameTaken');
-    expect(setup).toContain('SupabaseProfile.PushWithResult');
-    expect(setup).toContain('BELİRTMEK İSTEMİYORUM');
+    expect(setup).toContain('SupabaseAuth.CreatePinAccount');
+    expect(setup).toContain('ATLA');
+    expect(setup).toContain('PIN tekrar');
     expect(setup).toContain('CheckNameAfterDelay');
     expect(setup).toContain('Bu kullanıcı adı kullanılıyor.');
     expect(profile).not.toContain('fixName');

@@ -17,7 +17,7 @@ describe('admin lobby chat clearing', () => {
     expect(migration).toMatch(/function\s+public\.admin_clear_lobby_chat\(\)/i);
     expect(migration).toMatch(/security\s+definer/i);
     expect(migration).toMatch(/not\s+public\.is_current_user_admin\(\)/i);
-    expect(migration).toMatch(/delete\s+from\s+public\.lobby_chat/i);
+    expect(migration).toMatch(/delete\s+from\s+public\.lobby_chat\s+where\s+id\s+is\s+not\s+null/i);
     expect(migration).toMatch(/insert\s+into\s+public\.lobby_chat_clear_audit/i);
     expect(migration).toMatch(/jsonb_build_object\('ok',\s*true,\s*'cleared_count',\s*v_count\)/i);
     expect(migration).toMatch(/grant\s+execute\s+on\s+function\s+public\.admin_clear_lobby_chat\(\)\s+to\s+authenticated/i);
