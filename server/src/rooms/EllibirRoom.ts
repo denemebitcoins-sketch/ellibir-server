@@ -311,7 +311,7 @@ export class EllibirRoom extends Room {
       if (!payloadWithinLimit(raw, 128) || !this.messageGuard.allow(client.sessionId, 'reaction', 1, 5000)) return;
       let kind = typeof raw === 'string' ? raw : (raw?.kind ?? '');
       kind = String(kind).slice(0, 16).trim();
-      if (!['clap', 'smile', 'wow', 'angry', 'giggle', 'angry_shout'].includes(kind)) return;
+      if (!['clap', 'smile', 'wow', 'angry', 'giggle', 'angry_shout', 'tease_smirk', 'sad_shy'].includes(kind)) return;
       for (const c of this.clients) {
         if (this.seats.get(c.sessionId) != null) c.send('reaction', { seat, kind });
       }
