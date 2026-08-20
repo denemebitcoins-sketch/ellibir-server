@@ -291,7 +291,7 @@ export async function createPinAccount(req: Request): Promise<Record<string, unk
     userId = await createAuthUser(email, password);
     await upsertProfile(userId, name, gender);
     await upsertRecovery(userId, email, pin);
-    await bindDevice(userId, deviceHash, true);
+    await bindDevice(userId, deviceHash, false);
     const session = await passwordSession(email, password);
     return { ok: true, email, user_id: userId, ...session };
   } catch (error) {
