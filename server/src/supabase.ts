@@ -104,6 +104,7 @@ function vipActive(raw: unknown): boolean {
 function trustedProfileRole(row: any): string {
   const role = String(row?.role ?? 'normal').trim().toLowerCase();
   if (role === 'admin') return 'admin';
+  if (role === 'moderator') return 'moderator';
   if (role === 'vip' || vipActive(row?.vip_until)) return 'vip';
   return 'normal';
 }
