@@ -16,6 +16,7 @@ import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth'
 import { createPinAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
 import { submitPreAuthSupport } from './preAuthSupport';
 import { deleteAccount } from './accountDeletion';
+import { cosmeticInventory, equipCosmetic, purchaseCosmetic } from './cosmetics';
 
 const port = Number(process.env.PORT) || 2567;
 
@@ -101,6 +102,38 @@ app.post('/auth/account/delete', async (req, res) => {
       : message === 'pin_invalid' || message === 'pin_not_configured' ? 401
       : 400;
     res.status(status).json({ ok: false, error: message });
+  }
+});
+function cosmeticStatusCode(message: string): number {
+  if (message === 'auth_required') return 401;
+  if (message === 'server_not_configured') return 503;
+  if (message === 'cosmetic_invalid' || message === 'cosmetic_not_equippable') return 400;
+  return 400;
+}
+app.get('/cosmetics/inventory', async (req, res) => {
+  try {
+    res.json(await cosmeticInventory(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'cosmetic_inventory_failed');
+    res.status(cosmeticStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/cosmetics/purchase', async (req, res) => {
+  try {
+    const result = await purchaseCosmetic(req);
+    res.status(result.ok === false ? 400 : 200).json(result);
+  } catch (error: any) {
+    const message = String(error?.message || 'cosmetic_purchase_failed');
+    res.status(cosmeticStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/cosmetics/equip', async (req, res) => {
+  try {
+    const result = await equipCosmetic(req);
+    res.status(result.ok === false ? 400 : 200).json(result);
+  } catch (error: any) {
+    const message = String(error?.message || 'cosmetic_equip_failed');
+    res.status(cosmeticStatusCode(message)).json({ ok: false, error: message });
   }
 });
 app.post('/support/preauth/report', async (req, res) => {

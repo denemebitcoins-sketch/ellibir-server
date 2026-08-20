@@ -12,6 +12,7 @@ import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../
 import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { okeyCanakChance } from '../canakPolicy';
 import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
+import { canUseReaction } from '../cosmetics';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
 
@@ -289,13 +290,14 @@ export class OkeyRoom extends Room {
 
     // MASA REAKSİYONU: {kind} — masadaki TÜM insanlara (+ gönderene echo) broadcast.
     // State yok, kalıcılık yok: balon client'ta ~2.5sn yaşar. Türler client TableReactions ile birebir.
-    this.onMessage('reaction', (client, raw) => {
+    this.onMessage('reaction', async (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
       if (!payloadWithinLimit(raw, 128) || !this.messageGuard.allow(client.sessionId, 'reaction', 1, 5000)) return;
       let kind = typeof raw === 'string' ? raw : (raw?.kind ?? '');
       kind = String(kind).slice(0, 16).trim();
       if (!['clap', 'smile', 'wow', 'angry', 'giggle', 'angry_shout', 'tease_smirk', 'sad_shy'].includes(kind)) return;
+      if (!await canUseReaction(this.seatUsers.get(seat), kind)) return;
       for (const c of this.clients) {
         if (this.seats.get(c.sessionId) != null) c.send('reaction', { seat, kind });
       }
