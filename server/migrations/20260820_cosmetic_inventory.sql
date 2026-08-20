@@ -5,7 +5,7 @@ alter table if exists public.profiles
   add column if not exists equipped_profile_frame text not null default 'profile_frame_default';
 
 create table if not exists public.cosmetic_ownerships (
-  user_id uuid not null references public.profiles(id) on delete cascade,
+  user_id text not null references public.profiles(id) on delete cascade,
   cosmetic_id text not null,
   category text not null,
   source text not null default 'purchase',
@@ -20,7 +20,7 @@ create index if not exists cosmetic_ownerships_user_idx
 
 create table if not exists public.cosmetic_transactions (
   id bigserial primary key,
-  user_id uuid not null references public.profiles(id) on delete cascade,
+  user_id text not null references public.profiles(id) on delete cascade,
   cosmetic_id text not null,
   category text not null,
   diamond_delta integer not null,
@@ -32,7 +32,7 @@ create index if not exists cosmetic_transactions_user_idx
   on public.cosmetic_transactions(user_id, created_at desc);
 
 create or replace function public.cosmetic_purchase(
-  p_user_id uuid,
+  p_user_id text,
   p_cosmetic_id text,
   p_category text,
   p_diamond_cost integer
@@ -98,7 +98,7 @@ end;
 $$;
 
 create or replace function public.cosmetic_grant(
-  p_user_id uuid,
+  p_user_id text,
   p_cosmetic_id text,
   p_category text,
   p_source text default 'admin_grant'
@@ -125,7 +125,7 @@ end;
 $$;
 
 create or replace function public.equip_profile_frame(
-  p_user_id uuid,
+  p_user_id text,
   p_cosmetic_id text
 ) returns jsonb
 language plpgsql
@@ -175,9 +175,9 @@ $$;
 
 revoke all on table public.cosmetic_ownerships from anon, authenticated;
 revoke all on table public.cosmetic_transactions from anon, authenticated;
-revoke execute on function public.cosmetic_purchase(uuid, text, text, integer) from public, anon, authenticated;
-revoke execute on function public.cosmetic_grant(uuid, text, text, text) from public, anon, authenticated;
-revoke execute on function public.equip_profile_frame(uuid, text) from public, anon, authenticated;
-grant execute on function public.cosmetic_purchase(uuid, text, text, integer) to service_role;
-grant execute on function public.cosmetic_grant(uuid, text, text, text) to service_role;
-grant execute on function public.equip_profile_frame(uuid, text) to service_role;
+revoke execute on function public.cosmetic_purchase(text, text, text, integer) from public, anon, authenticated;
+revoke execute on function public.cosmetic_grant(text, text, text, text) from public, anon, authenticated;
+revoke execute on function public.equip_profile_frame(text, text) from public, anon, authenticated;
+grant execute on function public.cosmetic_purchase(text, text, text, integer) to service_role;
+grant execute on function public.cosmetic_grant(text, text, text, text) to service_role;
+grant execute on function public.equip_profile_frame(text, text) to service_role;
