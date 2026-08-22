@@ -26,4 +26,11 @@ describe('monetization parser', () => {
     expect(_test.storeMatchesProduct(store, 'onlinekahvem.vip.12month', 'subscription')).toBe(false);
     expect(_test.storeMatchesProduct({}, 'onlinekahvem.vip.1month', 'subscription')).toBe(false);
   });
+
+  it('accepts AdMob SSV panel verification calls without crediting a reward', () => {
+    expect(_test.isAdMobVerificationOnly('', '')).toBe(true);
+    expect(_test.isAdMobVerificationOnly('EXAMPLE_CUSTOM_DATA_STRING', 'txn-1')).toBe(true);
+    expect(_test.isAdMobVerificationOnly('9acda918-729b-4ea4-9692-673e90b3e513', '')).toBe(true);
+    expect(_test.isAdMobVerificationOnly('9acda918-729b-4ea4-9692-673e90b3e513', 'txn-1')).toBe(false);
+  });
 });

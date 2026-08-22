@@ -4,6 +4,7 @@ import { rpcService, verifyToken } from './supabase';
 
 const ADMOB_KEYS_URL = 'https://www.gstatic.com/admob/reward/verifier-keys.json';
 const PACKAGE_NAME = process.env.GOOGLE_PLAY_PACKAGE_NAME || 'com.elli.bir';
+const SESSION_ID_RE = /^[0-9a-f-]{36}$/i;
 
 type AdMobKey = { keyId: number; pem?: string; base64?: string };
 let keyCache: { expiresAt: number; keys: Map<string, string> } | null = null;
@@ -57,8 +58,9 @@ export async function handleAdMobSsv(req: Request): Promise<Record<string, unkno
   const params = await verifyAdMobSsv(req.originalUrl);
   const sessionId = params.get('custom_data') || '';
   const transactionId = params.get('transaction_id') || '';
-  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new Error('ssv_session_invalid');
-  if (!transactionId) throw new Error('ssv_transaction_missing');
+  if (isAdMobVerificationOnly(sessionId, transactionId)) {
+    return { ok: true, verification_only: true };
+  }
   const args = {
     p_session_id: sessionId,
     p_transaction_id: transactionId,
@@ -74,6 +76,10 @@ export async function handleAdMobSsv(req: Request): Promise<Record<string, unkno
   }
   if (training && (training.ok || training.error !== 'session_not_found')) return training;
   return await rpcService('finalize_rewarded_ad', args);
+}
+
+function isAdMobVerificationOnly(sessionId: string, transactionId: string): boolean {
+  return !SESSION_ID_RE.test(sessionId) || !transactionId;
 }
 
 function parseUnifiedReceipt(raw: string): any {
@@ -171,4 +177,4 @@ export async function verifyPlayPurchase(authHeader: string | undefined, receipt
   });
 }
 
-export const _test = { parseUnifiedReceipt, base64UrlBytes, storeMatchesProduct };
+export const _test = { parseUnifiedReceipt, base64UrlBytes, storeMatchesProduct, isAdMobVerificationOnly };
