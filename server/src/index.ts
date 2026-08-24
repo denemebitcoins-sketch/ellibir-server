@@ -13,7 +13,7 @@ import { TavlaRoom } from './rooms/TavlaRoom';
 import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
 import { startPushWorker } from './pushWorker';
 import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth';
-import { adminResetPinRecovery, createPinAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
+import { adminResetPinRecovery, createPinAccount, loginLegacyDeviceAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
 import { submitPreAuthSupport } from './preAuthSupport';
 import { deleteAccount } from './accountDeletion';
 import { cosmeticInventory, equipCosmetic, purchaseCosmetic } from './cosmetics';
@@ -60,6 +60,8 @@ function recoveryStatusCode(message: string): number {
   if (message === 'email_already_used' || message === 'name_taken' || message === 'device_registered' || message === 'device_deleted') return 409;
   if (message === 'email_not_found') return 404;
   if (message === 'credentials_invalid') return 401;
+  if (message === 'device_account_not_found' || message === 'profile_missing') return 404;
+  if (message === 'pin_recovery_required') return 409;
   return 400;
 }
 app.post('/auth/recovery/create', async (req, res) => {
@@ -83,6 +85,14 @@ app.post('/auth/recovery/login', async (req, res) => {
     res.json(await loginPinRecovery(req));
   } catch (error: any) {
     const message = String(error?.message || 'account_login_failed');
+    res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/auth/recovery/device-login', async (req, res) => {
+  try {
+    res.json(await loginLegacyDeviceAccount(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'device_login_failed');
     res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
   }
 });

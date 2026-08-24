@@ -166,6 +166,28 @@ async function recoveryByEmail(email: string): Promise<any | null> {
   return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
+async function recoveryByUserId(userId: string): Promise<any | null> {
+  const response = await serviceFetch(`/rest/v1/account_recovery_credentials?user_id=eq.${encodeURIComponent(userId)}&select=user_id,email&limit=1`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`recovery_lookup_${response.status}`);
+  const rows: any = await response.json();
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+async function userIdByDeviceHash(deviceHash: string): Promise<string> {
+  const response = await serviceFetch(`/rest/v1/device_accounts?device_hash=eq.${encodeURIComponent(deviceHash)}&select=user_id&limit=1`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`device_lookup_${response.status}`);
+  const rows: any[] = await response.json();
+  const userId = Array.isArray(rows) && rows.length ? String(rows[0]?.user_id || '') : '';
+  if (!userId) throw new Error('device_account_not_found');
+  return userId;
+}
+
 async function profileRole(userId: string): Promise<string> {
   const response = await serviceFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=role&limit=1`, {
     method: 'GET',
@@ -175,6 +197,16 @@ async function profileRole(userId: string): Promise<string> {
   const rows: any[] = await response.json();
   const role = Array.isArray(rows) && rows.length ? String(rows[0]?.role || '') : '';
   return role.trim().toLowerCase();
+}
+
+async function profileExists(userId: string): Promise<boolean> {
+  const response = await serviceFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id&limit=1`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`profile_lookup_${response.status}`);
+  const rows: any[] = await response.json();
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 async function profileNameTaken(name: string, exceptUserId = ''): Promise<boolean> {
@@ -231,6 +263,14 @@ async function bindDevice(userId: string, deviceHash: string, allowReassign: boo
 function profileWriteErrorToCode(status: number, text: string): string {
   if (/profiles_name_lower_uniq/i.test(text)) return 'name_taken';
   return `profile_insert_${status}`;
+}
+
+function legacyDeviceEmail(userId: string): string {
+  return `legacy-${userId.replace(/[^a-zA-Z0-9-]/g, '')}@device.online-kahvem.invalid`.toLowerCase();
+}
+
+function legacyDevicePassword(userId: string, deviceHash: string): string {
+  return 'OK-LEGACY-' + createHmac('sha256', SECRET).update(`legacy-device-login|${userId}|${deviceHash}`).digest('hex');
 }
 
 async function upsertProfile(userId: string, name: string, gender: string): Promise<void> {
@@ -349,6 +389,30 @@ export async function loginPinRecovery(req: Request): Promise<Record<string, unk
   await markProfileSecured(userId);
   await recordRecovery(userId);
   return { ok: true, email, user_id: userId, message: 'Hesap geri yuklendi.', ...session };
+}
+
+export async function loginLegacyDeviceAccount(req: Request): Promise<Record<string, unknown>> {
+  if (!configured()) throw new Error('server_not_configured');
+  const deviceHash = validDeviceHash(req.body?.device_hash);
+  if (await isDeletedDevice(deviceHash)) throw new Error('device_deleted');
+
+  const userId = await userIdByDeviceHash(deviceHash);
+  if (await recoveryByUserId(userId)) throw new Error('pin_recovery_required');
+  if (!(await profileExists(userId))) throw new Error('profile_missing');
+
+  const email = legacyDeviceEmail(userId);
+  const password = legacyDevicePassword(userId, deviceHash);
+  await updateAuthCredentials(userId, email, password);
+  await bindDevice(userId, deviceHash, true);
+  const session = await passwordSession(email, password);
+  return {
+    ok: true,
+    user_id: userId,
+    legacy_device_login: true,
+    needs_pin_setup: true,
+    message: 'Cihazdaki eski hesap geri baglandi. Lutfen hesabini e-posta ve PIN ile guvene al.',
+    ...session,
+  };
 }
 
 export async function pinRecoveryStatus(req: Request): Promise<Record<string, unknown>> {
