@@ -69,4 +69,15 @@ describe('mail + pin account recovery', () => {
     expect(index).toMatch(/\/auth\/recovery\/device-login/i);
     expect(index).toMatch(/pin_recovery_required[\s\S]*409/i);
   });
+
+  it('lets admins secure legacy device-bound accounts with contact email and pin', () => {
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    const index = readFileSync(join(root, 'src', 'index.ts'), 'utf8');
+    expect(recovery).toMatch(/export\s+async\s+function\s+adminSecureDeviceRecovery/i);
+    expect(recovery).toMatch(/profileRole\(adminId\)[\s\S]*!==\s*'admin'/i);
+    expect(recovery).toMatch(/userIdByDeviceHash\(deviceHash\)/i);
+    expect(recovery).toMatch(/recoveryByEmail\(email\)[\s\S]*email_already_used/i);
+    expect(recovery).toMatch(/markProfileSecured\(userId\)/i);
+    expect(index).toMatch(/\/auth\/recovery\/admin-secure-device/i);
+  });
 });
