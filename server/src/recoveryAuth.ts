@@ -166,6 +166,17 @@ async function recoveryByEmail(email: string): Promise<any | null> {
   return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
+async function profileRole(userId: string): Promise<string> {
+  const response = await serviceFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=role&limit=1`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`admin_profile_lookup_${response.status}`);
+  const rows: any[] = await response.json();
+  const role = Array.isArray(rows) && rows.length ? String(rows[0]?.role || '') : '';
+  return role.trim().toLowerCase();
+}
+
 async function profileNameTaken(name: string, exceptUserId = ''): Promise<boolean> {
   const response = await serviceFetch(`/rest/v1/profiles?name=ilike.${encodeURIComponent(name)}&select=id&limit=2`, {
     method: 'GET',
@@ -352,6 +363,28 @@ export async function pinRecoveryStatus(req: Request): Promise<Record<string, un
   const rows: any[] = await response.json();
   const email = Array.isArray(rows) && rows.length ? String(rows[0]?.email || '') : '';
   return { ok: true, secured: !!email, email };
+}
+
+export async function adminResetPinRecovery(req: Request): Promise<Record<string, unknown>> {
+  if (!configured()) throw new Error('server_not_configured');
+  const adminId = await verifyToken(authHeader(req));
+  if (!adminId) throw new Error('auth_required');
+  if ((await profileRole(adminId)) !== 'admin') throw new Error('admin_required');
+
+  const email = normalizeEmail(req.body?.email);
+  const pin = cleanPin(req.body?.pin ?? req.body?.new_pin);
+  if (!validEmail(email)) throw new Error('email_invalid');
+  if (!validPin(pin)) throw new Error('pin_invalid');
+
+  const row = await recoveryByEmail(email);
+  if (!row) throw new Error('email_not_found');
+  const userId = String(row.user_id || '');
+  if (!userId) throw new Error('recovery_row_invalid');
+
+  const password = derivedPassword(email, pin);
+  await updateAuthCredentials(userId, email, password);
+  await upsertRecovery(userId, email, pin);
+  return { ok: true, email, user_id: userId, message: 'PIN yenilendi.' };
 }
 
 export const _test = { normalizeEmail, validEmail, cleanPin, validPin, normalizeName, validName, normalizeGender, derivedPassword, pinHash, sameHash, profileWriteErrorToCode };

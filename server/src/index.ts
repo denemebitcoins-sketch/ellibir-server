@@ -13,7 +13,7 @@ import { TavlaRoom } from './rooms/TavlaRoom';
 import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
 import { startPushWorker } from './pushWorker';
 import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth';
-import { createPinAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
+import { adminResetPinRecovery, createPinAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
 import { submitPreAuthSupport } from './preAuthSupport';
 import { deleteAccount } from './accountDeletion';
 import { cosmeticInventory, equipCosmetic, purchaseCosmetic } from './cosmetics';
@@ -55,8 +55,10 @@ app.post('/auth/email/verify-code', async (req, res) => {
 });
 function recoveryStatusCode(message: string): number {
   if (message === 'auth_required') return 401;
+  if (message === 'admin_required') return 403;
   if (message === 'server_not_configured') return 503;
   if (message === 'email_already_used' || message === 'name_taken' || message === 'device_registered' || message === 'device_deleted') return 409;
+  if (message === 'email_not_found') return 404;
   if (message === 'credentials_invalid') return 401;
   return 400;
 }
@@ -89,6 +91,14 @@ app.get('/auth/recovery/status', async (req, res) => {
     res.json(await pinRecoveryStatus(req));
   } catch (error: any) {
     const message = String(error?.message || 'account_status_failed');
+    res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/auth/recovery/admin-reset-pin', async (req, res) => {
+  try {
+    res.json(await adminResetPinRecovery(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'pin_reset_failed');
     res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
   }
 });

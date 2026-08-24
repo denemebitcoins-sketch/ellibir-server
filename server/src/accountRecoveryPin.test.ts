@@ -45,4 +45,16 @@ describe('mail + pin account recovery', () => {
     expect(_test.profileWriteErrorToCode(409, 'duplicate key value violates unique constraint "profiles_pkey"'))
       .toBe('profile_insert_409');
   });
+
+  it('exposes an admin-only pin reset endpoint', () => {
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    const index = readFileSync(join(root, 'src', 'index.ts'), 'utf8');
+    expect(recovery).toMatch(/export\s+async\s+function\s+adminResetPinRecovery/i);
+    expect(recovery).toMatch(/verifyToken\(authHeader\(req\)\)/i);
+    expect(recovery).toMatch(/profileRole\(adminId\)[\s\S]*!==\s*'admin'/i);
+    expect(recovery).toMatch(/updateAuthCredentials\(userId,\s*email,\s*password\)/i);
+    expect(recovery).toMatch(/upsertRecovery\(userId,\s*email,\s*pin\)/i);
+    expect(index).toMatch(/\/auth\/recovery\/admin-reset-pin/i);
+    expect(index).toMatch(/admin_required[\s\S]*403/i);
+  });
 });
