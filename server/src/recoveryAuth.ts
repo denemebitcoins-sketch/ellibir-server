@@ -219,6 +219,51 @@ async function profileExists(userId: string): Promise<boolean> {
   return Array.isArray(rows) && rows.length > 0;
 }
 
+function isPlayableProfileName(name: string): boolean {
+  const normalized = normalizeName(name);
+  if (!validName(normalized)) return false;
+  if (/^Oyuncu_[0-9A-F]{6}$/i.test(normalized)) return false;
+  return normalized !== 'Oyuncu' && normalized !== 'Sen';
+}
+
+async function fallbackProfileName(userId: string): Promise<string> {
+  const compact = userId.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
+  const base = compact.slice(0, 6).padEnd(6, '0');
+  let name = `Misafir_${base}`;
+  if (!(await profileNameTaken(name, userId))) return name;
+  for (let i = 1; i <= 9; i += 1) {
+    name = `Misafir_${base.slice(0, 5)}${i}`;
+    if (!(await profileNameTaken(name, userId))) return name;
+  }
+  return `Misafir_${Date.now().toString().slice(-6)}`;
+}
+
+async function ensureProfilePlayableForRecovery(userId: string): Promise<void> {
+  const response = await serviceFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=name,gender&limit=1`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`profile_lookup_${response.status}`);
+  const rows: any[] = await response.json();
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error('profile_missing');
+
+  const currentName = normalizeName(rows[0]?.name);
+  const currentGender = normalizeGender(rows[0]?.gender);
+  const patch: Record<string, unknown> = { recovery_secured_at: new Date().toISOString() };
+  if (!isPlayableProfileName(currentName)) patch.name = await fallbackProfileName(userId);
+  if (!currentGender) patch.gender = 'x';
+
+  const update = await serviceFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!update.ok) {
+    const text = await update.text();
+    throw new Error(profileWriteErrorToCode(update.status, text));
+  }
+}
+
 async function profileNameTaken(name: string, exceptUserId = ''): Promise<boolean> {
   const response = await serviceFetch(`/rest/v1/profiles?name=ilike.${encodeURIComponent(name)}&select=id&limit=2`, {
     method: 'GET',
@@ -396,7 +441,7 @@ export async function loginPinRecovery(req: Request): Promise<Record<string, unk
   if (!sameHash(String(row.pin_hash || ''), pinHash(email, userId, pin))) throw new Error('credentials_invalid');
   const session = await passwordSessionForRecovery(userId, email, pin);
   await bindDevice(userId, deviceHash, true);
-  await markProfileSecured(userId);
+  await ensureProfilePlayableForRecovery(userId);
   await recordRecovery(userId);
   return { ok: true, email, user_id: userId, message: 'Hesap geri yuklendi.', ...session };
 }
@@ -482,8 +527,8 @@ export async function adminSecureDeviceRecovery(req: Request): Promise<Record<st
   await updateAuthCredentials(userId, email, password);
   await upsertRecovery(userId, email, pin);
   await bindDevice(userId, deviceHash, true);
-  await markProfileSecured(userId);
+  await ensureProfilePlayableForRecovery(userId);
   return { ok: true, email, user_id: userId, message: 'Cihazdaki hesap e-posta ve PIN ile guvene alindi.' };
 }
 
-export const _test = { normalizeEmail, validEmail, cleanPin, validPin, normalizeName, validName, normalizeGender, derivedPassword, pinHash, sameHash, profileWriteErrorToCode };
+export const _test = { normalizeEmail, validEmail, cleanPin, validPin, normalizeName, validName, normalizeGender, derivedPassword, pinHash, sameHash, profileWriteErrorToCode, isPlayableProfileName };

@@ -87,4 +87,15 @@ describe('mail + pin account recovery', () => {
     expect(recovery).toMatch(/catch\s*{\s*await\s+updateAuthCredentials\(userId,\s*email,\s*password\)/i);
     expect(recovery).toMatch(/const\s+session\s*=\s*await\s+passwordSessionForRecovery\(userId,\s*email,\s*pin\)/i);
   });
+
+  it('keeps recovered legacy profiles playable for old clients', () => {
+    expect(_test.isPlayableProfileName('Samet')).toBe(true);
+    expect(_test.isPlayableProfileName('Oyuncu_A1B2C3')).toBe(false);
+    expect(_test.isPlayableProfileName('Oyuncu')).toBe(false);
+
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    expect(recovery).toMatch(/async\s+function\s+ensureProfilePlayableForRecovery/i);
+    expect(recovery).toMatch(/patch\.gender\s*=\s*'x'/i);
+    expect(recovery).toMatch(/await\s+ensureProfilePlayableForRecovery\(userId\)/i);
+  });
 });
