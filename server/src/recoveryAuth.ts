@@ -102,6 +102,16 @@ async function passwordSession(email: string, password: string): Promise<any> {
   return json;
 }
 
+async function passwordSessionForRecovery(userId: string, email: string, pin: string): Promise<any> {
+  const password = derivedPassword(email, pin);
+  try {
+    return await passwordSession(email, password);
+  } catch {
+    await updateAuthCredentials(userId, email, password);
+    return await passwordSession(email, password);
+  }
+}
+
 async function updateAuthCredentials(userId: string, email: string, password: string): Promise<void> {
   const response = await serviceFetch(`/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
     method: 'PUT',
@@ -384,7 +394,7 @@ export async function loginPinRecovery(req: Request): Promise<Record<string, unk
   if (!row) throw new Error('credentials_invalid');
   const userId = String(row.user_id || '');
   if (!sameHash(String(row.pin_hash || ''), pinHash(email, userId, pin))) throw new Error('credentials_invalid');
-  const session = await passwordSession(email, derivedPassword(email, pin));
+  const session = await passwordSessionForRecovery(userId, email, pin);
   await bindDevice(userId, deviceHash, true);
   await markProfileSecured(userId);
   await recordRecovery(userId);

@@ -80,4 +80,11 @@ describe('mail + pin account recovery', () => {
     expect(recovery).toMatch(/markProfileSecured\(userId\)/i);
     expect(index).toMatch(/\/auth\/recovery\/admin-secure-device/i);
   });
+
+  it('repairs auth credentials when a valid recovery pin cannot open a session', () => {
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    expect(recovery).toMatch(/async\s+function\s+passwordSessionForRecovery/i);
+    expect(recovery).toMatch(/catch\s*{\s*await\s+updateAuthCredentials\(userId,\s*email,\s*password\)/i);
+    expect(recovery).toMatch(/const\s+session\s*=\s*await\s+passwordSessionForRecovery\(userId,\s*email,\s*pin\)/i);
+  });
 });
