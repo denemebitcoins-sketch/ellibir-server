@@ -136,6 +136,8 @@ function dealHand(state: GameState): GameState {
     pickup: null,
     sorgu: null,
     ciftIslekUsed: false,
+    openSnapshot: null,
+    islekSnapshot: null,
     // Katlamalı çıtalar EL BAŞINA sıfırlanır (yarış el içidir).
     enYuksekSeriAcisi: null,
     enYuksekCiftAcisi: null,
@@ -170,7 +172,16 @@ function finishMatch(state: GameState): GameState {
     (best, p) => (p.totalScore < best.totalScore ? p : best),
     state.players[0]!,
   );
-  return { ...state, phase: 'matchEnded', matchWinnerSeat: winner.seat };
+  return {
+    ...state,
+    phase: 'matchEnded',
+    matchWinnerSeat: winner.seat,
+    pickup: null,
+    sorgu: null,
+    ciftIslekUsed: false,
+    openSnapshot: null,
+    islekSnapshot: null,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1504,6 +1515,11 @@ function endHand(
     sheet: [...state.sheet, ...penaltyRows],
     phase: 'handEnded',
     lastHandResult: result,
+    pickup: null,
+    sorgu: null,
+    ciftIslekUsed: false,
+    openSnapshot: null,
+    islekSnapshot: null,
     matchLog: addLog(state, bitisMsg),
   };
   if (state.handNumber >= state.rules.totalHands) {

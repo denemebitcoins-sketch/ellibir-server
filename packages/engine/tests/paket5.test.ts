@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyMove, canRetrieveJoker, canUndoIslek, createGame, meldBarajTokens } from '../src/game';
+import { applyMove, canRetrieveJoker, canUndoIslek, createGame, meldBarajTokens, startNextHand } from '../src/game';
 import { DEFAULT_RULES } from '../src/rules';
 import type { Card, GameState, Meld } from '../src/types';
 import { c, joker } from './helpers';
@@ -156,6 +156,34 @@ describe('C3B — işlenen kart geri alma penceresi', () => {
     expect(canUndoIslek(done, 0)).toBe(false);
     expect(done.islekSnapshot).toBeNull();
     expect(() => applyMove(done, { type: 'undoIslek' })).toThrowError();
+  });
+
+  it('işlekten sonra bitiş atışı yapılınca geri alma penceresi el ve sonraki el için kapanır', () => {
+    const initial = rig(createGame({ seed: 1, dealerSeat: 3 }), {
+      currentSeat: 0,
+      phase: 'action',
+      openedMelds: [0],
+      melds: [
+        meld('seri1', 'run', [c('D', 4), c('D', 5), c('D', 6)], 2),
+      ],
+      hands: { 0: [c('D', 7), c('S', 2)] },
+    });
+    const seven = initial.players[0]!.hand[0]!;
+
+    const extended = applyMove(initial, { type: 'extend', meldId: 'seri1', cardId: seven.id });
+    expect(canUndoIslek(extended, 0)).toBe(true);
+
+    const ended = applyMove(extended, { type: 'discard', cardId: extended.players[0]!.hand[0]!.id });
+    expect(ended.phase).toBe('handEnded');
+    expect(ended.islekSnapshot).toBeNull();
+    expect(ended.openSnapshot).toBeNull();
+    expect(canUndoIslek(ended, 0)).toBe(false);
+    expect(() => applyMove(ended, { type: 'undoIslek' })).toThrowError();
+
+    const nextHand = startNextHand(ended);
+    expect(nextHand.islekSnapshot).toBeNull();
+    expect(nextHand.openSnapshot).toBeNull();
+    expect(canUndoIslek(nextHand, nextHand.currentSeat)).toBe(false);
   });
 });
 
