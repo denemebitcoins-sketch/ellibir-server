@@ -42,6 +42,14 @@ describe('one-hand no-contest economy policy', () => {
     }
   });
 
+  it('does not let 101 Okey skip XP settlement when scores identify a unique winner', () => {
+    const source = room('OkeyRoom.ts');
+    expect(source).toContain('hasLowestScoreTie');
+    expect(source).toMatch(/const\s+winnerSeat\s*=\s*this\.lowestScoreSeat\(\)/);
+    expect(source).toMatch(/this\.isOneHandNoContest\(winnerSeat\)/);
+    expect(source).toMatch(/this\.game\.rules\.variant\s*===\s*'yuzbir'[\s\S]*fallbackWinnerSeat[\s\S]*!hasLowestScoreTie\(this\.game\.scores\)/);
+  });
+
   it('stores refund idempotency in Supabase with service-role-only access', () => {
     expect(migration).toMatch(/create table if not exists public\.match_entry_refunds/i);
     expect(migration).toMatch(/refund_key text primary key/i);

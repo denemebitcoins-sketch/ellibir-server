@@ -11,7 +11,7 @@ import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
 import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { okeyCanakChance } from '../canakPolicy';
-import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
+import { hasLowestScoreTie, isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
@@ -779,7 +779,8 @@ export class OkeyRoom extends Room {
     this.settled = true;
     const scores = new Map<number, number>();
     for (let s = 0; s < 4; s++) scores.set(s, this.game.scores[s]!);
-    if (this.isOneHandNoContest()) {
+    const winnerSeat = this.lowestScoreSeat();
+    if (this.isOneHandNoContest(winnerSeat)) {
       this.rematchVotes.clear();
       const key = `okey:no-contest:${this.matchProgressionKey || this.roomId}`;
       this.logEvent('1 ellik maç sonuçsuz bitti — giriş ücretleri iade edildi');
@@ -791,8 +792,6 @@ export class OkeyRoom extends Room {
     const openedSeats = new Set<number>();
     if (this.game.rules.variant === 'yuzbir')
       for (let s = 0; s < 4; s++) if (this.game.players[s]!.hasOpened) openedSeats.add(s);
-    let winnerSeat = 0;
-    for (let s = 1; s < 4; s++) if (this.game.scores[s]! < this.game.scores[winnerSeat]!) winnerSeat = s;
     this.rematchVotes.clear();
     this.settlePromise = settleMatch({
       seatUsers: this.seatUsers,
@@ -810,11 +809,23 @@ export class OkeyRoom extends Room {
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
   }
 
-  private isOneHandNoContest(): boolean {
+  private lowestScoreSeat(): number {
+    if (!this.game) return 0;
+    let winnerSeat = 0;
+    for (let s = 1; s < 4; s++) if (this.game.scores[s]! < this.game.scores[winnerSeat]!) winnerSeat = s;
+    return winnerSeat;
+  }
+
+  private isOneHandNoContest(fallbackWinnerSeat?: number): boolean {
     if (!this.game) return false;
+    const handWinnerSeat = this.game.rules.variant === 'yuzbir'
+      && fallbackWinnerSeat != null
+      && !hasLowestScoreTie(this.game.scores)
+        ? fallbackWinnerSeat
+        : this.game.elWinner;
     return isOneRoundNoContest({
       totalRounds: this.game.rules.totalEls,
-      handWinnerSeat: this.game.elWinner,
+      handWinnerSeat,
       scores: this.game.scores,
     });
   }

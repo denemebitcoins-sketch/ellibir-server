@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { matchProgressionBaseXp } from './supabase';
 
 const migration = readFileSync(resolve(__dirname, '../migrations/20260813_account_progression_core.sql'), 'utf8');
+const dailyProgressionRestoreMigration = readFileSync(resolve(__dirname, '../migrations/20260825_restore_daily_progression_bonus.sql'), 'utf8');
 const supabaseBridge = readFileSync(resolve(__dirname, 'supabase.ts'), 'utf8');
 const room = (name: string) => readFileSync(resolve(__dirname, `rooms/${name}`), 'utf8');
 
@@ -76,5 +77,13 @@ describe('account progression Supabase authority schema', () => {
     expect(migration).toMatch(/v_level_bonus_chips\s*:=\s*floor\(v_chips_delta\s*\*\s*v_bonus_pct\s*\/\s*100\.0\)::bigint/i);
     expect(migration).toMatch(/'level_bonus_pct',\s*v_bonus_pct/i);
     expect(migration).toMatch(/'daily_bonus_pct',\s*public\.account_daily_bonus_pct\(v_level\)/i);
+  });
+
+  it('preserves daily level bonus fields after role/vip entitlement migrations', () => {
+    expect(dailyProgressionRestoreMigration).toMatch(/v_progress\s*:=\s*public\.account_xp_progress\(coalesce\(r\.account_xp_total,\s*0\)\)/i);
+    expect(dailyProgressionRestoreMigration).toMatch(/v_bonus_pct\s*:=\s*public\.account_daily_bonus_pct\(v_level\)/i);
+    expect(dailyProgressionRestoreMigration).toMatch(/v_chips_delta\s*:=\s*v_chips_delta\s*\+\s*v_level_bonus_chips/i);
+    expect(dailyProgressionRestoreMigration).toMatch(/'daily_bonus_pct',\s*v_bonus_pct/i);
+    expect(dailyProgressionRestoreMigration).toMatch(/coalesce\(r\.role,\s*'normal'\)\s+in\s+\('admin',\s*'moderator',\s*'vip'\)/i);
   });
 });

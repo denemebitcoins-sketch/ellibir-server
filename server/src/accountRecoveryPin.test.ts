@@ -70,6 +70,16 @@ describe('mail + pin account recovery', () => {
     expect(index).toMatch(/pin_recovery_required[\s\S]*409/i);
   });
 
+  it('lets old clients secure device-bound accounts when their legacy JWT was not cached', () => {
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    expect(recovery).toMatch(/let\s+userId\s*=\s*await\s+verifyToken\(authHeader\(req\)\)/i);
+    expect(recovery).toMatch(/if\s*\(!userId\)\s*{[\s\S]*userId\s*=\s*await\s+userIdByDeviceHash\(deviceHash\)/i);
+    expect(recovery).toMatch(/recoveryByUserId\(userId\)[\s\S]*pin_recovery_required/i);
+    expect(recovery).toMatch(/await\s+bindDevice\(userId,\s*deviceHash,\s*legacyDeviceSetup\)/i);
+    expect(recovery).toMatch(/await\s+ensureProfilePlayableForRecovery\(userId\)/i);
+    expect(recovery).toMatch(/const\s+session\s*=\s*await\s+passwordSession\(email,\s*password\)/i);
+  });
+
   it('lets admins secure legacy device-bound accounts with contact email and pin', () => {
     const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
     const index = readFileSync(join(root, 'src', 'index.ts'), 'utf8');

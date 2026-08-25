@@ -411,22 +411,31 @@ export async function createPinAccount(req: Request): Promise<Record<string, unk
 
 export async function setupPinRecovery(req: Request): Promise<Record<string, unknown>> {
   if (!configured()) throw new Error('server_not_configured');
-  const userId = await verifyToken(authHeader(req));
-  if (!userId) throw new Error('auth_required');
+  let userId = await verifyToken(authHeader(req));
   const email = normalizeEmail(req.body?.email);
   const pin = cleanPin(req.body?.pin);
   const deviceHash = validDeviceHash(req.body?.device_hash);
   if (!validEmail(email)) throw new Error('email_invalid');
   if (!validPin(pin)) throw new Error('pin_invalid');
+  let legacyDeviceSetup = false;
+  if (!userId) {
+    if (await isDeletedDevice(deviceHash)) throw new Error('device_deleted');
+    userId = await userIdByDeviceHash(deviceHash);
+    if (await recoveryByUserId(userId)) throw new Error('pin_recovery_required');
+    if (!(await profileExists(userId))) throw new Error('profile_missing');
+    legacyDeviceSetup = true;
+  }
   const existing = await recoveryByEmail(email);
   if (existing && String(existing.user_id) !== userId) throw new Error('email_already_used');
 
   const password = derivedPassword(email, pin);
   await updateAuthCredentials(userId, email, password);
   await upsertRecovery(userId, email, pin);
-  await bindDevice(userId, deviceHash, false);
+  await bindDevice(userId, deviceHash, legacyDeviceSetup);
+  await ensureProfilePlayableForRecovery(userId);
   await markProfileSecured(userId);
-  return { ok: true, email, message: 'Hesap mail ve PIN ile guvene alindi.' };
+  const session = await passwordSession(email, password);
+  return { ok: true, email, user_id: userId, message: 'Hesap mail ve PIN ile guvene alindi.', ...session };
 }
 
 export async function loginPinRecovery(req: Request): Promise<Record<string, unknown>> {
