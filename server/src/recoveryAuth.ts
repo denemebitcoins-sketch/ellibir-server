@@ -461,20 +461,24 @@ export async function loginLegacyDeviceAccount(req: Request): Promise<Record<str
   if (await isDeletedDevice(deviceHash)) throw new Error('device_deleted');
 
   const userId = await userIdByDeviceHash(deviceHash);
-  if (await recoveryByUserId(userId)) throw new Error('pin_recovery_required');
   if (!(await profileExists(userId))) throw new Error('profile_missing');
 
-  const email = legacyDeviceEmail(userId);
+  const recovery = await recoveryByUserId(userId);
+  const email = recovery?.email ? normalizeEmail(recovery.email) : legacyDeviceEmail(userId);
   const password = legacyDevicePassword(userId, deviceHash);
   await updateAuthCredentials(userId, email, password);
   await bindDevice(userId, deviceHash, true);
+  await ensureProfilePlayableForRecovery(userId);
+  if (recovery?.email) await recordRecovery(userId);
   const session = await passwordSession(email, password);
   return {
     ok: true,
     user_id: userId,
     legacy_device_login: true,
-    needs_pin_setup: true,
-    message: 'Cihazdaki eski hesap geri baglandi. Lutfen hesabini e-posta ve PIN ile guvene al.',
+    needs_pin_setup: !recovery?.email,
+    message: recovery?.email
+      ? 'Cihazdaki hesap sessizce geri baglandi.'
+      : 'Cihazdaki eski hesap geri baglandi.',
     ...session,
   };
 }

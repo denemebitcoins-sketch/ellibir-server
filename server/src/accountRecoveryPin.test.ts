@@ -58,16 +58,16 @@ describe('mail + pin account recovery', () => {
     expect(index).toMatch(/admin_required[\s\S]*403/i);
   });
 
-  it('allows legacy device recovery only before mail pin recovery is configured', () => {
+  it('allows device recovery even after mail pin recovery is configured', () => {
     const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
     const index = readFileSync(join(root, 'src', 'index.ts'), 'utf8');
     expect(recovery).toMatch(/export\s+async\s+function\s+loginLegacyDeviceAccount/i);
     expect(recovery).toMatch(/userIdByDeviceHash\(deviceHash\)/i);
-    expect(recovery).toMatch(/recoveryByUserId\(userId\)[\s\S]*pin_recovery_required/i);
+    expect(recovery).toMatch(/const\s+recovery\s*=\s*await\s+recoveryByUserId\(userId\)/i);
+    expect(recovery).not.toMatch(/loginLegacyDeviceAccount[\s\S]*throw\s+new\s+Error\('pin_recovery_required'\)/i);
     expect(recovery).toMatch(/legacyDeviceEmail\(userId\)/i);
-    expect(recovery).toMatch(/needs_pin_setup:\s*true/i);
+    expect(recovery).toMatch(/needs_pin_setup:\s*!recovery\?\.email/i);
     expect(index).toMatch(/\/auth\/recovery\/device-login/i);
-    expect(index).toMatch(/pin_recovery_required[\s\S]*409/i);
   });
 
   it('lets old clients secure device-bound accounts when their legacy JWT was not cached', () => {
