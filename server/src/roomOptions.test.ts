@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeRoomOption } from './supabase';
+import { normalizeRoomOption, onlineAuthRequired } from './supabase';
 
 describe('room rule option normalization', () => {
   it('accepts one-hand and one-point match options', () => {
@@ -12,6 +12,17 @@ describe('room rule option normalization', () => {
     process.env.AUTH_REQUIRED = '0';
     try {
       expect(normalizeRoomOption(2, [1, 3, 5], 5, 'hands')).toBe(5);
+    } finally {
+      if (old == null) delete process.env.AUTH_REQUIRED;
+      else process.env.AUTH_REQUIRED = old;
+    }
+  });
+
+  it('does not require online auth unless AUTH_REQUIRED is explicitly enabled', () => {
+    const old = process.env.AUTH_REQUIRED;
+    delete process.env.AUTH_REQUIRED;
+    try {
+      expect(onlineAuthRequired()).toBe(false);
     } finally {
       if (old == null) delete process.env.AUTH_REQUIRED;
       else process.env.AUTH_REQUIRED = old;

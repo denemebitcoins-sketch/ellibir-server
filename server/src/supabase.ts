@@ -17,7 +17,7 @@ export function onlineAuthRequired(): boolean {
   const flag = String(process.env.AUTH_REQUIRED ?? '').trim().toLowerCase();
   if (['0', 'false', 'off', 'no'].includes(flag)) return false;
   if (['1', 'true', 'on', 'yes'].includes(flag)) return true;
-  return authVerificationConfigured();
+  return false;
 }
 
 /** Auth token → userId (null = geçersiz/anon). Supabase GoTrue /auth/v1/user. */
