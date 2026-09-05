@@ -338,7 +338,10 @@ function legacyDeviceEmail(userId: string): string {
 }
 
 function legacyDevicePassword(userId: string, deviceHash: string): string {
-  return 'OK-LEGACY-' + createHmac('sha256', SECRET).update(`legacy-device-login|${userId}|${deviceHash}`).digest('hex');
+  return 'OKL-' + createHmac('sha256', SECRET)
+    .update(`legacy-device-login|${userId}|${deviceHash}`)
+    .digest('base64url')
+    .slice(0, 48);
 }
 
 async function upsertProfile(userId: string, name: string, gender: string): Promise<void> {

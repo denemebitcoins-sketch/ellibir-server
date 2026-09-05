@@ -70,6 +70,13 @@ describe('mail + pin account recovery', () => {
     expect(index).toMatch(/\/auth\/recovery\/device-login/i);
   });
 
+  it('keeps silent device password within Supabase Auth limits', () => {
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    expect(recovery).toMatch(/function\s+legacyDevicePassword/i);
+    expect(recovery).toMatch(/'OKL-'/i);
+    expect(recovery).toMatch(/\.slice\(0,\s*48\)/i);
+  });
+
   it('lets old clients secure device-bound accounts when their legacy JWT was not cached', () => {
     const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
     expect(recovery).toMatch(/let\s+userId\s*=\s*await\s+verifyToken\(authHeader\(req\)\)/i);
