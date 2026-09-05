@@ -130,6 +130,19 @@ async function updateAuthCredentials(userId: string, email: string, password: st
   }
 }
 
+async function updateAuthPassword(userId: string, password: string): Promise<void> {
+  const response = await serviceFetch(`/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      password,
+      email_confirm: true,
+      user_metadata: { ok_device_recovered_at: new Date().toISOString() },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`auth_update_${response.status}`);
+}
+
 async function createAuthUser(email: string, password: string): Promise<string> {
   const response = await serviceFetch('/auth/v1/admin/users', {
     method: 'POST',
@@ -466,7 +479,8 @@ export async function loginLegacyDeviceAccount(req: Request): Promise<Record<str
   const recovery = await recoveryByUserId(userId);
   const email = recovery?.email ? normalizeEmail(recovery.email) : legacyDeviceEmail(userId);
   const password = legacyDevicePassword(userId, deviceHash);
-  await updateAuthCredentials(userId, email, password);
+  if (recovery?.email) await updateAuthPassword(userId, password);
+  else await updateAuthCredentials(userId, email, password);
   await bindDevice(userId, deviceHash, true);
   await ensureProfilePlayableForRecovery(userId);
   if (recovery?.email) await recordRecovery(userId);
