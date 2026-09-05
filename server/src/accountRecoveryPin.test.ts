@@ -61,10 +61,14 @@ describe('mail + pin account recovery', () => {
   it('allows device recovery even after mail pin recovery is configured', () => {
     const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
     const index = readFileSync(join(root, 'src', 'index.ts'), 'utf8');
+    const deviceLogin = recovery.slice(
+      recovery.indexOf('export async function loginLegacyDeviceAccount'),
+      recovery.indexOf('export async function pinRecoveryStatus'),
+    );
     expect(recovery).toMatch(/export\s+async\s+function\s+loginLegacyDeviceAccount/i);
     expect(recovery).toMatch(/userIdByDeviceHash\(deviceHash\)/i);
     expect(recovery).toMatch(/const\s+recovery\s*=\s*await\s+recoveryByUserId\(userId\)/i);
-    expect(recovery).not.toMatch(/loginLegacyDeviceAccount[\s\S]*throw\s+new\s+Error\('pin_recovery_required'\)/i);
+    expect(deviceLogin).not.toMatch(/throw\s+new\s+Error\('pin_recovery_required'\)/i);
     expect(recovery).toMatch(/legacyDeviceEmail\(userId\)/i);
     expect(recovery).toMatch(/needs_pin_setup:\s*!recovery\?\.email/i);
     expect(index).toMatch(/\/auth\/recovery\/device-login/i);
@@ -75,6 +79,16 @@ describe('mail + pin account recovery', () => {
     expect(recovery).toMatch(/function\s+legacyDevicePassword/i);
     expect(recovery).toMatch(/'OKL-'/i);
     expect(recovery).toMatch(/\.slice\(0,\s*48\)/i);
+  });
+
+  it('exposes name-only device account start for the simplified entry flow', () => {
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    const index = readFileSync(join(root, 'src', 'index.ts'), 'utf8');
+    expect(recovery).toMatch(/export\s+async\s+function\s+startDeviceAccount/i);
+    expect(recovery).toMatch(/deviceAccountEmail\(deviceHash\)/i);
+    expect(recovery).toMatch(/await\s+upsertProfile\(userId,\s*name,\s*gender\)/i);
+    expect(recovery).toMatch(/await\s+bindDevice\(userId,\s*deviceHash,\s*false\)/i);
+    expect(index).toMatch(/\/auth\/device\/start/i);
   });
 
   it('lets old clients secure device-bound accounts when their legacy JWT was not cached', () => {

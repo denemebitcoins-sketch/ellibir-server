@@ -337,6 +337,10 @@ function legacyDeviceEmail(userId: string): string {
   return `legacy-${userId.replace(/[^a-zA-Z0-9-]/g, '')}@device.online-kahvem.invalid`.toLowerCase();
 }
 
+function deviceAccountEmail(deviceHash: string): string {
+  return `device-${deviceHash}@device.online-kahvem.invalid`;
+}
+
 function legacyDevicePassword(userId: string, deviceHash: string): string {
   return 'OKL-' + createHmac('sha256', SECRET)
     .update(`legacy-device-login|${userId}|${deviceHash}`)
@@ -416,6 +420,41 @@ export async function createPinAccount(req: Request): Promise<Record<string, unk
     await bindDevice(userId, deviceHash, false);
     const session = await passwordSession(email, password);
     return { ok: true, email, user_id: userId, ...session };
+  } catch (error) {
+    if (userId) {
+      await deleteProfile(userId);
+      await deleteAuthUser(userId);
+    }
+    throw error;
+  }
+}
+
+export async function startDeviceAccount(req: Request): Promise<Record<string, unknown>> {
+  if (!configured()) throw new Error('server_not_configured');
+  const deviceHash = validDeviceHash(req.body?.device_hash);
+  const name = normalizeName(req.body?.name);
+  const gender = normalizeGender(req.body?.gender) || 'x';
+  if (!validName(name) || !isPlayableProfileName(name)) throw new Error('name_invalid');
+  if (await isDeletedDevice(deviceHash)) throw new Error('device_deleted');
+
+  try {
+    await userIdByDeviceHash(deviceHash);
+    return await loginLegacyDeviceAccount(req);
+  } catch (error: any) {
+    if (String(error?.message || '') !== 'device_account_not_found') throw error;
+  }
+
+  if (await profileNameTaken(name)) throw new Error('name_taken');
+
+  const email = deviceAccountEmail(deviceHash);
+  const password = legacyDevicePassword('new-device-account', deviceHash);
+  let userId = '';
+  try {
+    userId = await createAuthUser(email, password);
+    await upsertProfile(userId, name, gender);
+    await bindDevice(userId, deviceHash, false);
+    const session = await passwordSession(email, password);
+    return { ok: true, user_id: userId, device_account: true, message: 'Cihaz hesabi hazir.', ...session };
   } catch (error) {
     if (userId) {
       await deleteProfile(userId);

@@ -13,7 +13,7 @@ import { TavlaRoom } from './rooms/TavlaRoom';
 import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
 import { startPushWorker } from './pushWorker';
 import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth';
-import { adminResetPinRecovery, adminSecureDeviceRecovery, createPinAccount, loginLegacyDeviceAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery } from './recoveryAuth';
+import { adminResetPinRecovery, adminSecureDeviceRecovery, createPinAccount, loginLegacyDeviceAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery, startDeviceAccount } from './recoveryAuth';
 import { submitPreAuthSupport } from './preAuthSupport';
 import { deleteAccount } from './accountDeletion';
 import { cosmeticInventory, equipCosmetic, purchaseCosmetic } from './cosmetics';
@@ -69,6 +69,14 @@ app.post('/auth/recovery/create', async (req, res) => {
     res.json(await createPinAccount(req));
   } catch (error: any) {
     const message = String(error?.message || 'account_create_failed');
+    res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
+  }
+});
+app.post('/auth/device/start', async (req, res) => {
+  try {
+    res.json(await startDeviceAccount(req));
+  } catch (error: any) {
+    const message = String(error?.message || 'device_start_failed');
     res.status(recoveryStatusCode(message)).json({ ok: false, error: message });
   }
 });
