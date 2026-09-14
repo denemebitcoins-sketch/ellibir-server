@@ -41,6 +41,7 @@ export class TavlaRoom extends Room {
   private gameTimer: NodeJS.Timeout | null = null;
   private startAt = 0;
   private turnDeadlineAt = 0;
+  private timerContext = '';
   private readonly START_MS = 7000;
   private readonly STEP_MS = 900;              // bot adım temposu (zar → hamle → hamle)
   private readonly GAME_END_MS = 7000;         // oyun sonu gösterimi → yeni oyun
@@ -602,11 +603,20 @@ export class TavlaRoom extends Room {
   private clearTurnTimers() {
     if (this.botTimer) { clearTimeout(this.botTimer); this.botTimer = null; }
     if (this.humanTimer) { clearTimeout(this.humanTimer); this.humanTimer = null; }
+    this.timerContext = '';
   }
 
   private scheduleTurn() {
     if (!this.game || this.game.gameEnded || this.game.matchEnded) return;
+    const responder = this.game.pendingResign >= 0 ? 1 - this.game.pendingResign
+      : this.game.pendingDouble >= 0 ? 1 - this.game.pendingDouble : this.game.turn;
+    const bot = this.game.players[responder]!.isBot || this.abandoned.has(responder);
+    const context = `${this.game.gameNumber}:${this.game.turn}:${this.game.pendingResign}:${this.game.pendingDouble}:${bot}`;
+    // A human gets one deadline per turn, not a fresh budget per checker/undo/roll.
+    // Response windows and bot takeover have their own context; bot steps still reschedule.
+    if (this.humanTimer && this.timerContext === context) return;
     this.clearTurnTimers();
+    this.timerContext = context;
 
     // ── TESLİM CEVABI BEKLENİYOR: rakip kabul ederse oyun olsun, reddederse oyun sürer ──
     if (this.game.pendingResign >= 0) {
