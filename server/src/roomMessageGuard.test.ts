@@ -75,7 +75,7 @@ describe('room message abuse guard', () => {
     const contracts = [
       ['TavlaRoom.ts', "'tavla'", false],
       ['OkeyRoom.ts', "'okey'", true],
-      ['EllibirRoom.ts', "'51'", true],
+      ['EllibirRoom.ts', 'this.gameKey', true],
     ] as const;
 
     for (const [name, game, oneHandAware] of contracts) {

@@ -1,8 +1,8 @@
 import { Room, Client } from '@colyseus/core';
-import { createGame, startNextHand, applySorguTimeout } from '../../../packages/engine/src/game';
+import { applySorguTimeout } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
-import { clientViewFor, clientViewForSpectator, clearHandOrder, reconcileHandOrder } from '../clientView';
-import { applyClientCommand, stepOnce, CmdError } from '../gameCommands';
+import { clearHandOrder, reconcileHandOrder } from '../clientView';
+import { CmdError } from '../gameCommands';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterChatText, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntryOnce, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
@@ -11,6 +11,7 @@ import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatS
 import { ellibirCanakChance } from '../canakPolicy';
 import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
+import { ellibirRuntime } from '../cardRoomRuntime';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -19,6 +20,10 @@ import { canUseReaction } from '../cosmetics';
  * botların çekip atması istemcide animasyonlu görünür (Edge "frames" modelinin karşılığı).
  */
 export class EllibirRoom extends Room {
+  protected gameKey = '51';
+  protected runtime = ellibirRuntime;
+  private ihaleDeadline = 0;
+  private ihaleDeadlineRevision = -1;
   maxClients = 1;
 
   private game: any;
@@ -183,12 +188,13 @@ export class EllibirRoom extends Room {
         void this.handleRematch(seat);
         return;
       }
+      if (this.gameKey === 'ihale' && cmd?.t === 'continue') return;
       try {
         if (cmd?.t === 'continue' && this.handEndTimer) {
           clearTimeout(this.handEndTimer);
           this.handEndTimer = null;
         }
-        const r = applyClientCommand(this.game, cmd, seat);
+        const r = this.runtime.apply(this.game, cmd, seat);
         this.game = r.state;
         this.pushViews();                       // insan hamlesi anında yansır
         if (!r.skipBots) this.runEngine();      // botlar gecikmeli oynar
@@ -445,14 +451,14 @@ export class EllibirRoom extends Room {
       const rules: any = this.cfg?.rules ?? {};
       const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
       const oneHandEntry = shouldDeferEntryHouse(rules.totalHands);
-      const entry = await deductEntry(entryUsers, this.bet, oneHandEntry ? undefined : '51', entryHouse);
+      const entry = await deductEntry(entryUsers, this.bet, oneHandEntry ? undefined : this.gameKey, entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
       this.entryCanakCharged = !oneHandEntry;
       if (!oneHandEntry) this.refreshCanak();
       // Yönetici botları motorun bot koltuklarına eklenir (runEngine onları oynatır).
       this.cfg.botSeats = [...this.adminBots.keys()];
-      this.game = createGame(this.cfg);
-      this.matchProgressionKey = `51:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
+      this.game = this.runtime.create(this.cfg);
+      this.matchProgressionKey = `${this.gameKey}:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players.find((pl: any) => pl.seat === seat);
         if (p && name) p.name = name;
@@ -516,8 +522,9 @@ export class EllibirRoom extends Room {
     const tableNo = Number((this.metadata as any)?.table) || 1;
     let presenceTimer: NodeJS.Timeout | null = null;
     if (uid) {
-      keepSeatPresence(uid, tableNo, mode);
-      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, mode), 50000);
+      const presenceMode = this.gameKey === 'ihale' ? `ihale-${mode}` : mode;
+      keepSeatPresence(uid, tableNo, presenceMode);
+      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, presenceMode), 50000);
     }
     const stopPresenceKeepalive = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
     try {
@@ -589,6 +596,7 @@ export class EllibirRoom extends Room {
   // temizlemeye gerek yok; sonraki el başında baştan kurulur.
   private resetHandOrder() {
     if (!this.game) return;
+    if (this.gameKey === 'ihale') return;
     clearHandOrder(this.game);
     // KÜLT KURAL: her el KARIŞIK başlar, çekilen kart hep EN SAĞA gelir, kendiliğinden per OLMAZ.
     // dizMode önceki elden taşınıyordu (immutable state spread'leri koruyor) → yeni el otomatik dizili
@@ -664,9 +672,9 @@ export class EllibirRoom extends Room {
         if (!this.game) break;   // matchEnded/reset sonrası game NULL → motor durur (null crash önle)
         // ÖNCE bekle: bir önceki hamlenin (insanın ıskartası dahil) uçuş animasyonu bitsin,
         // sonra bot oynasın. Aksi halde sen atarken sıradaki bot kartın havadayken çekiyor.
-        await new Promise((res) => setTimeout(res, this.STEP_MS));
+        await new Promise((res) => setTimeout(res, this.game?.ihale?.phase === 'trickEnd' ? 650 : this.STEP_MS));
         if (!this.game) break;   // bekleme sırasında game null olduysa (yarış) yine dur
-        const r = stepOnce(this.game, (s) => this.isHumanTurn(s));
+        const r = this.runtime.step(this.game, (s) => this.isHumanTurn(s));
         if (!r.moved) {
           console.log(`[runEngine] DUR phase=${this.game.phase} currentSeat=${this.game.currentSeat} sorgu=${!!this.game.sorgu} humans=${this.humanSeats}`);
           break;
@@ -674,7 +682,7 @@ export class EllibirRoom extends Room {
         this.game = r.state;
         // SÜRE-AŞIMI ZORLAMASI: forceBotSeat'in turu (draw+action) bitip sıra BAŞKA koltuğa geçince
         // zorlamayı kaldır → o insan koltuğu sonraki turunda yine kontrolü alır (kalıcı bot DEĞİL).
-        if (this.forceBotSeat != null && this.game.currentSeat !== this.forceBotSeat) this.forceBotSeat = null;
+        if (this.forceBotSeat != null && (this.gameKey === 'ihale' || this.runtime.controller(this.game) !== this.forceBotSeat)) this.forceBotSeat = null;
         this.pushViews();
       }
     } catch (e: any) {
@@ -699,7 +707,7 @@ export class EllibirRoom extends Room {
       const playable = phase === 'draw' || phase === 'action';
       const botTurn = this.game.sorgu
         ? false // sorgu adımı stepOnce içinde zaten ele alınır; insan ise zaten DUR
-        : playable && !this.isHumanTurn(this.game.currentSeat);
+        : playable && !this.isHumanTurn(this.runtime.controller(this.game));
       if (botTurn) setImmediate(() => this.runEngine());
     }
   }
@@ -710,9 +718,10 @@ export class EllibirRoom extends Room {
   private canakSeq = 0;          // patlama sayacı (view garantisi — broadcast kaçsa da modal açılır)
   private canakWin: { seat: number; name: string; amount: number } | null = null;
 
-  private refreshCanak() { fetchCanak('51').then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
+  private refreshCanak() { fetchCanak(this.gameKey).then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
 
   private maybeCanak() {
+    if (this.gameKey === 'ihale') return; // Ihale has no meld/okey finish jackpot trigger.
     const hr: any = this.game?.lastHandResult;
     if (!this.game || !hr) return;
     const handNo = Number(this.game.handNumber ?? 0);
@@ -749,7 +758,7 @@ export class EllibirRoom extends Room {
       this.rematchVotes.clear();
       const r: any = this.game.rules ?? {};
       const scoreValues = this.game.players.map((p: any) => Number(p.totalScore));
-      if (isOneRoundNoContest({
+      if (this.gameKey !== 'ihale' && isOneRoundNoContest({
         totalRounds: r.totalHands,
         handWinnerSeat: this.game.lastHandResult?.winnerSeat,
         scores: scoreValues,
@@ -768,7 +777,7 @@ export class EllibirRoom extends Room {
         bet: this.bet,
         teamMode: !!r.teamMode,
         scores: new Map(this.game.players.map((p: any) => [p.seat, p.totalScore])), // kademeli sıralama için
-        game: '51', // çanak hedefi
+        game: this.gameKey,
         entryHousePaid: this.entryCanakCharged,
         progressionKey: this.matchProgressionKey,
       }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
@@ -911,20 +920,20 @@ export class EllibirRoom extends Room {
     if (!this.game || this.game.sorgu) return;                 // sorgu → ayrı timer
     const phase = this.game.phase;
     if (phase !== 'draw' && phase !== 'action') return;        // yalnız oynanabilir fazlar
-    const seat = this.game.currentSeat;
+    const seat = this.runtime.controller(this.game);
     if (!this.isHumanTurn(seat)) return;                        // bot/terk → runEngine zaten oynatır
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
       // Bu arada insan oynadıysa / faz değiştiyse / sorgu açıldıysa boşver.
       if (!this.game || this.game.sorgu) return;
       const ph = this.game.phase;
-      if ((ph !== 'draw' && ph !== 'action') || this.game.currentSeat !== seat) return;
+      if ((ph !== 'draw' && ph !== 'action') || this.runtime.controller(this.game) !== seat) return;
       if (!this.isHumanTurn(seat)) return;                      // bu arada abandoned oldu → runEngine halleder
       console.log(`[turnTimeout] seat=${seat} süre doldu → bot hamlesi zorlanıyor`);
       this.forceBotSeat = seat;                                 // TEK tur bot (isHumanTurn false döner)
       // runEngine bot hamle(ler)ini oynatır ve bittiğinde forceBotSeat'i temizler (finally).
       this.runEngine();
-    }, this.turnMs());
+    }, this.gameKey === 'ihale' ? Math.max(1, this.ihaleDeadline - Date.now()) : this.turnMs());
   }
 
   /// Aynı masada yeni maç: önce bekleme/geri sayım durumuna döner. Giriş ücreti,
@@ -939,7 +948,7 @@ export class EllibirRoom extends Room {
       this.handEndTimer = null;
     }
     if (this.game.phase !== 'handEnded') return;
-    try { this.game = startNextHand(this.game); }
+    try { this.game = this.runtime.next(this.game); }
     catch (e: any) { console.error('[continueHand] hata:', e?.message); return; }
     this.resetHandOrder();
     this.pushViews();
@@ -947,6 +956,10 @@ export class EllibirRoom extends Room {
   }
 
   private pushViews() {
+    if (this.gameKey === 'ihale' && this.game && this.game.revision !== this.ihaleDeadlineRevision) {
+      this.ihaleDeadlineRevision = this.game.revision;
+      this.ihaleDeadline = Date.now() + Math.max(15, Number(this.game.rules.turnTimerSeconds) || 40) * 1000;
+    }
     // Oyun henüz başlamadıysa overlay + boş masa (emptyView).
     const waiting = !this.game;
     const starting = waiting && this.seats.size + this.adminBots.size >= this.humanSeats.length; // dolu, 7sn geri sayım
@@ -974,7 +987,8 @@ export class EllibirRoom extends Room {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) {
         // İzleyici: gizli el YOK, yalnız masadaki açık bilgi (sıra/skor/açık perler).
-        const sv: any = clientViewForSpectator(this.game);
+        const sv: any = this.runtime.view(this.game, -1);
+        if (sv.ihale) sv.ihale.turnMs = Math.max(0, this.ihaleDeadline - Date.now());
         decorate(sv.seats);
         sv.spectators = specList;
         sv.spectatorRoles = specRoles;
@@ -993,7 +1007,8 @@ export class EllibirRoom extends Room {
         c.send('view', JSON.stringify(sv));
         return;
       }
-      const view: any = clientViewFor(this.game, seat);
+      const view: any = this.runtime.view(this.game, seat);
+      if (view.ihale) view.ihale.turnMs = Math.max(0, this.ihaleDeadline - Date.now());
       decorate(view.seats);
       view.spectators = specList;
       view.spectatorRoles = specRoles;

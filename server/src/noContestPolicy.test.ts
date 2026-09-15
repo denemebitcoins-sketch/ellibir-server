@@ -30,7 +30,7 @@ describe('one-hand no-contest economy policy', () => {
     for (const name of ['EllibirRoom.ts', 'OkeyRoom.ts']) {
       const source = room(name);
       expect(source).toContain('shouldDeferEntryHouse');
-      expect(source).toMatch(/deductEntry\(entryUsers,\s*this\.bet,\s*oneHandEntry \? undefined : '(?:51|okey)',\s*entryHouse\)/);
+      expect(source).toMatch(/deductEntry\(entryUsers,\s*this\.bet,\s*oneHandEntry \? undefined : (?:this\.gameKey|'okey'),\s*entryHouse\)/);
       expect(source).toContain('this.entryCanakCharged = !oneHandEntry;');
       expect(source).toContain('isOneRoundNoContest');
       expect(source).toContain('refundEntryOnce(this.seatUsers, this.bet');

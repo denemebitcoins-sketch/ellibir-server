@@ -8,6 +8,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import express from 'express';
 import { createServer } from 'http';
 import { EllibirRoom } from './rooms/EllibirRoom';
+import { IhaleRoom } from './rooms/IhaleRoom';
 import { OkeyRoom } from './rooms/OkeyRoom';
 import { TavlaRoom } from './rooms/TavlaRoom';
 import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
@@ -219,6 +220,7 @@ const gameServer = new Server({
 // "ellibir" odası — masa. Matchmaking: joinOrCreate("ellibir", { mode, table }).
 // filterBy(mode,table): aynı mod + aynı masa no → AYNI odada buluşur ("Masa 3'te buluşalım").
 gameServer.define('ellibir', EllibirRoom).filterBy(['mode', 'table']);
+gameServer.define('ihale', IhaleRoom).filterBy(['mode', 'table']);
 // "okey" odası — aynı matchmaking modeli: joinOrCreate("okey", { mode, table, variant }).
 gameServer.define('okey', OkeyRoom).filterBy(['mode', 'table', 'variant']);
 // "tavla" odası — 2 kişilik: joinOrCreate("tavla", { mode, table }).
