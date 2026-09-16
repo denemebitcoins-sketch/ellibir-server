@@ -21,7 +21,8 @@ describe('profile username uniqueness contract', () => {
 
   it('keeps the Unity onboarding contract tied to backend availability and save-time conflict handling', () => {
     expect(clientContracts).toContain('SupabaseProfile.IsNameTaken');
-    expect(clientContracts).toContain('SupabaseProfile.PushWithResult');
+    expect(clientContracts).toContain('SupabaseAuth.StartDeviceAccount');
+    expect(clientContracts).toContain('case "name_taken"');
     expect(clientContracts).toContain('Bu kullanıcı adı kullanılıyor.');
   });
 });

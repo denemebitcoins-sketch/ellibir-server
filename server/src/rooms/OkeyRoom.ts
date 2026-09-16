@@ -1,4 +1,5 @@
 import { Room, Client } from '@colyseus/core';
+import { SeatPresenceLeases, hasOpenTransport } from '../seatPresenceLease';
 import {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, playOkeyBotTurn,
   beginBankoPhase, resolveBankoPhase, botBankoDecide, DEFAULT_OKEY_RULES,
@@ -260,6 +261,7 @@ export class OkeyRoom extends Room {
       if (seat == null) return;
       if (!payloadWithinLimit(raw, 256) || !this.messageGuard.allow(client.sessionId, 'away', 6, 3000)) return;
       const away = raw?.away !== false;
+      void keepSeatPresence(this.seatUsers.get(seat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !away, !!this.game);
       if (away) {
         if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} masadan uzaklaştı — bot devraldı`);
         this.abandoned.add(seat);
@@ -473,12 +475,15 @@ export class OkeyRoom extends Room {
 
   /* ── RECONNECT LIFECYCLE — 51 ile birebir (0.17: onDrop/onReconnect/onLeave) ── */
 
+  private presenceLeases = new SeatPresenceLeases();
+  private presenceMode(): string { return 'okey-' + ((this.metadata as any)?.mode ?? 'solo'); }
+
   async onDrop(client: Client) {
     const isTakeover = this.takeoverPending.delete(client.sessionId); // takeover dususu KALKAN-1'i atlar
     // KALKAN: wifi->mobil geciste SDK yeni baglantiyla COKTAN donduktan sonra eski
     // socketin gecikmis kapanisi ikinci bir onDrop tetikliyor; allowReconnection aninda
     // patlayip KOLTUGU SILIYORDU (log: onReconnect/onDrop ayni saniye -> EXPIRED -> 4002).
-    if (!isTakeover && Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 3000) {
+    if (!isTakeover && this.clients.some(c => c !== client && c.sessionId === client.sessionId && hasOpenTransport(c))) {
       console.log(`[OkeyRoom.onDrop] STALE drop (yeni baglanti canli) -> yok sayildi sid=${client.sessionId}`);
       return;
     }
@@ -501,25 +506,24 @@ export class OkeyRoom extends Room {
     const uid = this.seatUsers.get(seat);
     const mode = (this.metadata as any)?.mode ?? 'solo';
     const tableNo = Number((this.metadata as any)?.table) || 1;
-    let presenceTimer: NodeJS.Timeout | null = null;
-    if (uid) {
-      keepSeatPresence(uid, tableNo, 'okey-' + mode);
-      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, 'okey-' + mode), 50000);
-    }
-    const stop = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
+    const reservation = this.presenceLeases.reserve(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
     try {
       const back = await this.allowReconnection(client, 180);
       console.log(`[OkeyRoom.onDrop-SUCCESS] seat=${seat} geri döndü`);
-      stop();
+      if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
+      this.presenceLeases.restore(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
       this.abandoned.delete(seat);
       try { back.send('seat', { seat }); } catch { /* yoksay */ }
       this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
       this.afterChange();
     } catch (e: any) {
       console.log(`[OkeyRoom.onDrop-EXPIRED] seat=${seat}: ${e?.message ?? e}`);
-      stop();
+      if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
+      this.presenceLeases.stop(client.sessionId);
       // KALKAN-2: pencere doldu dese de bu sessionId hala BAGLIYSA (yaris) koltuga dokunma.
-      if (this.clients.some((c) => c.sessionId === client.sessionId)) {
+      const live = this.clients.find(c => c.sessionId === client.sessionId && hasOpenTransport(c));
+      if (live) {
+        this.onReconnect(live);
         console.log(`[OkeyRoom.onDrop-EXPIRED] client CANLI -> koltuk korunuyor (stale)`);
         return;
       }
@@ -530,6 +534,12 @@ export class OkeyRoom extends Room {
   }
 
   onReconnect(client: Client) {
+    const wasReserved = this.seats.has(client.sessionId);
+    if (wasReserved) {
+      const returningSeat = this.seats.get(client.sessionId)!;
+      this.presenceLeases.restore(client.sessionId, this.seatUsers.get(returningSeat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !!this.game);
+      this.logEvent(`${this.nameOfSeat(returningSeat)} masaya geri dondu - kontrol oyuncuya gecti`);
+    }
     this.lastReconnectAt.set(client.sessionId, Date.now());
     const seat = this.seats.get(client.sessionId);
     console.log(`[OkeyRoom.onReconnect] seat=${seat}`);
@@ -543,7 +553,7 @@ export class OkeyRoom extends Room {
     // KALKAN-3: reconnect'ten hemen sonra ESKI socket kapanisi onLeave (4002 vb.) olarak da
     // dusebiliyor — kalkan-1 onDrop'u kesince ayni hayalet buradan sizip koltugu siliyordu.
     // KASITLI cikis (4000 consented) etkilenmez.
-    if (_code !== 4000 && Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 5000) {
+    if (_code !== 4000 && this.clients.some(c => c !== client && c.sessionId === client.sessionId && hasOpenTransport(c))) {
       console.log(`[OkeyRoom.onLeave] STALE leave (reconnect taze, code=${_code}) -> yok sayildi sid=${client.sessionId}`);
       return;
     }
@@ -573,6 +583,10 @@ export class OkeyRoom extends Room {
   }
 
   private cleanupSeat(sessionId: string, seat: number) {
+    if (this.seats.get(sessionId) !== seat) return;
+    this.presenceLeases.stop(sessionId);
+    const uid = this.seatUsers.get(seat);
+    if (uid) this.presenceLeases.release(sessionId, uid, Number((this.metadata as any)?.table) || 1, this.presenceMode());
     this.messageGuard.forget(sessionId);
     this.giftBusy.delete(sessionId);
     this.lastReconnectAt.delete(sessionId);
@@ -948,6 +962,7 @@ export class OkeyRoom extends Room {
   }
 
   onDispose() {
+    this.presenceLeases.dispose();
     this.messageGuard.clear();
     this.giftBusy.clear();
     if (this.startTimer) clearTimeout(this.startTimer);

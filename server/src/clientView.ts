@@ -10,11 +10,11 @@ import type { GameState } from '../../packages/engine/src/types';
 import { VIEW_VERSION } from './viewContract';
 
 /* ── Per-koltuk el dizilim sırası (handOrder) — C# HandOrder/ReconcileOrder portu ──
-   Motor kuralını DEĞİŞTİRMEZ; yalnız el'in GÖRSEL sırasını izler. Çekilen kart sona,
+   Motor kuralını DEĞİŞTİRMEZ; yalnız el'in GÖRSEL sırasını izler. Çekilen kart sola,
    seri/çift diz gruplu sıra korunur. */
 
 /** Bir koltuğun handOrder'ını mevcut ele göre reconcile et: mevcut sıradaki kart-id'ler
- *  korunur (elde olmayanlar düşer), elde olup sırada olmayan YENİ kartlar SONA eklenir.
+ *  korunur (elde olmayanlar düşer), elde olup sırada olmayan YENİ kartlar SOLA eklenir.
  *  (C# ReconcileOrder.) Yan etki: state.handOrder[seat]'i günceller ve döndürür. */
 export function reconcileHandOrder(state: any, seat: number): string[] {
   if (!state) return [];
@@ -25,7 +25,7 @@ export function reconcileHandOrder(state: any, seat: number): string[] {
   const ids = new Set(hand.map((c: any) => c.id));
   const kept = prev.filter((id) => ids.has(id));
   const known = new Set(kept);
-  for (const c of hand) if (!known.has(c.id)) kept.push(c.id);
+  kept.unshift(...hand.filter((c: any) => !known.has(c.id)).map((c: any) => c.id));
   state.handOrder[seat] = kept;
   return kept;
 }

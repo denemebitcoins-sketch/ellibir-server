@@ -1,4 +1,5 @@
 import { Room, Client } from '@colyseus/core';
+import { SeatPresenceLeases, hasOpenTransport } from '../seatPresenceLease';
 import { applySorguTimeout } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clearHandOrder, reconcileHandOrder } from '../clientView';
@@ -24,6 +25,8 @@ export class EllibirRoom extends Room {
   protected runtime = ellibirRuntime;
   private ihaleDeadline = 0;
   private ihaleDeadlineRevision = -1;
+  private ihaleTimeoutStreak = new Map<number, number>();
+  private ihaleAutoPilot = new Set<number>();
   maxClients = 1;
 
   private game: any;
@@ -189,6 +192,7 @@ export class EllibirRoom extends Room {
         return;
       }
       if (this.gameKey === 'ihale' && cmd?.t === 'continue') return;
+      if (this.handleIhaleControl(client, cmd, seat)) return;
       try {
         if (cmd?.t === 'continue' && this.handEndTimer) {
           clearTimeout(this.handEndTimer);
@@ -196,6 +200,7 @@ export class EllibirRoom extends Room {
         }
         const r = this.runtime.apply(this.game, cmd, seat);
         this.game = r.state;
+        if (this.gameKey === 'ihale') this.ihaleTimeoutStreak.delete(seat);
         this.pushViews();                       // insan hamlesi anında yansır
         if (!r.skipBots) this.runEngine();      // botlar gecikmeli oynar
         else this.checkHandEnd();
@@ -278,6 +283,7 @@ export class EllibirRoom extends Room {
       if (seat == null) return;
       if (!payloadWithinLimit(raw, 256) || !this.messageGuard.allow(client.sessionId, 'away', 6, 3000)) return;
       const away = raw?.away !== false;
+      void keepSeatPresence(this.seatUsers.get(seat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !away, !!this.game);
       const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
       if (away) {
         if (!ab.includes(seat)) this.logEvent(`${this.nameOfSeat(seat)} masadan uzaklaştı — bot devraldı`);
@@ -490,12 +496,15 @@ export class EllibirRoom extends Room {
   //    reconnect çakışıp 524 veriyordu. GERÇEK KÖK BUYDU.)
 
   /** ANORMAL kopma (0.17 onDrop): koltuğu HEMEN bota devret + 180s rezerve tut. */
+  private presenceLeases = new SeatPresenceLeases();
+  private presenceMode(): string { return (this.gameKey === 'ihale' ? 'ihale-' : '') + ((this.metadata as any)?.mode ?? (this.humanSeats.length === 2 ? 'duo' : 'solo')); }
+
   async onDrop(client: Client) {
     const isTakeover = this.takeoverPending.delete(client.sessionId); // takeover dususu KALKAN-1'i atlar
     // KALKAN: wifi→mobil geçişinde SDK yeni bağlantıyla ÇOKTAN döndükten sonra eski
     // socket'in gecikmiş kapanışı ikinci bir onDrop tetikliyor; allowReconnection anında
     // patlayıp KOLTUĞU SİLİYORDU (log: onReconnect ↔ onDrop aynı saniye → EXPIRED → 4002).
-    if (!isTakeover && Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 3000) {
+    if (!isTakeover && this.clients.some(c => c !== client && c.sessionId === client.sessionId && hasOpenTransport(c))) {
       console.log(`[EllibirRoom.onDrop] STALE drop (yeni bağlantı canlı) → yok sayıldı sid=${client.sessionId}`);
       return;
     }
@@ -520,28 +529,27 @@ export class EllibirRoom extends Room {
     const uid = this.seatUsers.get(seat);
     const mode = (this.metadata as any)?.mode ?? (this.humanSeats.length === 2 ? 'duo' : 'solo');
     const tableNo = Number((this.metadata as any)?.table) || 1;
-    let presenceTimer: NodeJS.Timeout | null = null;
-    if (uid) {
-      const presenceMode = this.gameKey === 'ihale' ? `ihale-${mode}` : mode;
-      keepSeatPresence(uid, tableNo, presenceMode);
-      presenceTimer = setInterval(() => keepSeatPresence(uid, tableNo, presenceMode), 50000);
-    }
-    const stopPresenceKeepalive = () => { if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; } };
+    const reservation = this.presenceLeases.reserve(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
     try {
       console.log(`[onDrop] allowReconnection(180) BEKLENİYOR seat=${seat}`);
       const back = await this.allowReconnection(client, 180);  // 3 dk pencere (uygulama kapansa/ağ değişse bile)
       console.log(`[onDrop-SUCCESS] seat=${seat} oyuncu GERİ DÖNDÜ (allowReconnection çözüldü)`);
-      stopPresenceKeepalive();
+      if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
+      this.presenceLeases.restore(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
       this.setAbandoned(seat, false);   // KONTROL İADESİ → sıra/karar tekrar insana
+      if (this.forceBotSeat === seat) this.forceBotSeat = null;
       try { back.send('seat', { seat }); } catch { /* yoksay */ }
       this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
       this.runEngine();
       this.pushViews();
     } catch (e: any) {
       console.log(`[onDrop-EXPIRED] seat=${seat} reconnect penceresi DOLDU/iptal: ${e?.message ?? e}`);
-      stopPresenceKeepalive();
+      if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
+      this.presenceLeases.stop(client.sessionId);
       // KALKAN-2: pencere 'doldu' dese de bu sessionId hâlâ BAĞLIYSA (yarış) koltuğa dokunma.
-      if (this.clients.some((c) => c.sessionId === client.sessionId)) {
+      const live = this.clients.find(c => c.sessionId === client.sessionId && hasOpenTransport(c));
+      if (live) {
+        this.onReconnect(live);
         console.log(`[EllibirRoom.onDrop-EXPIRED] client CANLI → koltuk korunuyor (stale)`);
         return;
       }
@@ -551,11 +559,18 @@ export class EllibirRoom extends Room {
 
   /** Zamanında reconnect (0.17 onReconnect): kontrolü insana geri ver (onDrop await'e ek garanti). */
   onReconnect(client: Client) {
+    const wasReserved = this.seats.has(client.sessionId);
+    if (wasReserved) {
+      const returningSeat = this.seats.get(client.sessionId)!;
+      this.presenceLeases.restore(client.sessionId, this.seatUsers.get(returningSeat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !!this.game);
+      this.logEvent(`${this.nameOfSeat(returningSeat)} masaya geri dondu - kontrol oyuncuya gecti`);
+    }
     this.lastReconnectAt.set(client.sessionId, Date.now());
     console.log(`[onReconnect] TETİKLENDİ sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) return;
     this.setAbandoned(seat, false);            // bot diskalifiye
+    if (this.forceBotSeat === seat) this.forceBotSeat = null;
     try { client.send('seat', { seat }); } catch { /* yoksay */ }
     this.runEngine();
     this.pushViews();
@@ -566,7 +581,7 @@ export class EllibirRoom extends Room {
     // KALKAN-3: reconnect'ten hemen sonra ESKI socket kapanisi onLeave (4002 vb.) olarak da
     // dusebiliyor — kalkan-1 onDrop'u kesince ayni hayalet buradan sizip koltugu siliyordu.
     // KASITLI cikis (4000 consented) etkilenmez.
-    if (_code !== 4000 && Date.now() - (this.lastReconnectAt.get(client.sessionId) ?? 0) < 5000) {
+    if (_code !== 4000 && this.clients.some(c => c !== client && c.sessionId === client.sessionId && hasOpenTransport(c))) {
       console.log(`[EllibirRoom.onLeave] STALE leave (reconnect taze, code=${_code}) -> yok sayildi sid=${client.sessionId}`);
       return;
     }
@@ -616,6 +631,10 @@ export class EllibirRoom extends Room {
   }
 
   private cleanupSeat(sessionId: string, seat: number) {
+    if (this.seats.get(sessionId) !== seat) return;
+    this.presenceLeases.stop(sessionId);
+    const uid = this.seatUsers.get(seat);
+    if (uid) this.presenceLeases.release(sessionId, uid, Number((this.metadata as any)?.table) || 1, this.presenceMode());
     this.messageGuard.forget(sessionId);
     this.giftBusy.delete(sessionId);
     this.lastReconnectAt.delete(sessionId);
@@ -655,11 +674,31 @@ export class EllibirRoom extends Room {
   private isHumanTurn(seat: number): boolean {
     if (!this.humanSeats.includes(seat)) return false;
     if (this.adminBots.has(seat)) return false; // YÖNETİCİ botu: motor oynatır (insan değil)
+    if (this.gameKey === 'ihale' && this.ihaleAutoPilot.has(seat)) return false;
     // SÜRE AŞIMI ZORLAMASI: bu koltuk için TEK adım bot oynanacaksa "insan değil" say (stepOnce
     // bot hamlesi üretir). forceBotSeat süre aşımı timer'ında set edilir, adım sonrası temizlenir.
     if (this.forceBotSeat === seat) return false;
     const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
     return !ab.includes(seat);
+  }
+
+  private handleIhaleControl(client: Client, cmd: any, seat: number): boolean {
+    if (this.gameKey !== 'ihale') return false;
+    if (cmd?.t === 'ihaleResume') {
+      if (this.ihaleAutoPilot.delete(seat)) {
+        this.ihaleTimeoutStreak.delete(seat);
+        if (this.forceBotSeat === seat) this.forceBotSeat = null;
+        if (this.game && this.runtime.controller(this.game) === seat)
+          this.ihaleDeadline = Date.now() + Math.max(15, Number(this.game.rules.turnTimerSeconds) || 40) * 1000;
+        this.logEvent(`${this.nameOfSeat(seat)} otomatik pilottan kontrolü geri aldı`);
+        this.runEngine();
+      }
+      this.pushViews();
+      return true;
+    }
+    if (!this.ihaleAutoPilot.has(seat)) return false;
+    client.send('moveError', { code: 'autopilot_active', message: 'Kontrolü almak için GERİ AL düğmesine bas.' });
+    return true;
   }
 
   // Bot/sorgu adımlarını TEK TEK, aralarında gecikmeyle oynat ve her adımı push et.
@@ -834,6 +873,8 @@ export class EllibirRoom extends Room {
   }
 
   private prepareRematchCountdown() {
+    this.ihaleTimeoutStreak.clear();
+    this.ihaleAutoPilot.clear();
     this.rematchVotes.clear();
     this.clearSorguTimer();
     this.clearTurnTimer();
@@ -930,6 +971,15 @@ export class EllibirRoom extends Room {
       if ((ph !== 'draw' && ph !== 'action') || this.runtime.controller(this.game) !== seat) return;
       if (!this.isHumanTurn(seat)) return;                      // bu arada abandoned oldu → runEngine halleder
       console.log(`[turnTimeout] seat=${seat} süre doldu → bot hamlesi zorlanıyor`);
+      if (this.gameKey === 'ihale') {
+        const missed = (this.ihaleTimeoutStreak.get(seat) ?? 0) + 1;
+        this.ihaleTimeoutStreak.set(seat, missed);
+        if (missed >= 3) {
+          this.ihaleAutoPilot.add(seat);
+          this.logEvent(`${this.nameOfSeat(seat)} üç kez süreyi kaçırdı - otomatik pilot devrede`);
+        }
+        this.pushViews();
+      }
       this.forceBotSeat = seat;                                 // TEK tur bot (isHumanTurn false döner)
       // runEngine bot hamle(ler)ini oynatır ve bittiğinde forceBotSeat'i temizler (finally).
       this.runEngine();
@@ -1008,7 +1058,12 @@ export class EllibirRoom extends Room {
         return;
       }
       const view: any = this.runtime.view(this.game, seat);
-      if (view.ihale) view.ihale.turnMs = Math.max(0, this.ihaleDeadline - Date.now());
+      if (view.ihale) {
+        view.ihale.turnMs = Math.max(0, this.ihaleDeadline - Date.now());
+        view.ihale.autoPilot = this.ihaleAutoPilot.has(seat);
+        view.ihale.timeoutStreak = this.ihaleTimeoutStreak.get(seat) ?? 0;
+        if (view.ihale.autoPilot) view.yourTurn = false;
+      }
       decorate(view.seats);
       view.spectators = specList;
       view.spectatorRoles = specRoles;
@@ -1029,6 +1084,7 @@ export class EllibirRoom extends Room {
   }
 
   onDispose() {
+    this.presenceLeases.dispose();
     this.messageGuard.clear();
     this.giftBusy.clear();
     if (this.handEndTimer) clearTimeout(this.handEndTimer);

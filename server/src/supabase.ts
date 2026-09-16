@@ -286,20 +286,29 @@ export async function keepSeatPresence(
   userId: string | null | undefined,
   tableNo: number,
   mode: string,
+  connected = false,
+  started = true,
 ): Promise<void> {
-  if (!userId || !supabaseConfigured()) return;
-  try {
-    const body = JSON.stringify({
-      status: 'masada',
-      table_no: tableNo,
-      table_mode: mode.startsWith('okey-') || mode.startsWith('tavla-')
-        ? mode
-        : mode === 'duo' ? 'duo' : 'solo',
-      table_started: true,   // REZERVE = oyun DEVAM → salon koltuğu BOT (düşen oyuncunun kendisi dahil
-                             //   kimse OTUR görüp oturamaz; sadece İZLE).
-      last_seen: new Date().toISOString(),
-    });
-    await fetch(`${URL}/rest/v1/presence?user_id=eq.${userId}`, {
+  return updateSeatPresence(userId, tableNo, mode, {
+    status: connected ? 'masada' : 'reconnecting',
+    table_started: started,
+    last_seen: new Date().toISOString(),
+  });
+}
+
+export function clearSeatPresence(userId: string | undefined, tableNo: number, mode: string): Promise<void> {
+  return updateSeatPresence(userId, tableNo, mode, {
+    status: 'lobi', table_no: 0, table_mode: '', table_info: '', table_seat: -1, table_started: false,
+  });
+}
+
+const seatPresenceWrites = new Map<string, Promise<void>>();
+function updateSeatPresence(userId: string | null | undefined, tableNo: number, mode: string, patch: object): Promise<void> {
+  if (!userId || !supabaseConfigured()) return Promise.resolve();
+  // Serialize keepalive/restore/release; an old room must never overwrite a newer table.
+  const pending = (seatPresenceWrites.get(userId) ?? Promise.resolve()).then(async () => {
+    const query = new URLSearchParams({ user_id: `eq.${userId}`, table_no: `eq.${tableNo}`, table_mode: `eq.${mode}` });
+    const response = await fetch(`${URL}/rest/v1/presence?${query}`, {
       method: 'PATCH',
       headers: {
         apikey: SERVICE,
@@ -307,11 +316,14 @@ export async function keepSeatPresence(
         'Content-Type': 'application/json',
         Prefer: 'return=minimal',
       },
-      body,
+      body: JSON.stringify(patch),
+      signal: AbortSignal.timeout(10000),
     });
-  } catch (e: any) {
-    console.error('[supabase] keepSeatPresence:', e?.message);
-  }
+    if (!response.ok) throw new Error(`presence HTTP ${response.status}`);
+  }).catch((e: any) => { console.error('[supabase] seat presence:', e?.message); });
+  seatPresenceWrites.set(userId, pending);
+  void pending.then(() => { if (seatPresenceWrites.get(userId) === pending) seatPresenceWrites.delete(userId); });
+  return pending;
 }
 
 /** Bir Postgres RPC'yi service-role ile çağır (add_chips / deduct_chips). */

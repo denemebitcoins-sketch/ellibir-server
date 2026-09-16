@@ -17,13 +17,16 @@ describe('recovered Unity client contracts', () => {
     const beta = unitySource('Assets/Meta/Net/BetaWelcomeService.cs');
     const setup = unitySource('Assets/Meta/ProfileSetupScreen.cs');
     const profile = unitySource('Assets/Meta/Net/SupabaseProfile.cs');
+    const auth = unitySource('Assets/Meta/Net/SupabaseAuth.cs');
 
     expect(splash).not.toContain('SupabaseProfile.EnsureProfile');
     expect(beta).toContain('ProfileStore.HasCompletedRequiredInfo()');
     expect(setup).toContain('SupabaseProfile.IsNameTaken');
-    expect(setup).toContain('SupabaseAuth.CreatePinAccount');
-    expect(setup).toContain('ATLA');
-    expect(setup).toContain('PIN tekrar');
+    expect(setup).toContain('SupabaseAuth.StartDeviceAccount(nm');
+    expect(setup).not.toContain('SupabaseAuth.CreatePinAccount');
+    expect(setup).toContain('Fotoğraf şart değil');
+    expect(auth).toContain('/auth/device/start');
+    expect(auth).toContain('case "name_taken": return "Bu kullanıcı adı kullanılıyor."');
     expect(setup).toContain('CheckNameAfterDelay');
     expect(setup).toContain('Bu kullanıcı adı kullanılıyor.');
     expect(profile).not.toContain('fixName');
@@ -54,16 +57,26 @@ describe('recovered Unity client contracts', () => {
   it('uses rewarded ads for training access and keeps production ad units selected', () => {
     const config = unitySource('Assets/Meta/Monetization/MonetizationConfig.cs');
     const training = unitySource('Assets/Meta/Monetization/TrainingInterstitialService.cs');
+    const pool = unitySource('Assets/Meta/Monetization/RewardedAdPool.cs');
+    const unityMediationDeps = unitySource('Assets/GoogleMobileAds/Editor/UnityAdsMediationDependencies.xml');
 
     expect(config).toContain('public const bool UseGoogleTestAds = false');
+    expect(config).toContain('public const bool UseHighValueRewardedUnit = true');
     expect(config).toContain('AndroidRewardedProductionUnit');
-    expect(training).toContain('RewardedAd.Load(MonetizationConfig.RewardedUnitId');
+    expect(config).toContain('AndroidRewardedHighValueProductionUnit');
+    expect(config).toContain('return new[] { high, normal }');
+    expect(pool).toContain('RewardedAd.Load(slot.unitId');
+    expect(training).toContain('RewardedAdPool.EnsureLoaded');
     expect(training).toContain('begin_training_rewarded_ad');
     expect(training).toContain('get_training_rewarded_ad_state');
     expect(training).toContain('RefreshAccessState(active =>');
     expect(training).toContain('ShowAccessAdAfterServerCheck');
     expect(training).toContain('begin.error == "active" && begin.remaining_seconds > 0');
     expect(training).not.toContain('grant_training_access');
+    expect(config).not.toContain('InterstitialUnitId');
+    expect(unityMediationDeps).toContain('com.google.ads.mediation:unity:4.19.0.0');
+    expect(unityMediationDeps).toContain('com.unity3d.ads:unity-ads:4.19.0');
+    expect(existsSync(path.resolve(unityRoot, 'Assets/Meta/Monetization/TrainingInterstitialFallback.cs'))).toBe(false);
   });
 
   it('refreshes training access when the training salon is drawn and exposes a central quick-play button', () => {
@@ -73,7 +86,7 @@ describe('recovered Unity client contracts', () => {
     const tavla = unitySource('Assets/Meta/TavlaLobbyScreen.cs');
 
     expect(gate).toContain('TrainingInterstitialService.RefreshAccessState(_ => UpdateStatus(label))');
-    expect(gate).toContain('"trainingQuickPlay"');
+    expect(gate).toContain('"ANTRENMANA BAŞLA"');
     expect(gate).toContain('new Vector2(470f, 92f)');
     expect(ellibir).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay)');
     expect(okey).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay)');
@@ -165,8 +178,10 @@ describe('recovered Unity client contracts', () => {
     const okey = unitySource('Assets/Meta/OkeyGameClient.cs');
     const share = unitySource('Assets/Meta/YazbozShare.cs');
 
-    expect(okey).toContain('"yzcapture"');
-    expect(okey).toContain('YazbozShare.CaptureAndShare(this, capRt');
+    expect(okey).toContain('ScoreSheetKit.Draw(Stage, result == null ? "yz" : "okeyResult", sheet, result)');
+    expect(okey).toContain('ShareResultModal("okeyResult", OkeyShareName())');
+    expect(okey).toContain('Transform target = Stage.Find(rootName)');
+    expect(okey).toContain('YazbozShare.CaptureAndShare(this, rt, gameName, Toast)');
     expect(okey).not.toContain('YazbozShare.CaptureAndShare(this, (RectTransform)bd.transform');
     expect(share).toContain('Sosyal Oyun Platformu');
     expect(share).toContain('shareWatermark');
