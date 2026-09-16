@@ -27,6 +27,7 @@ export class EllibirRoom extends Room {
   private ihaleDeadlineRevision = -1;
   private ihaleTimeoutStreak = new Map<number, number>();
   private ihaleAutoPilot = new Set<number>();
+  private ihalePilotClients = new Set<string>();
   maxClients = 1;
 
   private game: any;
@@ -353,6 +354,7 @@ export class EllibirRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    if (options?.ihalePilotVersion === 1) this.ihalePilotClients.add(client.sessionId);
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
     if (existing) {
@@ -587,6 +589,7 @@ export class EllibirRoom extends Room {
     }
 
     console.log(`[onLeave] TETİKLENDİ sessionId=${client.sessionId} code=${_code} seat=${this.seats.get(client.sessionId)}`);
+    this.ihalePilotClients.delete(client.sessionId);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
@@ -632,6 +635,7 @@ export class EllibirRoom extends Room {
 
   private cleanupSeat(sessionId: string, seat: number) {
     if (this.seats.get(sessionId) !== seat) return;
+    this.ihalePilotClients.delete(sessionId);
     this.presenceLeases.stop(sessionId);
     const uid = this.seatUsers.get(seat);
     if (uid) this.presenceLeases.release(sessionId, uid, Number((this.metadata as any)?.table) || 1, this.presenceMode());
@@ -974,7 +978,9 @@ export class EllibirRoom extends Room {
       if (this.gameKey === 'ihale') {
         const missed = (this.ihaleTimeoutStreak.get(seat) ?? 0) + 1;
         this.ihaleTimeoutStreak.set(seat, missed);
-        if (missed >= 3) {
+        // Older clients cannot render GERİ AL; keep their one-move timeout fallback.
+        const canResume = [...this.seats].some(([sid, assigned]) => assigned === seat && this.ihalePilotClients.has(sid));
+        if (missed >= 3 && canResume) {
           this.ihaleAutoPilot.add(seat);
           this.logEvent(`${this.nameOfSeat(seat)} üç kez süreyi kaçırdı - otomatik pilot devrede`);
         }

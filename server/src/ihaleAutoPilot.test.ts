@@ -13,12 +13,25 @@ function playing(dummy = false) {
 function room(dummy = false): any {
   vi.useFakeTimers(); vi.setSystemTime(100000);
   const r: any = new IhaleRoom(); r.game = playing(dummy); r.humanSeats = [0, 1, 2, 3];
+  r.seats.set('me', 0); r.ihalePilotClients.add('me');
   r.pushViews();
   return r;
 }
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe('Ihale persistent automatic control', () => {
+  it('keeps legacy clients on recoverable one-move timeout handling', async () => {
+    const r = room(); r.runEngine = vi.fn(); r.ihalePilotClients.clear();
+    for (let miss = 0; miss < 4; miss++) {
+      r.forceBotSeat = null; r.ihaleDeadline = Date.now() + 40000;
+      r.armTurnTimeoutIfNeeded(); await vi.advanceTimersByTimeAsync(40000);
+      expect(r.forceBotSeat).toBe(0);
+      expect(r.ihaleAutoPilot.has(0)).toBe(false);
+    }
+    r.forceBotSeat = null;
+    expect(r.isHumanTurn(0)).toBe(true); r.onDispose();
+  });
+
   it.each([false, true])('switches after three misses on the controller, dummy=%s', async dummy => {
     const r = room(dummy); r.runEngine = vi.fn();
     for (let miss = 1; miss <= 3; miss++) {
