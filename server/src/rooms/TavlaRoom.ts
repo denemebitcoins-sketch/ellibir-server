@@ -13,6 +13,10 @@ import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../
 import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { tavlaCanakChance } from '../canakPolicy';
 import { canUseReaction } from '../cosmetics';
+import { allHumanStartingRoster } from '../matchRewardEligibility';
+import { PopulationRoomSession } from '../botPopulation/roomSession';
+import { PopulationStorage } from '../botPopulation/storage';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient } from '../botPopulation/roomBinding';
 
 /**
  * TAVLA masası (2 kişilik) — OkeyRoom/EllibirRoom ile AYNI sosyal/reconnect altyapısı
@@ -50,6 +54,7 @@ export class TavlaRoom extends Room {
   private bet = 0;
   private settled = false;
   private entryCanakCharged = false;
+  private matchRewardsEligible = false;
   private settlePromise: Promise<void> | null = null;
   private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private cfg: any = null;
@@ -60,6 +65,75 @@ export class TavlaRoom extends Room {
   private readonly messageGuard = new RoomMessageGuard();
   private readonly giftBusy = new Set<string>();
   private closingBotOnly = false;
+  private population: PopulationRoomSession | null = null;
+  private populationHeartbeat: NodeJS.Timeout | null = null;
+  private populationAccepting = true;
+  private entryStarting = false;
+  private disposed = false;
+
+  // Trusted server capability only, never supplied by client options/messages.
+  bindPopulation(storage: PopulationStorage, owner: string, roomKey: string): PopulationRoomSession {
+    if (!this.cfg || this.game || this.entryStarting || this.population || this.adminBots.size) throw new Error('population_bind_unavailable');
+    const names = new Set<number>();
+    let wasPlayable = true;
+    const population = new PopulationRoomSession(storage, owner, roomKey, 'tavla', this.bet, {
+      canReserve: seat => this.populationAccepting && !this.disposed && !this.game && !this.entryStarting
+        && ![...this.seats.values()].includes(seat) && !this.adminBots.has(seat),
+      canRemove: () => !this.disposed && !this.game && !this.entryStarting && this.seats.size === 0,
+      status: () => ({ phase: !this.game ? 'waiting' : this.game.matchEnded ? 'ended' : 'playing',
+        humanSeats: [...this.seats.values()], occupiedSeats: [...this.occupiedSeats()], starting: this.entryStarting, disposed: this.disposed }),
+      accepting: value => { this.populationAccepting = value; },
+      chat: payload => this.broadcast('chat',payload),
+      detached: seats => {
+        for (const seat of seats) if (![...this.seats.values()].includes(seat)) this.seatNames.delete(seat);
+        if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }
+        this.population = null;
+        this.populationAccepting = true;
+        this.autoDispose = true;
+        this.pushViews();
+      },
+      changed: () => {
+        if (this.disposed) return;
+        for (const seat of names) if (!population.has(seat)) {
+          if (![...this.seats.values()].includes(seat) && !this.adminBots.has(seat)) this.seatNames.delete(seat);
+          names.delete(seat);
+        }
+        for (const seat of population.seats()) { names.add(seat); this.seatNames.set(seat, population.name(seat)!); }
+        const playable = this.populationCanPlay();
+        const resumed = playable && !wasPlayable;
+        wasPlayable = playable;
+        if (!playable) this.pausePopulationTimers();
+        if (!this.game) this.startGameIfReady();
+        else if (resumed) this.afterChange();
+        else if (playable && this.game.matchEnded) this.settleOnce();
+        this.pushViews();
+      },
+    });
+    this.population = population;
+    this.autoDispose = false;
+    this.populationHeartbeat = setInterval(() => {
+      void population.renew().catch((e: any) => console.warn('[population] lease renewal:', e?.message));
+    }, 10000);
+    this.populationHeartbeat.unref?.();
+    return population;
+  }
+
+  private populationCanPlay(): boolean { return !this.disposed && (!this.population?.size || this.population.canPlay); }
+  /** Server-only invite lookup. Never trust a requested room, seat or user ID from a client payload. */
+  populationInviteSeat(uid: string): number {
+    if (!uid || !this.population || !this.populationAccepting || !this.populationCanPlay() || this.game || this.entryStarting) return -1;
+    if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))) return -1;
+    const occupied = this.occupiedSeats();
+    return this.humanSeats.find(s => !occupied.has(s)) ?? -1;
+  }
+  private occupiedSeats(): Set<number> {
+    return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
+  }
+  private pausePopulationTimers() {
+    this.clearTurnTimers();
+    this.turnDeadlineAt = 0;
+    if (this.gameTimer) { clearTimeout(this.gameTimer); this.gameTimer = null; }
+  }
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar
 
   onCreate(options: any) {
@@ -121,13 +195,15 @@ export class TavlaRoom extends Room {
     rules.targetScore = normalizeRoomOption(rules.targetScore, [1, 3, 5, 7], DEFAULT_TAVLA_RULES.targetScore, 'tavla_target');
     rules.turnTimerSeconds = normalizeRoomOption(rules.turnTimerSeconds, [30, 45, 60], DEFAULT_TAVLA_RULES.turnTimerSeconds, 'tavla_turn');
 
-    this.bet = normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'tavla');
+    this.bet = populationBetOption(options) ?? normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'tavla');
     this.cfg = { seed, names, botSeats, rules };
+    attachPopulationBinding(options, this);
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
     this.setMetadata({ game: 'tavla', mode, table: tableNo, humans: this.humanSeats.length });
 
     // Oyun komutları: {t:'roll'} | {t:'move', from, die}  (from: 0-23, -1 = kırık)
     this.onMessage('cmd', (client, raw) => {
+      if (!this.populationCanPlay()) { client.send('moveError', { code: 'population_paused', message: 'Masa baglantisi yenileniyor.' }); return; }
       const seat = this.seats.get(client.sessionId);
       if (seat == null || !this.game) return;
       if (!payloadWithinLimit(raw, 16 * 1024) || !this.messageGuard.allow(client.sessionId, 'cmd', 12, 1000)) {
@@ -243,6 +319,7 @@ export class TavlaRoom extends Room {
 
     // YONETICI bot yerlestirme (kullanici istegi): admin beklerken bos koltuga bot atar.
     this.onMessage('adminAddBot', (client, raw) => {
+      if (this.population || this.entryStarting) return;
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
       if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
@@ -257,6 +334,7 @@ export class TavlaRoom extends Room {
       this.pushViews();
     });
     this.onMessage('adminRemoveBot', (client, raw) => {
+      if (this.population || this.entryStarting) return;
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
       if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
@@ -285,6 +363,7 @@ export class TavlaRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    requirePopulationClient(this.population, options);
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
     if (existing) {
@@ -298,8 +377,9 @@ export class TavlaRoom extends Room {
       this.pushViews();
       return;
     }
-    const taken = new Set(this.seats.values());
-    const spectate = options?.spectate === true || options?.spectate === 'true';
+    const taken = this.occupiedSeats();
+    const spectate = this.entryStarting || !!(this.population && (this.game || !uid))
+      || options?.spectate === true || options?.spectate === 'true';
     const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
     const seat = decision.seat;
     if (seat == null) {
@@ -330,6 +410,9 @@ export class TavlaRoom extends Room {
   }
 
   private async trySit(client: Client, rawSeat: any, options: any) {
+    if (this.entryStarting || (this.population && !authUserIdFromClient(client))) {
+      client.send('sitError', { reason: 'Masa su anda katilima uygun degil.' }); return;
+    }
     if (this.seats.has(client.sessionId)) return;
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
     const uid = authUserIdFromClient(client);
@@ -339,7 +422,7 @@ export class TavlaRoom extends Room {
       this.pushViews();
       return;
     }
-    const taken = new Set(this.seats.values());
+    const taken = this.occupiedSeats();
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
     let seat: number;
@@ -363,7 +446,8 @@ export class TavlaRoom extends Room {
   }
 
   private startGameIfReady() {
-    if (this.game || this.startTimer || this.seats.size + this.adminBots.size < this.humanSeats.length) return;
+    if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game || this.startTimer
+      || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) return;
     this.startAt = Date.now();
     this.pushViews();
     if (this.startTick) clearInterval(this.startTick);
@@ -371,14 +455,20 @@ export class TavlaRoom extends Room {
     this.startTimer = setTimeout(async () => {
       if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
       this.startTimer = null;
-      if (this.seats.size + this.adminBots.size < this.humanSeats.length) { this.pushViews(); return; }
+      if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game
+        || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) { this.pushViews(); return; }
+      this.entryStarting = true;
+      try {
       const entryUsers = new Map(this.seatUsers);
+      const rewardsEligible = allHumanStartingRoster(2, entryUsers, [...this.adminBots.keys(), ...(this.population?.seats() ?? [])]);
       const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 2, teamMode: false, realSeats: entryUsers.size });
-      const entry = await deductEntry(entryUsers, this.bet, 'tavla', entryHouse);
+      const entry = this.population?.size ? await this.beginPopulationEntry(entryUsers)
+        : await deductEntry(entryUsers, this.bet, rewardsEligible ? 'tavla' : undefined, entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+      this.matchRewardsEligible = rewardsEligible;
       this.entryCanakCharged = true;
       this.refreshCanak();
-      this.cfg.botSeats = [...this.adminBots.keys()]; // yönetici botları motorun bot koltukları
+      this.cfg.botSeats = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
       this.game = createTavlaGame(this.cfg);
       this.matchProgressionKey = `tavla:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
       for (const [seat, name] of this.seatNames) {
@@ -392,7 +482,23 @@ export class TavlaRoom extends Room {
       this.canakGame = -1;
       console.log('[TavlaRoom] oyun başladı');
       this.afterChange();
+      } catch (e: any) {
+        console.error('[TavlaRoom] entry failed:', e?.message);
+        if (!this.game && this.population?.activeMatch) {
+          try { await this.population.finish(null); } catch (refundError: any) { console.error('[population] refund pending:', refundError?.message); }
+        }
+        if (!this.disposed) this.abortEntryStart([]);
+      } finally { this.entryStarting = false; }
     }, this.START_MS);
+  }
+
+  private async beginPopulationEntry(humans: Map<number, string>): Promise<{ ok: boolean; failedSeats: number[] }> {
+    if (!this.population || this.adminBots.size) throw new Error('population_roster_invalid');
+    await this.population.begin(humans, false);
+    const unchanged = !this.disposed && humans.size === this.seatUsers.size
+      && [...humans].every(([seat, uid]) => this.seatUsers.get(seat) === uid);
+    if (!unchanged) { await this.population.finish(null); return { ok: false, failedSeats: [] }; }
+    return { ok: true, failedSeats: [] };
   }
 
   private abortEntryStart(failedSeats: number[]) {
@@ -538,6 +644,7 @@ export class TavlaRoom extends Room {
 
   /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */
   private scheduleBotOnlyClose() {
+    if (this.population?.size && !this.population.isDisposed) return;
     if (this.closingBotOnly || this.seats.size > 0) return;
     this.closingBotOnly = true;
     setTimeout(() => {
@@ -567,6 +674,7 @@ export class TavlaRoom extends Room {
   private refreshCanak() { fetchCanak('tavla').then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
 
   private maybeCanak() {
+    if (!this.matchRewardsEligible) return;
     if (!this.game || this.canakGame === this.game.gameNumber) return;
     this.canakGame = this.game.gameNumber;
     // Ücretsiz/antrenman masası (bahis 0) çanağı PATLATAMAZ — sürpriz ekonomi sızıntısı olmaz.
@@ -590,6 +698,7 @@ export class TavlaRoom extends Room {
   /* ── OYUN AKIŞI: her değişimden sonra tek yerden zamanla ── */
 
   private afterChange() {
+    if (!this.populationCanPlay()) { this.pausePopulationTimers(); this.pushViews(); return; }
     // SIRA ÖNEMLİ: önce zamanlayıcı (turnDeadlineAt) KURULUR, sonra push — aksi halde view
     // eski deadline ile gider (sayaç insan sırasında çıkmaz / yanlış koltukta görünür).
     if (!this.game) { this.pushViews(); return; }
@@ -603,7 +712,7 @@ export class TavlaRoom extends Room {
       if (!this.gameTimer) {
         this.gameTimer = setTimeout(() => {
           this.gameTimer = null;
-          if (!this.game || this.game.matchEnded) return;
+          if (!this.game || this.game.matchEnded || !this.populationCanPlay()) return;
           startNextGame(this.game);
           this.afterChange();
         }, this.GAME_END_MS);
@@ -621,6 +730,7 @@ export class TavlaRoom extends Room {
   }
 
   private scheduleTurn() {
+    if (!this.populationCanPlay()) return;
     if (!this.game || this.game.gameEnded || this.game.matchEnded) return;
     const responder = this.game.pendingResign >= 0 ? 1 - this.game.pendingResign
       : this.game.pendingDouble >= 0 ? 1 - this.game.pendingDouble : this.game.turn;
@@ -641,6 +751,7 @@ export class TavlaRoom extends Room {
         this.turnDeadlineAt = 0;
         this.botTimer = setTimeout(() => {
           this.botTimer = null;
+          if (!this.populationCanPlay()) return;
           if (!this.game || this.game.pendingResign < 0) { this.afterChange(); return; }
           const accept = shouldAcceptResign(this.game, responder);
           applyTavlaMove(this.game, responder, { t: accept ? 'acceptResign' : 'declineResign' });
@@ -651,6 +762,7 @@ export class TavlaRoom extends Room {
         this.turnDeadlineAt = Date.now() + ms;
         this.humanTimer = setTimeout(() => {
           this.humanTimer = null;
+          if (!this.populationCanPlay()) return;
           if (!this.game || this.game.pendingResign < 0) { this.afterChange(); return; }
           applyTavlaMove(this.game, responder, { t: 'acceptResign' }); // süre doldu → oyun olsun
           this.logEvent(`${this.nameOfSeat(responder)} süresi doldu — teslim kabul sayıldı`);
@@ -669,6 +781,7 @@ export class TavlaRoom extends Room {
         this.turnDeadlineAt = 0;
         this.botTimer = setTimeout(() => {
           this.botTimer = null;
+          if (!this.populationCanPlay()) return;
           if (!this.game || this.game.pendingDouble < 0) { this.afterChange(); return; }
           const take = shouldTakeDouble(this.game, responder);
           applyTavlaMove(this.game, responder, { t: take ? 'takeDouble' : 'dropDouble' });
@@ -679,6 +792,7 @@ export class TavlaRoom extends Room {
         this.turnDeadlineAt = Date.now() + ms;
         this.humanTimer = setTimeout(() => {
           this.humanTimer = null;
+          if (!this.populationCanPlay()) return;
           if (!this.game || this.game.pendingDouble < 0) { this.afterChange(); return; }
           applyTavlaMove(this.game, responder, { t: 'dropDouble' }); // süre doldu → RED
           this.logEvent(`${this.nameOfSeat(responder)} süresi doldu — katlama RED sayıldı`);
@@ -696,6 +810,7 @@ export class TavlaRoom extends Room {
       // Bot ADIM ADIM: önce (yerinde görürse) KATLAMA, sonra zar (görünür), sonra tek tek hamleler.
       this.botTimer = setTimeout(() => {
         this.botTimer = null;
+        if (!this.populationCanPlay()) return;
         if (!this.game || this.game.gameEnded || this.game.turn !== turn) { this.afterChange(); return; }
         if (this.game.phase === 'roll') {
           if (shouldOfferDouble(this.game, turn)) applyTavlaMove(this.game, turn, { t: 'double' });
@@ -712,6 +827,7 @@ export class TavlaRoom extends Room {
       this.turnDeadlineAt = Date.now() + ms;
       this.humanTimer = setTimeout(() => {
         this.humanTimer = null;
+        if (!this.populationCanPlay()) return;
         if (!this.game || this.game.gameEnded || this.game.turn !== turn) { this.afterChange(); return; }
         autoTavlaMove(this.game, turn);
         this.logEvent(`${this.nameOfSeat(turn)} süresi doldu — otomatik oynandı`);
@@ -725,6 +841,12 @@ export class TavlaRoom extends Room {
     this.settled = true;
     const winnerSeat = this.game.matchScore[0]! >= this.game.rules.targetScore ? 0 : 1;
     this.rematchVotes.clear();
+    if (this.population?.hasMatch) {
+      this.settlePromise = this.population.finish(winnerSeat)
+        .then(() => this.pushViews())
+        .catch((e: any) => { this.settled = false; console.error('[population] settlement pending:', e?.message); });
+      return;
+    }
     this.settlePromise = settleMatch({
       seatUsers: this.seatUsers,
       winnerSeat,
@@ -733,6 +855,7 @@ export class TavlaRoom extends Room {
       totalSeats: 2, // tavla 1v1 — pot = 2×bet (bot bahsi sanal; ECONOMY §4)
       game: 'tavla', // çanak hedefi
       entryHousePaid: this.entryCanakCharged,
+      matchRewardsEligible: this.matchRewardsEligible,
       progressionKey: this.matchProgressionKey,
     }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
@@ -780,6 +903,7 @@ export class TavlaRoom extends Room {
   }
 
   private prepareRematchCountdown() {
+    this.population?.resetMatch();
     this.rematchVotes.clear();
     this.clearTurnTimers();
     if (this.startTimer) { clearTimeout(this.startTimer); this.startTimer = null; }
@@ -790,6 +914,7 @@ export class TavlaRoom extends Room {
     this.settled = false;
     this.settlePromise = null;
     this.entryCanakCharged = false;
+    this.matchRewardsEligible = false;
     this.canakGame = -1;
     this.abandoned.clear();
     this.cfg.seed = Date.now() % 2147483647;
@@ -805,15 +930,16 @@ export class TavlaRoom extends Room {
 
   private pushViews() {
     const waiting = !this.game;
-    const starting = waiting && this.seats.size + this.adminBots.size >= this.humanSeats.length;
+    const starting = waiting && this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length;
     const filled = new Set(this.seats.values());
     const seated = [0, 1].map((s) => ({
       seat: s,
       human: this.humanSeats.includes(s),
-      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s)) : true,
+      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s) || (this.population?.has(s) ?? false)) : true,
       name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
       bot: this.adminBots.has(s) || undefined,
     }));
+    for (const row of seated) this.population?.decorate(row);
     const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
     const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
     const specRoles = specClients.map((c) => {
@@ -829,6 +955,7 @@ export class TavlaRoom extends Room {
           s.uid = this.seatUsers.get(s.seat) ?? ''; // profil tıklaması (public kimlik)
           s.abandoned = this.abandoned.has(s.seat);
           if (s.abandoned) s.isBot = true;
+          this.population?.decorate(s);
         }
       v.spectators = specList;
       v.spectatorRoles = specRoles;
@@ -856,6 +983,9 @@ export class TavlaRoom extends Room {
   }
 
   onDispose() {
+    this.disposed = true;
+    if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }
+    this.pausePopulationTimers();
     this.presenceLeases.dispose();
     this.messageGuard.clear();
     this.giftBusy.clear();
@@ -864,5 +994,6 @@ export class TavlaRoom extends Room {
     if (this.gameTimer) clearTimeout(this.gameTimer);
     this.clearTurnTimers();
     console.log('[TavlaRoom] dispose');
+    return this.population?.dispose();
   }
 }

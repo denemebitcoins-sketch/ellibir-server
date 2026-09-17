@@ -13,6 +13,10 @@ import { ellibirCanakChance } from '../canakPolicy';
 import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
 import { ellibirRuntime } from '../cardRoomRuntime';
+import { allHumanStartingRoster } from '../matchRewardEligibility';
+import { PopulationRoomSession } from '../botPopulation/roomSession';
+import { PopulationStorage } from '../botPopulation/storage';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient } from '../botPopulation/roomBinding';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -62,6 +66,7 @@ export class EllibirRoom extends Room {
   private bet = 0;                             // masa bahsi (maç sonu settle için)
   private settled = false;                     // çift settle koruması
   private entryCanakCharged = false;           // komisyon/çanak payı maç başında işlendi
+  private matchRewardsEligible = false;
   private settlePromise: Promise<void> | null = null;
   private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private rematchVotes = new Set<number>();    // maç sonu TEKRAR OYNA diyen insan koltukları
@@ -72,6 +77,77 @@ export class EllibirRoom extends Room {
   private readonly messageGuard = new RoomMessageGuard();
   private readonly giftBusy = new Set<string>();
   private closingBotOnly = false;
+  private population: PopulationRoomSession | null = null;
+  private populationHeartbeat: NodeJS.Timeout | null = null;
+  private populationAccepting = true;
+  private entryStarting = false;
+  private disposed = false;
+
+  // Process-only capability. Never read storage/owner/character options from client messages.
+  bindPopulation(storage: PopulationStorage, owner: string, roomKey: string): PopulationRoomSession {
+    if (!this.cfg || this.game || this.entryStarting || this.population || this.adminBots.size) throw new Error('population_bind_unavailable');
+    const populationNames = new Set<number>();
+    let wasPlayable = true;
+    const population = new PopulationRoomSession(storage, owner, roomKey, this.gameKey === 'ihale' ? 'ihale' : '51', this.bet, {
+      canReserve: seat => this.populationAccepting && !this.disposed && !this.game && !this.entryStarting
+        && ![...this.seats.values()].includes(seat) && !this.adminBots.has(seat),
+      canRemove: () => !this.disposed && !this.game && !this.entryStarting && this.seats.size === 0,
+      status: () => ({ phase: !this.game ? 'waiting' : this.game.phase === 'matchEnded' ? 'ended' : 'playing',
+        humanSeats: [...this.seats.values()], occupiedSeats: [...this.occupiedSeats()], starting: this.entryStarting, disposed: this.disposed }),
+      accepting: value => { this.populationAccepting = value; },
+      chat: payload => this.broadcast('chat',payload),
+      detached: seats => {
+        for (const seat of seats) if (![...this.seats.values()].includes(seat)) this.seatNames.delete(seat);
+        if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }
+        this.population = null;
+        this.populationAccepting = true;
+        this.autoDispose = true;
+        this.pushViews();
+      },
+      changed: () => {
+        if (this.disposed) return;
+        for (const seat of populationNames) if (!population.has(seat)) {
+          if (![...this.seats.values()].includes(seat) && !this.adminBots.has(seat)) this.seatNames.delete(seat);
+          populationNames.delete(seat);
+        }
+        for (const seat of population.seats()) { populationNames.add(seat); this.seatNames.set(seat, population.name(seat)!); }
+        const playable = this.populationCanPlay();
+        const resumed = playable && !wasPlayable;
+        wasPlayable = playable;
+        if (!playable) {
+          this.clearTurnTimer();
+          this.clearSorguTimer();
+        }
+        if (!this.game) this.startGameIfReady();
+        // Routine heartbeats must not restart a human's turn/sorgu countdown.
+        else if (resumed) {
+          if (this.gameKey === 'ihale') this.ihaleDeadlineRevision = -1;
+          this.pushViews();
+          void this.runEngine();
+        } else if (playable && this.game.phase === 'matchEnded') this.checkHandEnd();
+        this.pushViews();
+      },
+    });
+    this.population = population;
+    this.autoDispose = false;
+    this.populationHeartbeat = setInterval(() => {
+      void population.renew().catch((e: any) => console.warn('[population] lease renewal:', e?.message));
+    }, 10000);
+    this.populationHeartbeat.unref?.();
+    return population;
+  }
+
+  private populationCanPlay(): boolean { return !this.disposed && (!this.population?.size || this.population.canPlay); }
+  /** Server-only invite lookup. Never trust a requested room, seat or user ID from a client payload. */
+  populationInviteSeat(uid: string): number {
+    if (!uid || !this.population || !this.populationAccepting || !this.populationCanPlay() || this.game || this.entryStarting) return -1;
+    if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))) return -1;
+    const occupied = this.occupiedSeats();
+    return this.humanSeats.find(s => !occupied.has(s)) ?? -1;
+  }
+  private occupiedSeats(): Set<number> {
+    return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
+  }
 
   onCreate(options: any) {
     // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
@@ -139,11 +215,12 @@ export class EllibirRoom extends Room {
     rules.turnTimerSeconds = normalizeRoomOption(rules.turnTimerSeconds, [15, 20, 25, 35, 40, 45], DEFAULT_RULES.turnTimerSeconds, 'elliBir_turn');
     rules.openingMinPoints = normalizeRoomOption(rules.openingMinPoints, [51, 81], DEFAULT_RULES.openingMinPoints, 'elliBir_opening');
 
-    this.bet = normalizeRoomBet(options?.bet, [100, 250, 500, 1000, 2500, 5000], 'elliBir');
+    this.bet = populationBetOption(options) ?? normalizeRoomBet(options?.bet, [100, 250, 500, 1000, 2500, 5000], 'elliBir');
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
     // Oyunu HEMEN kurma — tüm insan koltukları dolunca başlat (yoksa bekleyen oyuncu
     // bot'larla oynanmış bir el görür). Şimdilik sadece config sakla.
     this.cfg = { seed, playerNames: names, botSeats, rules };
+    attachPopulationBinding(options, this);
     this.game = null;
     this.setMetadata({ mode, table: tableNo, humans: this.humanSeats.length });
 
@@ -154,6 +231,7 @@ export class EllibirRoom extends Room {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
       if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
+      if (this.population || this.entryStarting) { client.send('sitError', { reason: 'Masa su anda sistem tarafindan yonetiliyor.' }); return; }
       if (this.game) { client.send('sitError', { reason: 'oyun başladı' }); return; }
       const target = Number(raw?.seat);
       if (!Number.isInteger(target) || !this.humanSeats.includes(target)) { client.send('sitError', { reason: 'geçersiz koltuk' }); return; }
@@ -168,6 +246,7 @@ export class EllibirRoom extends Room {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
       if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
+      if (this.population || this.entryStarting) { client.send('sitError', { reason: 'Masa su anda sistem tarafindan yonetiliyor.' }); return; }
       if (this.game) { client.send('sitError', { reason: 'oyun başladı' }); return; }
       const target = Number(raw?.seat);
       if (this.adminBots.delete(target)) {
@@ -181,6 +260,7 @@ export class EllibirRoom extends Room {
     this.onMessage('cmd', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null || !this.game) return;   // oyun henüz başlamadı (rakip bekleniyor)
+      if (!this.populationCanPlay()) { client.send('moveError', { code: 'population_paused', message: 'Masa baglantisi yenileniyor.' }); return; }
       if (!payloadWithinLimit(raw, 16 * 1024) || !this.messageGuard.allow(client.sessionId, 'cmd', 12, 1000)) {
         client.send('moveError', { code: 'rate_limited', message: 'Çok hızlı hamle gönderildi.' });
         return;
@@ -354,6 +434,7 @@ export class EllibirRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    requirePopulationClient(this.population, options);
     if (options?.ihalePilotVersion === 1) this.ihalePilotClients.add(client.sessionId);
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
@@ -369,10 +450,10 @@ export class EllibirRoom extends Room {
       this.pushViews();
       return;
     }
-    const taken = new Set(this.seats.values());
+    const taken = this.occupiedSeats();
     // İZLE ile gelen (spectate:true) → koltuk boş OLSA BİLE oturtma; izleyici kalır.
     // Oturmak için sonradan 'sit' mesajı gönderilir. (HEMEN OYNA/davet-kabul spectate yollamaz → otomatik oturur.)
-    const spectate = options?.spectate === true || options?.spectate === 'true';
+    const spectate = options?.spectate === true || options?.spectate === 'true' || this.entryStarting || !!(this.population && (this.game || !uid));
     const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
     const seat = decision.seat;
     if (seat == null) {
@@ -389,6 +470,7 @@ export class EllibirRoom extends Room {
         });
       }
       console.log(`[onJoin] izleyici, izleyici sayısı=${this.spectators.size}`);
+      if (this.population && !uid) client.send('sitError', { reason: 'Oturmak icin baglantiniz dogrulanmali.' });
       this.pushViews();
       return;
     }
@@ -407,15 +489,17 @@ export class EllibirRoom extends Room {
   /** İzleyiciyi/koltuksuzu boş bir koltuğa oturt ('sit' mesajı). Oyun başlamadan (game==null) izinli. */
   private async trySit(client: Client, rawSeat: any, options: any) {
     if (this.seats.has(client.sessionId)) return; // zaten oturuyor
+    if (this.entryStarting) { client.send('sitError', { reason: 'Oyun hazirlaniyor.' }); return; }
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
     const uid = authUserIdFromClient(client);
+    if (this.population && !uid) { client.send('sitError', { reason: 'Oturmak icin baglantiniz dogrulanmali.' }); return; }
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
     if (existing) {
       client.send('sitError', { reason: 'Bu hesap zaten masada; devam eden oyuna geri dön.' });
       this.pushViews();
       return;
     }
-    const taken = new Set(this.seats.values());
+    const taken = this.occupiedSeats();
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
 
@@ -446,7 +530,8 @@ export class EllibirRoom extends Room {
 
   /// Tüm insan koltukları (gerçek + yönetici botları) dolunca 7sn geri sayım → oyunu kur. Geri sayımda biri çıkarsa iptal.
   private startGameIfReady() {
-    if (this.game || this.startTimer || this.seats.size + this.adminBots.size < this.humanSeats.length) return;
+    if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game || this.startTimer
+      || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) return;
     this.startAt = Date.now();
     this.pushViews(); // "oyun başlıyor" overlay (dolu ama henüz başlamadı)
     if (this.startTick) clearInterval(this.startTick);
@@ -454,29 +539,51 @@ export class EllibirRoom extends Room {
     this.startTimer = setTimeout(async () => {
       if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
       this.startTimer = null;
-      if (this.seats.size + this.adminBots.size < this.humanSeats.length) { this.pushViews(); return; } // bu arada çıktı
-      const entryUsers = new Map(this.seatUsers);
-      const rules: any = this.cfg?.rules ?? {};
-      const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
-      const oneHandEntry = shouldDeferEntryHouse(rules.totalHands);
-      const entry = await deductEntry(entryUsers, this.bet, oneHandEntry ? undefined : this.gameKey, entryHouse);
-      if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
-      this.entryCanakCharged = !oneHandEntry;
-      if (!oneHandEntry) this.refreshCanak();
-      // Yönetici botları motorun bot koltuklarına eklenir (runEngine onları oynatır).
-      this.cfg.botSeats = [...this.adminBots.keys()];
-      this.game = this.runtime.create(this.cfg);
-      this.matchProgressionKey = `${this.gameKey}:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
-      for (const [seat, name] of this.seatNames) {
-        const p = this.game.players.find((pl: any) => pl.seat === seat);
-        if (p && name) p.name = name;
-      }
-      this.resetHandOrder();
-      console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
-      this.settled = false;
-      this.pushViews();
-      this.runEngine();
+      if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) { this.pushViews(); return; }
+      this.entryStarting = true;
+      try {
+        const entryUsers = new Map(this.seatUsers);
+        const rewardsEligible = allHumanStartingRoster(4, entryUsers, [...this.adminBots.keys(), ...(this.population?.seats() ?? [])]);
+        const rules: any = this.cfg?.rules ?? {};
+        const entryHouse = entryHouseAmount({ bet: this.bet, totalSeats: 4, teamMode: !!rules.teamMode, realSeats: entryUsers.size });
+        const oneHandEntry = shouldDeferEntryHouse(rules.totalHands);
+        const entry = this.population?.size
+          ? await this.beginPopulationEntry(entryUsers, !!rules.teamMode)
+          : await deductEntry(entryUsers, this.bet, oneHandEntry || !rewardsEligible ? undefined : this.gameKey, entryHouse);
+        if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+        this.matchRewardsEligible = rewardsEligible;
+        this.entryCanakCharged = !oneHandEntry;
+        if (!oneHandEntry) this.refreshCanak();
+        this.cfg.botSeats = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
+        this.game = this.runtime.create(this.cfg);
+        this.matchProgressionKey = `${this.gameKey}:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
+        for (const [seat, name] of this.seatNames) {
+          const p = this.game.players.find((pl: any) => pl.seat === seat);
+          if (p && name) p.name = name;
+        }
+        this.resetHandOrder();
+        console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
+        this.settled = false;
+        this.pushViews();
+        this.runEngine();
+      } catch (e: any) {
+        console.error('[EllibirRoom] entry failed:', e?.message);
+        if (this.population?.activeMatch && !this.game) await this.population.finish(null).catch((error: any) => console.error('[population] refund pending:', error?.message));
+        this.abortEntryStart([]);
+      } finally { this.entryStarting = false; }
     }, this.START_MS);
+  }
+
+  private async beginPopulationEntry(users: Map<number, string>, team: boolean): Promise<{ ok: boolean; failedSeats: number[] }> {
+    const population = this.population!;
+    if (this.adminBots.size) throw new Error('mixed_virtual_population_bots');
+    await population.begin(users, team);
+    const unchanged = users.size === this.seatUsers.size && [...users].every(([seat, uid]) => this.seatUsers.get(seat) === uid);
+    if (this.disposed || !unchanged) {
+      await population.finish(null);
+      return { ok: false, failedSeats: [] };
+    }
+    return { ok: true, failedSeats: [] };
   }
 
   private abortEntryStart(failedSeats: number[]) {
@@ -657,6 +764,7 @@ export class EllibirRoom extends Room {
 
   /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */
   private scheduleBotOnlyClose() {
+    if (this.population?.size && !this.population.isDisposed) return;
     if (this.closingBotOnly || this.seats.size > 0) return;
     this.closingBotOnly = true;
     setTimeout(() => {
@@ -677,6 +785,7 @@ export class EllibirRoom extends Room {
   // O koltukta KARAR verecek bağlı insan var mı? Terk edilmiş koltuk → bot oynar.
   private isHumanTurn(seat: number): boolean {
     if (!this.humanSeats.includes(seat)) return false;
+    if (this.population?.has(seat)) return false;
     if (this.adminBots.has(seat)) return false; // YÖNETİCİ botu: motor oynatır (insan değil)
     if (this.gameKey === 'ihale' && this.ihaleAutoPilot.has(seat)) return false;
     // SÜRE AŞIMI ZORLAMASI: bu koltuk için TEK adım bot oynanacaksa "insan değil" say (stepOnce
@@ -707,7 +816,7 @@ export class EllibirRoom extends Room {
 
   // Bot/sorgu adımlarını TEK TEK, aralarında gecikmeyle oynat ve her adımı push et.
   private async runEngine() {
-    if (this.busy) return;
+    if (this.busy || !this.populationCanPlay()) return;
     this.busy = true;
     this.clearTurnTimer(); // motor çalışırken tur timer'ı fire etmesin (loop sonunda yeniden kurulur)
     try {
@@ -716,7 +825,7 @@ export class EllibirRoom extends Room {
         // ÖNCE bekle: bir önceki hamlenin (insanın ıskartası dahil) uçuş animasyonu bitsin,
         // sonra bot oynasın. Aksi halde sen atarken sıradaki bot kartın havadayken çekiyor.
         await new Promise((res) => setTimeout(res, this.game?.ihale?.phase === 'trickEnd' ? 650 : this.STEP_MS));
-        if (!this.game) break;   // bekleme sırasında game null olduysa (yarış) yine dur
+        if (!this.game || !this.populationCanPlay()) break;
         const r = this.runtime.step(this.game, (s) => this.isHumanTurn(s));
         if (!r.moved) {
           console.log(`[runEngine] DUR phase=${this.game.phase} currentSeat=${this.game.currentSeat} sorgu=${!!this.game.sorgu} humans=${this.humanSeats}`);
@@ -734,6 +843,7 @@ export class EllibirRoom extends Room {
       this.busy = false;
       this.forceBotSeat = null; // güvenlik: her runEngine sonunda zorlama temizlenir (sonsuz zorla yok)
     }
+    if (!this.populationCanPlay()) return;
     this.checkHandEnd();
     // SORGU ZAMAN AŞIMI (RULES.md 1.11): karar bir İNSANDA bekliyorsa 15 sn sonra
     // otomatik VER (applySorguTimeout). AFK ile bedava "verme" istismarı kapanır,
@@ -764,6 +874,7 @@ export class EllibirRoom extends Room {
   private refreshCanak() { fetchCanak(this.gameKey).then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
 
   private maybeCanak() {
+    if (!this.matchRewardsEligible) return;
     if (this.gameKey === 'ihale') return; // Ihale has no meld/okey finish jackpot trigger.
     const hr: any = this.game?.lastHandResult;
     if (!this.game || !hr) return;
@@ -801,6 +912,14 @@ export class EllibirRoom extends Room {
       this.rematchVotes.clear();
       const r: any = this.game.rules ?? {};
       const scoreValues = this.game.players.map((p: any) => Number(p.totalScore));
+      if (this.population?.hasMatch) {
+        const noContest = this.gameKey !== 'ihale' && isOneRoundNoContest({ totalRounds: r.totalHands,
+          handWinnerSeat: this.game.lastHandResult?.winnerSeat, scores: scoreValues });
+        this.settlePromise = this.population.finish(noContest ? null : Number(this.game.matchWinnerSeat))
+          .then(() => this.pushViews())
+          .catch((e: any) => { this.settled = false; console.error('[population] settlement pending:', e?.message); });
+        return;
+      }
       if (this.gameKey !== 'ihale' && isOneRoundNoContest({
         totalRounds: r.totalHands,
         handWinnerSeat: this.game.lastHandResult?.winnerSeat,
@@ -822,6 +941,7 @@ export class EllibirRoom extends Room {
         scores: new Map(this.game.players.map((p: any) => [p.seat, p.totalScore])), // kademeli sıralama için
         game: this.gameKey,
         entryHousePaid: this.entryCanakCharged,
+        matchRewardsEligible: this.matchRewardsEligible,
         progressionKey: this.matchProgressionKey,
       }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
         .catch((e) => console.error('[settle] hata:', e?.message));
@@ -877,6 +997,7 @@ export class EllibirRoom extends Room {
   }
 
   private prepareRematchCountdown() {
+    this.population?.resetMatch();
     this.ihaleTimeoutStreak.clear();
     this.ihaleAutoPilot.clear();
     this.rematchVotes.clear();
@@ -890,6 +1011,7 @@ export class EllibirRoom extends Room {
     this.settled = false;
     this.settlePromise = null;
     this.entryCanakCharged = false;
+    this.matchRewardsEligible = false;
     this.canakHand = -1;
     this.forceBotSeat = null;
     this.cfg.seed = Math.floor(Math.random() * 1_000_000_000);
@@ -918,6 +1040,7 @@ export class EllibirRoom extends Room {
    */
   private armSorguTimeoutIfNeeded() {
     this.clearSorguTimer();
+    if (!this.populationCanPlay()) return;
     const decider = this.sorguDeciderSeat();
     if (decider == null || !this.game?.sorgu) return;
     const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
@@ -925,7 +1048,7 @@ export class EllibirRoom extends Room {
     this.sorguDeadlineAt = Date.now() + this.SORGU_MS;
     this.sorguTimer = setTimeout(() => {
       this.sorguTimer = null;
-      if (!this.game?.sorgu) return;            // bu arada cevaplandıysa boşver
+      if (!this.game?.sorgu || !this.populationCanPlay()) return;
       try {
         this.game = applySorguTimeout(this.game); // RULES.md 1.11: varsayılan VER
         this.pushViews();
@@ -962,6 +1085,7 @@ export class EllibirRoom extends Room {
    */
   private armTurnTimeoutIfNeeded() {
     this.clearTurnTimer();
+    if (!this.populationCanPlay()) return;
     if (!this.game || this.game.sorgu) return;                 // sorgu → ayrı timer
     const phase = this.game.phase;
     if (phase !== 'draw' && phase !== 'action') return;        // yalnız oynanabilir fazlar
@@ -970,7 +1094,7 @@ export class EllibirRoom extends Room {
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
       // Bu arada insan oynadıysa / faz değiştiyse / sorgu açıldıysa boşver.
-      if (!this.game || this.game.sorgu) return;
+      if (!this.game || this.game.sorgu || !this.populationCanPlay()) return;
       const ph = this.game.phase;
       if ((ph !== 'draw' && ph !== 'action') || this.runtime.controller(this.game) !== seat) return;
       if (!this.isHumanTurn(seat)) return;                      // bu arada abandoned oldu → runEngine halleder
@@ -999,6 +1123,7 @@ export class EllibirRoom extends Room {
   }
 
   private continueHand() {
+    if (!this.populationCanPlay()) return;
     if (this.handEndTimer) {
       clearTimeout(this.handEndTimer);
       this.handEndTimer = null;
@@ -1018,16 +1143,17 @@ export class EllibirRoom extends Room {
     }
     // Oyun henüz başlamadıysa overlay + boş masa (emptyView).
     const waiting = !this.game;
-    const starting = waiting && this.seats.size + this.adminBots.size >= this.humanSeats.length; // dolu, 7sn geri sayım
+    const starting = waiting && this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length;
     const filled = new Set(this.seats.values());
     // Beklerken masada oturanları göster: insan koltukları (dolu=oturdu, boş=bekleniyor) + botlar.
     const seated = [0, 1, 2, 3].map((s) => ({
       seat: s,
       human: this.humanSeats.includes(s),
-      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s)) : true,  // bot koltukları "dolu"
+      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s) || (this.population?.has(s) ?? false)) : true,
       name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
       bot: this.adminBots.has(s) || undefined, // YÖNETİCİ botu: client "BOT" rozeti + kaldır butonu gösterir
     }));
+    for (const row of seated) this.population?.decorate(row);
     // AKTİF izleyiciler: koltuksuz (seat yok) bağlı client'lar → adları (çıkan izleyici otomatik düşer).
     const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
     const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
@@ -1038,7 +1164,7 @@ export class EllibirRoom extends Room {
     const specGenders = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.gender ?? '');
     // Koltuk listesine cinsiyet/rol + UID enjekte et (isim rengi/rozet + masa-içi MiniProfile:
     // profil kartından MESAJ/ARKADAŞ akışı uid ister — okey/tavla ile parite).
-    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; } s.uid = this.seatUsers.get(s.seat) ?? ''; } };
+    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; } s.uid = this.seatUsers.get(s.seat) ?? ''; this.population?.decorate(s); } };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) {
@@ -1090,6 +1216,8 @@ export class EllibirRoom extends Room {
   }
 
   onDispose() {
+    this.disposed = true;
+    if (this.populationHeartbeat) clearInterval(this.populationHeartbeat);
     this.presenceLeases.dispose();
     this.messageGuard.clear();
     this.giftBusy.clear();
@@ -1098,5 +1226,6 @@ export class EllibirRoom extends Room {
     if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
     this.clearSorguTimer();
     this.clearTurnTimer();
+    return this.population?.dispose();
   }
 }

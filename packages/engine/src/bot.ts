@@ -1,7 +1,7 @@
 import type { Card, CardId, Meld, Move, NormalCard, PlayerView, Rank, Suit } from './types';
 import { isNormalCard } from './types';
 import type { MoveProvider } from './provider';
-import { canExtend, canRetrieveJoker, canTakeDiscardView } from './game';
+import { canExtend, canRetrieveJoker, canTakeDiscardView, evaluateDiscard } from './game';
 import { analyzePair, handCardPenalty } from './melds';
 import { analyzeHand, bestOpening, bestPairOpening } from './insight';
 import { solveHand } from './solver';
@@ -22,6 +22,8 @@ export interface BotOptions {
   difficulty?: BotDifficulty;
   profile?: BotProfile;
 }
+
+const runRank = (rank: number) => rank === 1 ? 14 : rank;
 
 /**
  * Sezgisel bot — iki eksen:
@@ -185,7 +187,7 @@ export class HeuristicBot implements MoveProvider {
     const bySuit = new Map<Suit, number[]>();
     for (const c of rest) {
       const arr = bySuit.get(c.suit) ?? [];
-      arr.push(c.rank);
+      arr.push(runRank(c.rank));
       bySuit.set(c.suit, arr);
     }
     for (const arr of bySuit.values()) {
@@ -239,7 +241,7 @@ export class HeuristicBot implements MoveProvider {
       if (mate && hand.length - 2 >= 1) return { type: 'meld', cards: [card.id, mate.id] };
       if (!view.ciftIslekUsed) {
         const target = view.melds.find((m) => canExtend(m, card, view.rules));
-        if (target && hand.length > 2) {
+        if (target && hand.length > 1) {
           return { type: 'extend', meldId: target.id, cardId: card.id };
         }
         const jokerMeld = view.melds.find((m) => canRetrieveJoker(m, card, view.rules));
@@ -254,7 +256,7 @@ export class HeuristicBot implements MoveProvider {
     );
     if (layWithCard) return { type: 'meld', cards: layWithCard.map((c) => c.id) };
     const target = view.melds.find((m) => canExtend(m, card, view.rules));
-    if (target && hand.length > 2) return { type: 'extend', meldId: target.id, cardId: card.id };
+    if (target && hand.length > 1) return { type: 'extend', meldId: target.id, cardId: card.id };
     const jokerMeld = view.melds.find((m) => canRetrieveJoker(m, card, view.rules));
     if (jokerMeld) return { type: 'retrieveJoker', meldId: jokerMeld.id, cardId: card.id };
     return null;
@@ -290,6 +292,12 @@ export class HeuristicBot implements MoveProvider {
       const pair = this.findIdenticalPair(hand, rules);
       if (pair && hand.length - 2 >= 1) {
         return { type: 'meld', cards: pair };
+      }
+      if (!view.ciftIslekUsed && hand.length > 1) {
+        for (const card of [...hand].sort((a, b) => handCardPenalty(b, rules) - handCardPenalty(a, rules))) {
+          const target = view.melds.find(m => canExtend(m, card, rules));
+          if (target) return { type: 'extend', meldId: target.id, cardId: card.id };
+        }
       }
       return this.chooseDiscard(view);
     }
@@ -455,7 +463,7 @@ export class HeuristicBot implements MoveProvider {
       return taken.some(
         (t) =>
           t.rank === card.rank ||
-          (t.suit === card.suit && Math.abs(t.rank - card.rank) <= 2),
+          (t.suit === card.suit && Math.abs(runRank(t.rank) - runRank(card.rank)) <= 2),
       );
     };
   }
@@ -466,7 +474,12 @@ export class HeuristicBot implements MoveProvider {
     const filtered = view.pickup?.zorunlu
       ? view.hand.filter((c) => c.id !== view.pickup!.cardId)
       : view.hand;
-    const hand = filtered.length > 0 ? filtered : view.hand; // boş kalırsa orijinale dön (güvenlik)
+    const hand = view.hand;
+    const eligible = filtered.length > 0 ? filtered : hand;
+    // Penalties are global, not per priority bucket; preserve duplicate/finish exemptions.
+    const penalties = new Map(eligible.map(c => [c.id, evaluateDiscard(c, hand, view.melds, rules).penalty]));
+    const minimum = Math.min(...penalties.values());
+    const choices = eligible.filter(c => penalties.get(c.id) === minimum);
     const solved = solveHand(hand, rules, 'cards');
     const planned = new Set(solved.melds.flat().map((c) => c.id));
 
@@ -480,7 +493,7 @@ export class HeuristicBot implements MoveProvider {
       for (const b of hand) {
         if (a.id === b.id || !isNormalCard(b)) continue;
         const pair = a.rank === b.rank; // küt ortağı ya da özdeş çift adayı
-        const near = a.suit === b.suit && Math.abs(a.rank - b.rank) <= 2 && a.rank !== b.rank;
+        const near = a.suit === b.suit && Math.abs(runRank(a.rank) - runRank(b.rank)) <= 2 && a.rank !== b.rank;
         if (pair || near) {
           useful.add(a.id);
           break;
@@ -492,9 +505,9 @@ export class HeuristicBot implements MoveProvider {
     const pick = (cards: Card[]): Card | undefined =>
       cards.sort((a, b) => handCardPenalty(b, rules) - handCardPenalty(a, rules))[0];
 
-    const disposable = hand.filter((c) => !useful.has(c.id));
+    const disposable = choices.filter((c) => !useful.has(c.id));
     const safeDisposable = disposable.filter((c) => !dangerous(c));
-    const semiDisposable = hand.filter((c) => !planned.has(c.id) && isNormalCard(c));
+    const semiDisposable = choices.filter((c) => !planned.has(c.id) && isNormalCard(c));
     const safeSemi = semiDisposable.filter((c) => !dangerous(c));
 
     const chosen =
@@ -502,8 +515,8 @@ export class HeuristicBot implements MoveProvider {
       pick(disposable) ??
       pick(safeSemi) ??
       pick(semiDisposable) ??
-      pick(hand.filter(isNormalCard)) ??
-      hand[hand.length - 1]!;
+      pick(choices.filter(isNormalCard)) ??
+      choices[choices.length - 1]!;
 
     return { type: 'discard', cardId: chosen.id };
   }

@@ -14,6 +14,10 @@ import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatS
 import { okeyCanakChance } from '../canakPolicy';
 import { hasLowestScoreTie, isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
+import { allHumanStartingRoster } from '../matchRewardEligibility';
+import { PopulationRoomSession } from '../botPopulation/roomSession';
+import { PopulationStorage } from '../botPopulation/storage';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient } from '../botPopulation/roomBinding';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
 
@@ -77,6 +81,7 @@ export class OkeyRoom extends Room {
   private bet = 0;
   private settled = false;
   private entryCanakCharged = false;
+  private matchRewardsEligible = false;
   private settlePromise: Promise<void> | null = null;
   private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private cfg: any = null;
@@ -88,6 +93,82 @@ export class OkeyRoom extends Room {
   private readonly giftBusy = new Set<string>();
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar (izleyici katıldı vb.)
   private closingBotOnly = false;
+  private population: PopulationRoomSession | null = null;
+  private populationHeartbeat: NodeJS.Timeout | null = null;
+  private populationAccepting = true;
+  private entryStarting = false;
+  private disposed = false;
+
+  // Trusted server capability only, never supplied by client options/messages.
+  bindPopulation(storage: PopulationStorage, owner: string, roomKey: string): PopulationRoomSession {
+    if (!this.cfg || this.game || this.entryStarting || this.population || this.adminBots.size) throw new Error('population_bind_unavailable');
+    const names = new Set<number>();
+    let wasPlayable = true;
+    const population = new PopulationRoomSession(storage, owner, roomKey, normalizeOkeyVariant(this.cfg.rules?.variant), this.bet, {
+      canReserve: seat => this.populationAccepting && !this.disposed && !this.game && !this.entryStarting
+        && ![...this.seats.values()].includes(seat) && !this.adminBots.has(seat),
+      canRemove: () => !this.disposed && !this.game && !this.entryStarting && this.seats.size === 0,
+      status: () => ({ phase: !this.game ? 'waiting' : this.game.matchEnded ? 'ended' : 'playing',
+        humanSeats: [...this.seats.values()], occupiedSeats: [...this.occupiedSeats()], starting: this.entryStarting, disposed: this.disposed }),
+      accepting: value => { this.populationAccepting = value; },
+      chat: payload => this.broadcast('chat',payload),
+      detached: seats => {
+        for (const seat of seats) if (![...this.seats.values()].includes(seat)) this.seatNames.delete(seat);
+        if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }
+        this.population = null;
+        this.populationAccepting = true;
+        this.autoDispose = true;
+        this.pushViews();
+      },
+      changed: () => {
+        if (this.disposed) return;
+        for (const seat of names) if (!population.has(seat)) {
+          if (![...this.seats.values()].includes(seat) && !this.adminBots.has(seat)) this.seatNames.delete(seat);
+          names.delete(seat);
+        }
+        for (const seat of population.seats()) { names.add(seat); this.seatNames.set(seat, population.name(seat)!); }
+        const playable = this.populationCanPlay();
+        const resumed = playable && !wasPlayable;
+        wasPlayable = playable;
+        if (!playable) this.pausePopulationTimers();
+        if (!this.game) this.startGameIfReady();
+        else if (resumed) {
+          if (this.game.bankoPhase) this.scheduleBankoPhase();
+          else this.afterChange();
+        } else if (playable && this.game.matchEnded) this.settleOnce();
+        this.pushViews();
+      },
+    });
+    this.population = population;
+    this.autoDispose = false;
+    this.populationHeartbeat = setInterval(() => {
+      void population.renew().catch((e: any) => console.warn('[population] lease renewal:', e?.message));
+    }, 10000);
+    this.populationHeartbeat.unref?.();
+    return population;
+  }
+
+  private populationCanPlay(): boolean { return !this.disposed && (!this.population?.size || this.population.canPlay); }
+  /** Server-only invite lookup. Never trust a requested room, seat or user ID from a client payload. */
+  populationInviteSeat(uid: string): number {
+    if (!uid || !this.population || !this.populationAccepting || !this.populationCanPlay() || this.game || this.entryStarting) return -1;
+    if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))) return -1;
+    const occupied = this.occupiedSeats();
+    return this.humanSeats.find(s => !occupied.has(s)) ?? -1;
+  }
+  private occupiedSeats(): Set<number> {
+    return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
+  }
+  private pausePopulationTimers() {
+    this.clearTurnTimers();
+    this.turnDeadlineAt = 0;
+    if (this.elTimer) { clearTimeout(this.elTimer); this.elTimer = null; }
+    if (this.bankoTimer) { clearTimeout(this.bankoTimer); this.bankoTimer = null; }
+    if (this.bankoTick) { clearInterval(this.bankoTick); this.bankoTick = null; }
+    for (const timer of this.bankoBotTimers) clearTimeout(timer);
+    this.bankoBotTimers = [];
+    this.bankoDeadlineAt = 0;
+  }
 
   static async onAuth(_token: string, options: any): Promise<any> {
     normalizeOkeyJoinOptions(options);
@@ -161,13 +242,15 @@ export class OkeyRoom extends Room {
     if (rules.variant === 'duz' && ![20, 24, 28, 30].includes(rules.scoring.startScore)) rules.scoring.startScore = 24;
     rules.teamMode = mode === 'duo';
 
-    this.bet = normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'okey');
+    this.bet = populationBetOption(options) ?? normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'okey');
     this.cfg = { seed, names, botSeats, rules };
+    attachPopulationBinding(options, this);
     this.setMetadata({ game: 'okey', mode, table: tableNo, variant: rules.variant, humans: this.humanSeats.length });
     this.refreshCanak(); // 🏺 çanak göstergesi (BÖLÜM 33)
 
     // Oyun komutları: {t:'draw',from} | {t:'discard',tileId} | {t:'finish',tileId} | {t:'gosterge'}
     this.onMessage('cmd', (client, raw) => {
+      if (!this.populationCanPlay()) { client.send('moveError', { code: 'population_paused', message: 'Masa baglantisi yenileniyor.' }); return; }
       const seat = this.seats.get(client.sessionId);
       if (seat == null || !this.game) return;
       if (!payloadWithinLimit(raw, 16 * 1024) || !this.messageGuard.allow(client.sessionId, 'cmd', 12, 1000)) {
@@ -307,6 +390,7 @@ export class OkeyRoom extends Room {
 
     // YONETICI bot yerlestirme (kullanici istegi): admin beklerken bos koltuga bot atar.
     this.onMessage('adminAddBot', (client, raw) => {
+      if (this.population || this.entryStarting) return;
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
       if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
@@ -321,6 +405,7 @@ export class OkeyRoom extends Room {
       this.pushViews();
     });
     this.onMessage('adminRemoveBot', (client, raw) => {
+      if (this.population || this.entryStarting) return;
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
       if (this.seatMeta.get(seat)?.role !== 'admin') { client.send('sitError', { reason: 'yetki yok' }); return; }
@@ -343,6 +428,7 @@ export class OkeyRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    requirePopulationClient(this.population, options);
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
     if (existing) {
@@ -357,8 +443,9 @@ export class OkeyRoom extends Room {
       this.pushViews();
       return;
     }
-    const taken = new Set(this.seats.values());
-    const spectate = options?.spectate === true || options?.spectate === 'true';
+    const taken = this.occupiedSeats();
+    const spectate = this.entryStarting || !!(this.population && (this.game || !uid))
+      || options?.spectate === true || options?.spectate === 'true';
     const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
     const seat = decision.seat;
     if (seat == null) {
@@ -389,6 +476,9 @@ export class OkeyRoom extends Room {
   }
 
   private async trySit(client: Client, rawSeat: any, options: any) {
+    if (this.entryStarting || (this.population && !authUserIdFromClient(client))) {
+      client.send('sitError', { reason: 'Masa su anda katilima uygun degil.' }); return;
+    }
     if (this.seats.has(client.sessionId)) return;
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
     const uid = authUserIdFromClient(client);
@@ -398,7 +488,7 @@ export class OkeyRoom extends Room {
       this.pushViews();
       return;
     }
-    const taken = new Set(this.seats.values());
+    const taken = this.occupiedSeats();
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
     let seat: number;
@@ -422,7 +512,8 @@ export class OkeyRoom extends Room {
   }
 
   private startGameIfReady() {
-    if (this.game || this.startTimer || this.seats.size + this.adminBots.size < this.humanSeats.length) return;
+    if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game || this.startTimer
+      || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) return;
     this.startAt = Date.now();
     this.pushViews();
     if (this.startTick) clearInterval(this.startTick);
@@ -430,8 +521,12 @@ export class OkeyRoom extends Room {
     this.startTimer = setTimeout(async () => {
       if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
       this.startTimer = null;
-      if (this.seats.size + this.adminBots.size < this.humanSeats.length) { this.pushViews(); return; }
+      if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game
+        || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) { this.pushViews(); return; }
+      this.entryStarting = true;
+      try {
       const entryUsers = new Map(this.seatUsers);
+      const rewardsEligible = allHumanStartingRoster(4, entryUsers, [...this.adminBots.keys(), ...(this.population?.seats() ?? [])]);
       const entryHouse = entryHouseAmount({
         bet: this.bet,
         totalSeats: 4,
@@ -440,12 +535,14 @@ export class OkeyRoom extends Room {
         realSeats: entryUsers.size,
       });
       const oneHandEntry = shouldDeferEntryHouse(this.cfg?.rules?.totalEls);
-      const entry = await deductEntry(entryUsers, this.bet, oneHandEntry ? undefined : 'okey', entryHouse);
+      const entry = this.population?.size ? await this.beginPopulationEntry(entryUsers)
+        : await deductEntry(entryUsers, this.bet, oneHandEntry || !rewardsEligible ? undefined : 'okey', entryHouse);
       if (!entry.ok) { this.abortEntryStart(entry.failedSeats); return; }
+      this.matchRewardsEligible = rewardsEligible;
       this.entryCanakCharged = !oneHandEntry;
       if (!oneHandEntry) this.refreshCanak();
       const banko = this.cfg?.rules?.variant === 'banko';
-      this.cfg.botSeats = [...this.adminBots.keys()]; // yönetici botları motorun bot koltukları
+      this.cfg.botSeats = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
       this.game = createOkeyGame({ ...this.cfg, dealFirst: !banko });
       this.matchProgressionKey = `okey:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
       for (const [seat, name] of this.seatNames) {
@@ -460,7 +557,23 @@ export class OkeyRoom extends Room {
       console.log('[OkeyRoom] oyun başladı' + (banko ? ' (banko: ilk el seçim fazı)' : ''));
       if (banko) this.enterBankoPhase();
       else this.afterChange();
+      } catch (e: any) {
+        console.error('[OkeyRoom] entry failed:', e?.message);
+        if (!this.game && this.population?.activeMatch) {
+          try { await this.population.finish(null); } catch (refundError: any) { console.error('[population] refund pending:', refundError?.message); }
+        }
+        if (!this.disposed) this.abortEntryStart([]);
+      } finally { this.entryStarting = false; }
     }, this.START_MS);
+  }
+
+  private async beginPopulationEntry(humans: Map<number, string>): Promise<{ ok: boolean; failedSeats: number[] }> {
+    if (!this.population || this.adminBots.size) throw new Error('population_roster_invalid');
+    await this.population.begin(humans, !!this.cfg.rules?.teamMode);
+    const unchanged = !this.disposed && humans.size === this.seatUsers.size
+      && [...humans].every(([seat, uid]) => this.seatUsers.get(seat) === uid);
+    if (!unchanged) { await this.population.finish(null); return { ok: false, failedSeats: [] }; }
+    return { ok: true, failedSeats: [] };
   }
 
   private abortEntryStart(failedSeats: number[]) {
@@ -606,6 +719,7 @@ export class OkeyRoom extends Room {
 
   /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */
   private scheduleBotOnlyClose() {
+    if (this.population?.size && !this.population.isDisposed) return;
     if (this.closingBotOnly || this.seats.size > 0) return;
     this.closingBotOnly = true;
     setTimeout(() => {
@@ -635,6 +749,7 @@ export class OkeyRoom extends Room {
   private refreshCanak() { fetchCanak('okey').then((v) => { this.canakAmount = v; this.pushViews(); }).catch(() => {}); }
 
   private maybeCanak() {
+    if (!this.matchRewardsEligible) return;
     if (!this.game || this.canakEl === this.game.elNumber) return;
     this.canakEl = this.game.elNumber;
     // Ücretsiz/antrenman masası (bahis 0) çanağı PATLATAMAZ — sürpriz ekonomi sızıntısı olmaz.
@@ -657,6 +772,7 @@ export class OkeyRoom extends Room {
   }
 
   private afterChange() {
+    if (!this.populationCanPlay()) { this.pausePopulationTimers(); this.pushViews(); return; }
     if (this.game && (this.game.elEnded || this.game.matchEnded) && !this.isOneHandNoContest()) this.maybeCanak();
     // SIRA ÖNEMLİ: önce zamanlayıcı (turnDeadlineAt) KURULUR, sonra push edilir — aksi halde
     // view ESKİ deadline ile gider: insan sırasında turnMs=0 (sayaç hiç çıkmaz), bot sırasındaki
@@ -672,7 +788,7 @@ export class OkeyRoom extends Room {
       if (!this.elTimer) {
         this.elTimer = setTimeout(() => {
           this.elTimer = null;
-          if (!this.game || this.game.matchEnded) return;
+          if (!this.game || this.game.matchEnded || !this.populationCanPlay()) return;
           if (this.game.rules.variant === 'banko') { this.enterBankoPhase(); return; }
           startNextEl(this.game);
           this.afterChange();
@@ -690,6 +806,7 @@ export class OkeyRoom extends Room {
   }
 
   private scheduleTurn() {
+    if (!this.populationCanPlay()) return;
     if (!this.game || this.game.elEnded || this.game.matchEnded) return;
     this.clearTurnTimers();
     const turn = this.game.turn;
@@ -699,6 +816,7 @@ export class OkeyRoom extends Room {
       this.turnDeadlineAt = 0;
       this.botTimer = setTimeout(() => {
         this.botTimer = null;
+        if (!this.populationCanPlay()) return;
         if (!this.game || this.game.elEnded || this.game.turn !== turn) { this.afterChange(); return; }
         playOkeyBotTurn(this.game, turn);
         this.afterChange();
@@ -708,6 +826,7 @@ export class OkeyRoom extends Room {
       this.turnDeadlineAt = Date.now() + ms;
       this.humanTimer = setTimeout(() => {
         this.humanTimer = null;
+        if (!this.populationCanPlay()) return;
         if (!this.game || this.game.elEnded || this.game.turn !== turn) { this.afterChange(); return; }
         autoOkeyMove(this.game, turn);
         this.logEvent(`${this.nameOfSeat(turn)} süresi doldu — otomatik oynandı`);
@@ -723,6 +842,7 @@ export class OkeyRoom extends Room {
    *  HER karar yolundan çağrılır — eski hali yalnız cmd handler'daydı; hakkını geçmiş elde
    *  kullanan oyuncu HİÇ komut göndermediği için 2. el ve sonrası hızlandırma çalışmıyordu. */
   private maybeAccelerateBanko() {
+    if (!this.populationCanPlay()) return;
     if (!this.game || !(this.game as any).bankoPhase || !this.bankoTimer) return;
     const humans = [...this.seats.values()];
     if (humans.length === 0) return;
@@ -737,7 +857,7 @@ export class OkeyRoom extends Room {
   }
 
   private enterBankoPhase() {
-    if (!this.game) return;
+    if (!this.game || !this.populationCanPlay()) return;
     // HERKES hakkını kullandıysa liste HİÇ çıkmaz — el direkt başlar (kullanıcı kuralı).
     // (Son el mecburiyeti bu kontrolden ETKİLENMEZ: mecburiyet hakkı DURANLARA yazılır;
     //  hak kalmadıysa zaten gösterilecek karar yok.)
@@ -750,6 +870,14 @@ export class OkeyRoom extends Room {
       return;
     }
     beginBankoPhase(this.game);
+    this.scheduleBankoPhase();
+  }
+
+  // Resume scheduling without erasing choices that were already made before a pause.
+  private scheduleBankoPhase() {
+    if (!this.game?.bankoPhase || !this.populationCanPlay()) return;
+    for (const timer of this.bankoBotTimers) clearTimeout(timer);
+    this.bankoBotTimers = [];
     this.bankoDeadlineAt = Date.now() + this.BANKO_PHASE_MS;
     this.pushViews();
     if (this.bankoTimer) clearTimeout(this.bankoTimer);
@@ -761,7 +889,7 @@ export class OkeyRoom extends Room {
       if (this.game.bankoChoice[si] !== -1) continue;
       const delay = 800 + Math.floor(Math.random() * 1700);
       this.bankoBotTimers.push(setTimeout(() => {
-        if (!this.game || !this.game.bankoPhase) return;
+        if (!this.game || !this.game.bankoPhase || !this.populationCanPlay()) return;
         botBankoDecide(this.game, si);
         this.pushViews();
       }, delay));
@@ -774,6 +902,7 @@ export class OkeyRoom extends Room {
   }
 
   private finishBankoPhase() {
+    if (!this.populationCanPlay()) { this.pausePopulationTimers(); return; }
     if (this.bankoTimer) { clearTimeout(this.bankoTimer); this.bankoTimer = null; }
     if (this.bankoTick) { clearInterval(this.bankoTick); this.bankoTick = null; }
     for (const t of this.bankoBotTimers) clearTimeout(t);
@@ -794,6 +923,13 @@ export class OkeyRoom extends Room {
     const scores = new Map<number, number>();
     for (let s = 0; s < 4; s++) scores.set(s, this.game.scores[s]!);
     const winnerSeat = this.lowestScoreSeat();
+    if (this.population?.hasMatch) {
+      this.rematchVotes.clear();
+      this.settlePromise = this.population.finish(this.isOneHandNoContest(winnerSeat) ? null : winnerSeat)
+        .then(() => this.pushViews())
+        .catch((e: any) => { this.settled = false; console.error('[population] settlement pending:', e?.message); });
+      return;
+    }
     if (this.isOneHandNoContest(winnerSeat)) {
       this.rematchVotes.clear();
       const key = `okey:no-contest:${this.matchProgressionKey || this.roomId}`;
@@ -818,6 +954,7 @@ export class OkeyRoom extends Room {
       openedSeats,
       game: 'okey', // çanak hedefi (düz + banko ortak çanak)
       entryHousePaid: this.entryCanakCharged,
+      matchRewardsEligible: this.matchRewardsEligible,
       progressionKey: this.matchProgressionKey,
     }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
@@ -886,6 +1023,7 @@ export class OkeyRoom extends Room {
   }
 
   private prepareRematchCountdown() {
+    this.population?.resetMatch();
     this.rematchVotes.clear();
     this.clearTurnTimers();
     if (this.startTimer) { clearTimeout(this.startTimer); this.startTimer = null; }
@@ -896,6 +1034,7 @@ export class OkeyRoom extends Room {
     this.settled = false;
     this.settlePromise = null;
     this.entryCanakCharged = false;
+    this.matchRewardsEligible = false;
     this.canakEl = -1;
     this.abandoned.clear();
     this.cfg.seed = Math.floor(Math.random() * 1_000_000_000);
@@ -911,15 +1050,16 @@ export class OkeyRoom extends Room {
 
   private pushViews() {
     const waiting = !this.game;
-    const starting = waiting && this.seats.size + this.adminBots.size >= this.humanSeats.length;
+    const starting = waiting && this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length;
     const filled = new Set(this.seats.values());
     const seated = [0, 1, 2, 3].map((s) => ({
       seat: s,
       human: this.humanSeats.includes(s),
-      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s)) : true,
+      filled: this.humanSeats.includes(s) ? (filled.has(s) || this.adminBots.has(s) || (this.population?.has(s) ?? false)) : true,
       name: this.humanSeats.includes(s) ? (this.seatNames.get(s) ?? null) : 'Bot',
       bot: this.adminBots.has(s) || undefined,
     }));
+    for (const row of seated) this.population?.decorate(row);
     const specClients = this.clients.filter((c) => this.seats.get(c.sessionId) == null);
     const specList = specClients.map((c) => this.spectatorNames.get(c.sessionId) ?? 'İzleyici');
     const specRoles = specClients.map((c) => {
@@ -935,6 +1075,7 @@ export class OkeyRoom extends Room {
           s.uid = this.seatUsers.get(s.seat) ?? ''; // profil tıklaması (public kimlik)
           s.abandoned = this.abandoned.has(s.seat);
           if (s.abandoned) s.isBot = true;
+          this.population?.decorate(s);
         }
       v.spectators = specList;
       v.spectatorRoles = specRoles;
@@ -962,6 +1103,9 @@ export class OkeyRoom extends Room {
   }
 
   onDispose() {
+    this.disposed = true;
+    if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }
+    this.pausePopulationTimers();
     this.presenceLeases.dispose();
     this.messageGuard.clear();
     this.giftBusy.clear();
@@ -972,5 +1116,6 @@ export class OkeyRoom extends Room {
     if (this.bankoTick) clearInterval(this.bankoTick);
     this.clearTurnTimers();
     console.log('[OkeyRoom] dispose');
+    return this.population?.dispose();
   }
 }

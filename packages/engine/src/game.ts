@@ -412,6 +412,19 @@ export function isIslekCard(card: Card, melds: readonly Meld[], rules: RuleConfi
   );
 }
 
+/** Public rule query shared by scoring and bot planning; it does not validate turn legality. */
+export function evaluateDiscard(card: Card, hand: readonly Card[], melds: readonly Meld[], rules: RuleConfig) {
+  const finish = hand.every(c => c.id === card.id);
+  const duplicate = isNormalCard(card) && hand.some(c => c.id !== card.id &&
+    isNormalCard(c) && c.rank === card.rank && c.suit === card.suit);
+  const playable = isIslekCard(card, melds, rules);
+  const islek = !finish && rules.islek.penaltyEnabled && !card.joker && !duplicate && playable;
+  const okey = !finish && rules.islek.penaltyEnabled && card.joker;
+  return { finish, duplicate, islek, okey,
+    penalty: okey ? rules.islek.okeyPenaltyPoints : islek ? rules.islek.penaltyPoints : 0,
+    locked: !finish && (okey || islek || (duplicate && playable)) };
+}
+
 interface DiscardUseParams {
   hand: readonly Card[];
   melds: readonly Meld[];
@@ -1281,29 +1294,8 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
 
   const card = cardsFromHand(player, [cardId])[0]!;
   const newHand0 = player.hand.filter((c) => c.id !== cardId);
-  const isFinishThrow = newHand0.length === 0;
-
-  // İŞLEK-ÇİFT MUAFİYETİ (RULES.md 1.7 — kullanıcı kanunu): atılan kart İŞLEKSE ve
-  // oyuncunun elinde o karttan 2 ADET (özdeş çift) varsa (yani atıştan SONRA elde hâlâ
-  // aynı kart kalıyorsa), CEZA YEMEZ. ("çift olması/olmaması" ile ALAKASIZ.)
-  const islekCiftMuaf =
-    isNormalCard(card) &&
-    newHand0.some((c) => isNormalCard(c) && c.rank === card.rank && c.suit === card.suit);
-
-  // CEZALAR (RULES.md 1.7): BİTİŞ atışı tek değerlendirilir — bitişte işlek/okey
-  // ıskarta cezası YAZILMAZ (çift ceza yok). Okey ıskartaya atılırsa 100, işlek 50.
-  const islekHit =
-    !isFinishThrow &&
-    state.rules.islek.penaltyEnabled &&
-    !card.joker &&
-    !islekCiftMuaf &&
-    isIslekCard(card, state.melds, state.rules);
-  const okeyHit = !isFinishThrow && state.rules.islek.penaltyEnabled && card.joker;
-  const islekPenalty = okeyHit
-    ? state.rules.islek.okeyPenaltyPoints
-    : islekHit
-      ? state.rules.islek.penaltyPoints
-      : 0;
+  const consequence = evaluateDiscard(card, player.hand, state.melds, state.rules);
+  const { islek: islekHit, okey: okeyHit, duplicate: islekCiftMuaf, penalty: islekPenalty } = consequence;
   // İşlek bayrağı SON ATIŞ olayına işlenir (pickupCommit araya girebilir).
   const lastDiscardIdx = (() => {
     for (let i = state.log.length - 1; i >= 0; i--) {
@@ -1313,9 +1305,7 @@ function applyDiscard(state: GameState, cardId: CardId): GameState {
   })();
   // ATILAN KART KİLİTLİ Mİ: işlek (cezalı VEYA çift-muaf) ya da okey ıskarta → rakip
   // ALAMAZ/SORAMAZ (RULES.md işlek/okey atış kuralı). Bitiş atışı kilitlemez.
-  const atisKilit =
-    !isFinishThrow &&
-    (okeyHit || islekHit || (islekCiftMuaf && isIslekCard(card, state.melds, state.rules)));
+  const atisKilit = consequence.locked;
   const log = atisKilit
     ? state.log.map((e, i) => (i === lastDiscardIdx ? { ...e, islek: true } : e))
     : state.log;

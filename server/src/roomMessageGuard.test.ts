@@ -84,10 +84,10 @@ describe('room message abuse guard', () => {
       expect(src).toContain('entryHouseAmount({');
       if (oneHandAware) {
         expect(src).toContain('const oneHandEntry = shouldDeferEntryHouse');
-        expect(src).toContain(`deductEntry(entryUsers, this.bet, oneHandEntry ? undefined : ${game}, entryHouse)`);
+        expect(src).toContain(`deductEntry(entryUsers, this.bet, oneHandEntry || !rewardsEligible ? undefined : ${game}, entryHouse)`);
         expect(src).toContain('this.entryCanakCharged = !oneHandEntry;');
       } else {
-        expect(src).toContain(`deductEntry(entryUsers, this.bet, ${game}, entryHouse)`);
+        expect(src).toContain(`deductEntry(entryUsers, this.bet, rewardsEligible ? ${game} : undefined, entryHouse)`);
         expect(src).toContain('this.entryCanakCharged = true;');
       }
       expect(src).toContain('entryHousePaid: this.entryCanakCharged');

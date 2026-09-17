@@ -18,11 +18,17 @@ import { adminResetPinRecovery, adminSecureDeviceRecovery, createPinAccount, log
 import { submitPreAuthSupport } from './preAuthSupport';
 import { deleteAccount } from './accountDeletion';
 import { cosmeticInventory, equipCosmetic, purchaseCosmetic } from './cosmetics';
+import { PopulationRuntime } from './botPopulation/runtime';
+import { populationAdminRouter } from './botPopulation/admin';
+import { populationPublicRouter } from './botPopulation/public';
 
 const port = Number(process.env.PORT) || 2567;
 
 const app = express();
 app.use(express.json({ limit: '96kb' }));
+const populationRuntime = new PopulationRuntime();
+app.use('/admin/bots', populationAdminRouter(populationRuntime.storage, () => populationRuntime.tick()));
+app.use('/bots', populationPublicRouter((uid,character) => populationRuntime.invite(uid,character)));
 app.get('/', (_req, res) => res.send('Elli Bir Colyseus sunucusu çalışıyor ✦'));
 app.get('/health', (_req, res) => res.json({
   ok: true,
@@ -228,7 +234,12 @@ gameServer.define('tavla', TavlaRoom).filterBy(['mode', 'table']);
 
 try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
 
-gameServer.listen(port);
+gameServer.onBeforeShutdown(() => populationRuntime.stop().catch(() => {
+  console.warn('[population] shutdown drain incomplete; lease recovery will reconcile');
+}));
+void gameServer.listen(port).then(() => populationRuntime.start()).catch(() => {
+  console.error('[server] listen failed'); process.exitCode = 1;
+});
 startPushWorker();
 
 // GÜNLÜK ÖDÜL HATIRLATMASI: her gün 19:00'da (yerel) ödülünü almamış + push cihazı açık

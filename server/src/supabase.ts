@@ -710,6 +710,7 @@ export async function settleMatch(opts: {
   gameVariant?: string;          // okey: 'duz' | 'banko' | 'yuzbir'
   openedSeats?: Iterable<number>; // legacy: eski final-el açan filtresi; 101 payout artık toplam maç sıralamasını esas alır
   entryHousePaid?: boolean;       // komisyon/çanak payı maç başında işlendi; settle tekrar eklemesin
+  matchRewardsEligible: boolean; // immutable all-human starting roster; takeover keeps eligibility
   progressionKey?: string;        // XP idempotency key for this authoritative match
 }): Promise<MatchProgressionAward[]> {
   const { seatUsers, winnerSeat, bet, teamMode } = opts;
@@ -741,7 +742,8 @@ export async function settleMatch(opts: {
     for (const { uid } of winners) await rpc('add_chips', { p_user_id: uid, p_amount: perWinner });
 
   // ÇANAK: komisyonun %50'si ilgili oyunun çanağına birikir (kalan %50 yakılır — ECONOMY §4).
-  if (economyBet > 0 && opts.game && !opts.entryHousePaid) await canakAdd(opts.game, entryCanakShare(pot - prizePool));
+  if (opts.matchRewardsEligible === true && economyBet > 0 && opts.game && !opts.entryHousePaid)
+    await canakAdd(opts.game, entryCanakShare(pot - prizePool));
 
   // İSTATİSTİK: oynanan maç (matches) HER gerçek oyuncuda +1; galibiyet (wins) yalnız
   // kazananlarda +1. Ayrıca kazanan serisi (cur_streak/best_streak) ve toplam kazanç
@@ -751,8 +753,10 @@ export async function settleMatch(opts: {
     await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: Math.max(0, perWinner - economyBet) });
   for (const { uid } of losers)
     await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
-  for (const { uid } of winners) questMatchEvent(uid, true, opts.game);
-  for (const { uid } of losers) questMatchEvent(uid, false, opts.game);
+  if (opts.matchRewardsEligible === true) {
+    for (const { uid } of winners) questMatchEvent(uid, true, opts.game);
+    for (const { uid } of losers) questMatchEvent(uid, false, opts.game);
+  }
   const progressionAwards: MatchProgressionAward[] = [];
   for (const { seat, uid } of winners) {
     const award = await grantMatchProgression(uid, true, {

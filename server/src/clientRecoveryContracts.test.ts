@@ -109,7 +109,8 @@ describe('recovered Unity client contracts', () => {
     const adminScreen = unitySource('Assets/Meta/AdminPanelScreen.cs');
     const adminApi = unitySource('Assets/Meta/Net/SupabaseAdmin.cs');
 
-    expect(adminScreen).toContain('TabButton("SOHBET"');
+    expect(adminScreen).toContain('"SOHBET", "BOTLAR"');
+    expect(adminScreen).toContain('TabButton(tabs[i], i,');
     expect(adminScreen).toContain('BuildClearChatConfirm');
     expect(adminScreen).toContain('TOPLULUK SOHBETİNİ TEMİZLE');
     expect(adminScreen).toContain('SupabaseAdmin.ClearLobbyChat');

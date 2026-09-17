@@ -193,8 +193,11 @@ export function isValidPair(tiles: readonly OkeyTile[], okeyColor: OkeyColor, ok
    SIRALA/skorlama için: eldeki taşlardan en çok taşı kapsayan geçerli seri/küt
    kümesini bulur (skip-anchor + memo; okey boşluğa ORTAYA girer, pos ekseni 1..14). */
 
+export type OkeyGroupingCache = Map<string, { cov: number; score: number; groups: string[][] }>;
+
 export function bestGrouping(
   hand: OkeyTile[], okeyColor: OkeyColor, okeyRank: OkeyRank, allowHighOne = true, preferScore = false,
+  cache?: OkeyGroupingCache,
 ): OkeyTile[][] {
   const counts = new Map<string, number>();
   const pools = new Map<string, OkeyTile[]>();
@@ -217,7 +220,8 @@ export function bestGrouping(
       ? candidateScore > bestScore || (candidateScore === bestScore && candidateCov > bestCov)
       : candidateCov > bestCov || (candidateCov === bestCov && candidateScore > bestScore);
 
-  const memo = new Map<string, { cov: number; score: number; groups: string[][] }>();
+  // Shared only across alternatives in one decision; descriptors contain no physical tile IDs.
+  const memo = cache ?? new Map<string, { cov: number; score: number; groups: string[][] }>();
   const stateKey = (w: number): string => {
     let sb = '';
     for (const c of OKEY_COLORS)
@@ -225,7 +229,7 @@ export function bestGrouping(
         const n = get(key(c, r));
         if (n > 0) sb += c + r + ':' + n + ',';
       }
-    return sb + '|' + w;
+    return sb + '|' + w + '|' + Number(allowHighOne) + Number(preferScore);
   };
 
   const solve = (w: number): { cov: number; score: number; groups: string[][] } => {

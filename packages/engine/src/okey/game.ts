@@ -4,7 +4,7 @@ import type { OkeyRuleConfig } from './rules';
 import { DEFAULT_OKEY_RULES } from './rules';
 import { dealOkey, isOkeyTile, identityOf } from './deck';
 import { createRng } from '../deck';
-import { canFinishMelds, canFinishPairs, bestGrouping, isValidPair, isValidRun, isValidSet } from './melds';
+import { canFinishMelds, canFinishPairs, bestGrouping, isValidPair, isValidRun, isValidSet, type OkeyGroupingCache } from './melds';
 
 /**
  * DÜZ OKEY oyun makinesi (otoriter). 51 motoruyla aynı ilkeler:
@@ -60,6 +60,8 @@ export interface OkeyGameState {
   players: OkeyPlayer[];
   stock: OkeyTile[];         // kapalı yığın; çekiş dizinin SONUNDAN (pop)
   discards: OkeyTile[][];    // koltuk başına atık yığını (son eleman = üstteki)
+  /** Only publicly observed transfers into hands; one entry per physical tile, reset each deal. */
+  publicPickups?: { seat: number; tile: OkeyTile }[];
   gosterge: NormalOkeyTile;
   okeyColor: OkeyColor;
   okeyRank: OkeyRank;
@@ -93,6 +95,15 @@ export interface OkeyGameState {
 export interface OkeyMoveResult {
   ok: boolean;
   error?: string;
+}
+
+function rememberPublicPickup(state: OkeyGameState, seat: number, tile: OkeyTile): void {
+  state.publicPickups = (state.publicPickups ?? []).filter(p => p.tile.id !== tile.id);
+  state.publicPickups.push({ seat, tile: { ...tile } });
+}
+
+function forgetPublicPickup(state: OkeyGameState, tile: OkeyTile): void {
+  if (state.publicPickups) state.publicPickups = state.publicPickups.filter(p => p.tile.id !== tile.id);
 }
 
 export interface OkeyCreateOptions {
@@ -240,6 +251,7 @@ export function startNextEl(state: OkeyGameState): void {
   }
   state.stock = deal.stock;
   state.discards = [[], [], [], []];
+  state.publicPickups = [];
   state.gosterge = deal.gosterge;
   state.okeyColor = deal.okeyColor;
   state.okeyRank = deal.okeyRank;
@@ -383,7 +395,7 @@ function bestMeldCoverage(tiles: OkeyTile[], state: OkeyGameState): number {
   return bestGrouping([...tiles], state.okeyColor, state.okeyRank, false).reduce((n, g) => n + g.length, 0);
 }
 
-function canLayAllRemaining(tiles: OkeyTile[], state: OkeyGameState, mode: 'melds' | 'pairs' | null): boolean {
+export function canLayAllRemaining(tiles: OkeyTile[], state: OkeyGameState, mode: 'melds' | 'pairs' | null): boolean {
   if (tiles.length === 0) return true;
   if (mode === 'pairs') {
     if (tiles.length % 2 !== 0) return false;
@@ -422,8 +434,8 @@ export function pairGroupsFor(tiles: readonly OkeyTile[], state: OkeyGameState):
   return groups;
 }
 
-export function bestYuzbirMeldOpening(state: OkeyGameState, seat: number): { groups: string[][]; points: number } {
-  const groups = bestGrouping([...state.players[seat]!.hand], state.okeyColor, state.okeyRank, false, true);
+export function bestYuzbirMeldOpening(state: OkeyGameState, seat: number, cache?: OkeyGroupingCache): { groups: string[][]; points: number } {
+  const groups = bestGrouping([...state.players[seat]!.hand], state.okeyColor, state.okeyRank, false, true, cache);
   let points = 0;
   const picked: string[][] = [];
   for (const g of groups) {
@@ -440,7 +452,7 @@ export function bestYuzbirPairOpening(state: OkeyGameState, seat: number): { pai
   return { pairs: pairs.map((g) => g.map((t) => t.id)), count: pairs.length };
 }
 
-function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
+export function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld, tile: OkeyTile): boolean {
   if (buildYuzbirJokerReplacement(state, meld, tile)) return true;
   if (meld.kind === 'pair') return false;
   const test = [...meld.tiles, tile];
@@ -448,7 +460,7 @@ function canExtendYuzbirMeldWithTile(state: OkeyGameState, meld: OkeyPublicMeld,
   return buildYuzbirRunExtension(state, meld.tiles, tile) != null;
 }
 
-function isYuzbirIslekDiscard(state: OkeyGameState, tile: OkeyTile): boolean {
+export function isYuzbirIslekDiscard(state: OkeyGameState, tile: OkeyTile): boolean {
   return (state.openMelds ?? []).some((m) => canExtendYuzbirMeldWithTile(state, m, tile));
 }
 
@@ -620,6 +632,7 @@ function returnLeft(state: OkeyGameState, seat: number): OkeyMoveResult {
   }
   const tile = p.hand.splice(idx, 1)[0]!;
   state.discards[(seat + 3) % 4]!.push(tile);
+  forgetPublicPickup(state, tile);
   p.yuzbirPendingLeftTileId = undefined;
   state.phase = 'draw';
   state.matchLog.push(`${p.name} soldan aldığı taşı geri bıraktı`);
@@ -739,7 +752,10 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   }
   meld.points = yuzbirMeldPoints(state, meld.kind, meld.tiles);
   p.hand.splice(idx, 1);
-  if (replacement) p.hand.push(replacement.rescued);
+  if (replacement) {
+    p.hand.push(replacement.rescued);
+    rememberPublicPickup(state, seat, replacement.rescued);
+  }
   state.yuzbirMeldProcessCounts[processKey] = processCount + 1;
   state.islekHistory.push({
     seat,
@@ -775,6 +791,7 @@ function retrieveLastIslek(state: OkeyGameState, seat: number): OkeyMoveResult {
     if (ridx >= 0) p.hand.splice(ridx, 1);
   }
   p.hand.push(item.tile);
+  rememberPublicPickup(state, seat, item.tile);
   meld.tiles = item.previousTiles;
   meld.points = item.previousPoints;
   state.yuzbirMeldProcessCounts[item.processKey] = (state.yuzbirMeldProcessCounts[item.processKey] ?? 1) - 1;
@@ -826,6 +843,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
         if (!top) return { ok: false, error: 'solda atılmış taş yok' };
         leftPile.pop();
         p.hand.push(top);
+        rememberPublicPickup(state, seat, top);
         p.yuzbirPendingLeftTileId = top.id;
       } else {
         const top = state.stock.pop();
@@ -854,6 +872,7 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       if (idx < 0) return { ok: false, error: 'taş elinde değil' };
       const tile = p.hand.splice(idx, 1)[0]!;
       state.discards[seat]!.push(tile);
+      forgetPublicPickup(state, tile);
       p.discardCount++;
       p.yuzbirPendingLeftTileId = undefined;
       if (state.rules.variant === 'yuzbir') {
