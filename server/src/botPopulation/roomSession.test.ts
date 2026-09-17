@@ -545,11 +545,14 @@ describe('population director with real rooms and SQL leases', () => {
     let time = Date.now();
     const opened: ReturnType<typeof makeRoom>[] = [];
     const provider = {
-      open: vi.fn(async () => { const m = makeRoom(IhaleRoom); opened.push(m); return m.population; }),
+      open: vi.fn(async () => {
+        const m = plan.game === '51' ? makeRoom(EllibirRoom) : plan.game === 'duz' ? makeOkey('duz') : makeRoom(IhaleRoom);
+        opened.push(m); return m.population;
+      }),
       close: vi.fn(async () => {}),
     };
     const d = new PopulationDirector(storage, owner, [plan], provider, lobby, () => time, () => 0.25);
-    return { d, opened, provider, later: () => { time += 300001; } };
+    return { d, opened, provider, later: (ms = 300001) => { time += ms; } };
   }
 
   it('is inert on construction and provisions nothing while the persisted control is off', async () => {
@@ -611,6 +614,55 @@ describe('population director with real rooms and SQL leases', () => {
     expect(provider.close).not.toHaveBeenCalled();
   });
 
+  it('rotates a three-bot waiting table, then starts with its first human and preserves that match during drain', async () => {
+    const { d, opened, later } = director({ ...waiting, waitingBots: 3 }, 0);
+    await d.tick();
+    const { r, population } = opened[0];
+    expect(population.size).toBe(3);
+    expect(r.game).toBeFalsy();
+    expect(r.startTimer).toBeNull();
+    const before = population.seats().map(s => population.characterId(s));
+    later(); await d.tick();
+    expect(population.size).toBe(3);
+    const rotated = population.seats().map(s => population.characterId(s));
+    expect(rotated).not.toEqual(before);
+    await human(r, 3);
+    later(); await d.tick();
+    expect(population.seats().map(s => population.characterId(s))).toEqual(rotated);
+    await vi.advanceTimersByTimeAsync(7100);
+    expect(r.game).toBeTruthy();
+    expect(population.activeMatch).toBe(true);
+    expect((await matches())).toHaveLength(1);
+    await d.requestDrain();
+    expect(population.canPlay).toBe(true);
+    expect(d.status().tables).toHaveLength(1);
+    r.game.phase = 'matchEnded'; r.game.matchWinnerSeat = 3;
+    r.checkHandEnd(); await r.settlePromise;
+    await d.tick();
+    expect(d.status().tables).toEqual([]);
+    expect((await matches())[0].state).toBe('settled');
+    expect(r.seats.size).toBe(1);
+  });
+
+  it.each(['51', 'duz'] as const)('%s starts its three-bot table with one human, without requiring an invite', async game => {
+    const { d, opened, later } = director({ ...waiting, game, key: `${game}:team:1`, waitingBots: 3 }, 0);
+    await d.tick();
+    const { r, population } = opened[0];
+    const before = population.seats().map(s => population.characterId(s));
+    expect(before).toHaveLength(3);
+    expect(r.game).toBeFalsy();
+    await human(r, 3);
+    later(); await d.tick();
+    expect(population.seats().map(s => population.characterId(s))).toEqual(before);
+    await vi.advanceTimersByTimeAsync(7100);
+    expect(r.game).toBeTruthy();
+    expect(population.activeMatch).toBe(true);
+    expect((await matches())).toHaveLength(1);
+    await d.requestDrain();
+    expect(population.canPlay).toBe(true);
+    expect(d.status().tables).toHaveLength(1);
+  });
+
   it('drain releases idle bots without removing a waiting human or charging a match', async () => {
     const { d, opened, provider } = director();
     await d.tick(); await human(opened[0].r, 2);
@@ -666,6 +718,26 @@ describe('population director with real rooms and SQL leases', () => {
     expect(opened[1].population.seats().map(s => opened[1].population.characterId(s)).some(id => ids.includes(id))).toBe(false);
     expect(await matches()).toHaveLength(1);
     expect((await matches())[0].state).toBe('settled');
+  });
+
+  it('pauses a rotating quota after match end and retires its old roster before creating another game', async () => {
+    const { d, opened, provider, later } = director({...waiting,kind:'showcase',tablePool:[1,2,3]},0);
+    await d.tick();
+    const {r,population} = opened[0];
+    const old = population.seats().map(s => population.characterId(s));
+    await vi.advanceTimersByTimeAsync(7100);
+    r.game.phase='matchEnded';r.game.matchWinnerSeat=0;
+    r.checkHandEnd();await r.settlePromise;
+    await d.tick();
+    expect(d.status().tables).toEqual([]);
+    expect(provider.close).toHaveBeenCalledTimes(1);
+    await d.tick();
+    expect(provider.open).toHaveBeenCalledTimes(1);
+    later(40001);await d.tick();
+    expect(provider.open).toHaveBeenCalledTimes(2);
+    expect(opened[1].population.size).toBe(4);
+    expect(opened[1].population.seats().map(s => opened[1].population.characterId(s)).some(id => old.includes(id))).toBe(false);
+    expect((await matches()).map(m => m.state)).toEqual(['settled']);
   });
 
   it('enforces below-threshold refill through SQL and leaves richer wallets intact', async () => {

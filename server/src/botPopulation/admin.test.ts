@@ -13,14 +13,15 @@ vi.mock('../supabase', () => ({
 }));
 const rpc = vi.fn(), refresh = vi.fn(async () => {});
 let server: Server, base: string;
+let now = 0;
 beforeAll(async () => {
   const app = express(); app.use(express.json({limit:'8kb'}));
-  app.use('/admin/bots', populationAdminRouter(new PopulationStorage(rpc),refresh));
+  app.use('/admin/bots', populationAdminRouter(new PopulationStorage(rpc),refresh, () => now));
   server = createServer(app);
   await new Promise<void>(resolve => server.listen(0,'127.0.0.1',resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/admin/bots`;
 });
-beforeEach(() => { auth.configured=true; auth.uid='real-admin-id'; auth.role='admin'; rpc.mockReset(); refresh.mockClear(); });
+beforeEach(() => { now += 10000; auth.configured=true; auth.uid='real-admin-id'; auth.role='admin'; rpc.mockReset(); refresh.mockClear(); });
 afterAll(async () => { await new Promise<void>((resolve,reject) => server.close(error => error ? reject(error) : resolve())); });
 function get(token='valid') { return fetch(base,{headers: {authorization: 'Bearer '+token}}); }
 function post(body: any) { return fetch(base+'/control',{method:'POST',headers:{authorization:'Bearer valid','content-type':'application/json'},body:JSON.stringify(body)}); }
@@ -69,5 +70,76 @@ describe('population admin HTTP trust boundary', () => {
     const r = await get();
     expect(r.status).toBe(503);
     expect(await r.json()).toEqual({ok:false,error:'population_service_unavailable'});
+  });
+  it('throttles report refreshes before the database and permits the expiry boundary', async () => {
+    rpc.mockResolvedValue({ok:true});
+    expect((await get()).status).toBe(200);
+    const denied = await get();
+    expect(denied.status).toBe(429);
+    expect(denied.headers.get('retry-after')).toBe('1');
+    expect(await denied.json()).toEqual({ok:false,error:'too_many_requests'});
+    expect(rpc).toHaveBeenCalledTimes(1);
+    now += 999;
+    expect((await get()).status).toBe(429);
+    now++;
+    expect((await get()).status).toBe(200);
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+  it('admits only one concurrent activation and does not repeat the runtime wake', async () => {
+    rpc.mockResolvedValue({mode:'running',revision:1,max_active:24});
+    const body = {mode:'running',revision:0,max_active:24};
+    const results = await Promise.all([post(body), post({...body,actor:'different-client-claim'})]);
+    expect(results.map(r => r.status).sort()).toEqual([200,429]);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    now += 2000;
+    expect((await post({...body,revision:1})).status).toBe(200);
+  });
+  it('allows immediate draining and report after activation without sharing their budgets', async () => {
+    rpc.mockResolvedValue({ok:true});
+    expect((await get()).status).toBe(200);
+    expect((await post({mode:'running',revision:0,max_active:24})).status).toBe(200);
+    expect((await get()).status).toBe(200);
+    const body = {mode:'draining',revision:1,max_active:24};
+    expect((await post(body)).status).toBe(200);
+    expect((await get()).status).toBe(200);
+    expect((await post(body)).status).toBe(429);
+    expect(rpc).toHaveBeenCalledTimes(5);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+  it('keys limits by verified administrator and always rechecks authorization', async () => {
+    rpc.mockResolvedValue({ok:true});
+    expect((await get()).status).toBe(200);
+    auth.role='vip';
+    expect((await get()).status).toBe(403);
+    auth.role='admin'; auth.uid='another-real-admin';
+    expect((await get()).status).toBe(200);
+    auth.uid='real-admin-id';
+    expect((await get()).status).toBe(429);
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+  it('bounds failed service attempts without swallowing their original error', async () => {
+    rpc.mockRejectedValue(new Error('control_revision_conflict'));
+    const body = {mode:'running',revision:0,max_active:24};
+    expect((await post(body)).status).toBe(409);
+    expect((await post(body)).status).toBe(429);
+    expect(refresh).not.toHaveBeenCalled();
+    now += 2000;
+    expect((await post(body)).status).toBe(409);
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+  it('bounds actor storage without letting report saturation prevent draining', async () => {
+    rpc.mockResolvedValue({ok:true});
+    for (let i=0;i<1000;i++) {
+      auth.uid=`verified-admin-${i}`;
+      expect((await get()).status).toBe(200);
+    }
+    auth.uid='verified-admin-over-cap';
+    expect((await get()).status).toBe(429);
+    expect((await post({mode:'draining',revision:0,max_active:24})).status).toBe(200);
+    expect(rpc).toHaveBeenCalledTimes(1001);
+    now += 1000;
+    expect((await get()).status).toBe(200);
+    expect(rpc).toHaveBeenCalledTimes(1002);
   });
 });

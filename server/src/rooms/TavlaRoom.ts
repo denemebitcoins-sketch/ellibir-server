@@ -16,7 +16,7 @@ import { canUseReaction } from '../cosmetics';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
 import { PopulationStorage } from '../botPopulation/storage';
-import { attachPopulationBinding, populationBetOption, requirePopulationClient } from '../botPopulation/roomBinding';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan } from '../botPopulation/roomBinding';
 
 /**
  * TAVLA masası (2 kişilik) — OkeyRoom/EllibirRoom ile AYNI sosyal/reconnect altyapısı
@@ -70,6 +70,7 @@ export class TavlaRoom extends Room {
   private populationAccepting = true;
   private entryStarting = false;
   private disposed = false;
+  private readonly populationClients = new PopulationClientSupport();
 
   // Trusted server capability only, never supplied by client options/messages.
   bindPopulation(storage: PopulationStorage, owner: string, roomKey: string): PopulationRoomSession {
@@ -125,6 +126,13 @@ export class TavlaRoom extends Room {
     if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))) return -1;
     const occupied = this.occupiedSeats();
     return this.humanSeats.find(s => !occupied.has(s)) ?? -1;
+  }
+  populationAdoption(uid: string) {
+    if (!uid || !this.cfg || this.population || this.disposed || this.game || this.entryStarting || this.startTimer
+      || this.adminBots.size || !this.populationClients.ready(this.clients)) return null;
+    if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))
+      || [...this.seats.values()].some(s => !this.seatUsers.get(s)) || this.occupiedSeats().size >= this.humanSeats.length) return null;
+    return populationAdoptionPlan('tavla', false, Number((this.metadata as any)?.table), this.bet);
   }
   private occupiedSeats(): Set<number> {
     return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
@@ -364,6 +372,7 @@ export class TavlaRoom extends Room {
 
   async onJoin(client: Client, options: any) {
     requirePopulationClient(this.population, options);
+    this.populationClients.observe(client, options, this.clients, this.seats.keys());
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
     if (existing) {

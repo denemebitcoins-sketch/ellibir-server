@@ -5,7 +5,8 @@ import { resolve } from 'node:path';
 import { matchMaker } from '@colyseus/core';
 import { ColyseusPopulationProvider } from './colyseusProvider';
 import { PopulationStorage, PopulationRpc, PopulationGame } from './storage';
-import { PopulationTablePlan } from './director';
+import { PopulationDirector, PopulationTablePlan } from './director';
+import { defaultPopulationPlans } from './runtime';
 import { initialCharacters } from './characters';
 import { EllibirRoom } from '../rooms/EllibirRoom';
 import { IhaleRoom } from '../rooms/IhaleRoom';
@@ -34,7 +35,7 @@ beforeAll(async () => {
   await db.exec(`create role anon; create role authenticated; create role service_role; create schema auth;
     create function auth.role() returns text language sql as $$select 'service_role'::text$$;
     create table public.profiles(id uuid primary key, chips bigint not null);`);
-  for (const f of ['20260917_01_bot_population_storage.sql', '20260917_02_bot_population_matches.sql', '20260917_03_bot_population_room_hosts.sql'])
+  for (const f of ['20260917_01_bot_population_storage.sql', '20260917_02_bot_population_matches.sql', '20260917_03_bot_population_room_hosts.sql', '20260917_08_bot_population_lock_time.sql'])
     await db.exec(readFileSync(resolve(__dirname, '../../migrations', f), 'utf8'));
   storage = new PopulationStorage(rpc);
   await matchMaker.setup();
@@ -55,7 +56,81 @@ beforeEach(async () => {
 afterEach(async () => { intercept = null; await Promise.all(matchMaker.disconnectAll()); });
 afterAll(async () => { await matchMaker.gracefullyShutdown(); await db?.close(); });
 
-describe('actual Colyseus room provisioning with all three SQL migrations', () => {
+describe('actual Colyseus room provisioning with current authority migrations', () => {
+  it('changes table after retirement, skips human tables and keeps one distributed quota', async () => {
+    const existing = await matchMaker.handleCreateRoom('ihale', {mode:'solo',table:1,bet:1000});
+    const provider = new ColyseusPopulationProvider(() => 0.99);
+    const p = {...plan(), key:'ihale:showcase', tablePool:[1,2,3]};
+    const first = (await provider.open(p, storage, owner))!;
+    expect((await storage.rooms())[0].table_no).toBe(2);
+    const other = new ColyseusPopulationProvider(() => 0);
+    expect(await other.open(p, storage, next)).toBeNull();
+    expect(await storage.rooms()).toHaveLength(1);
+    await first.retire(); await provider.retired(first); await provider.close(first);
+    const second = (await provider.open(p, storage, owner))!;
+    expect((await storage.rooms())[0]).toMatchObject({room_key:p.key,table_no:3});
+    expect(second).not.toBe(first);
+    expect((await matchMaker.query()).some(r => r.roomId === existing.roomId)).toBe(true);
+  });
+  it('leaves busy tables alone instead of evicting humans to satisfy a quota', async () => {
+    for (const table of [1,2]) await matchMaker.handleCreateRoom('ihale', {mode:'solo',table,bet:1000});
+    const provider = new ColyseusPopulationProvider();
+    expect(await provider.open({...plan(),key:'ihale:showcase',tablePool:[1,2]},storage,owner)).toBeNull();
+    expect(await storage.rooms()).toEqual([]);
+    expect(await matchMaker.query()).toHaveLength(2);
+  });
+  it('recovers a rotating quota in place after a lost publish response, without a second allocation', async () => {
+    const provider = new ColyseusPopulationProvider(() => 0.99);
+    const p = {...plan(),key:'ihale:showcase',tablePool:[2,3]};
+    intercept = async name => {if (name === 'bot_population_publish_room') {intercept=null;throw new Error('lost_publish');}};
+    const session = await provider.open(p,storage,owner);
+    expect(session).toBeTruthy();
+    expect(await provider.open(p,storage,owner)).toBe(session);
+    expect(await storage.rooms()).toHaveLength(1);
+    expect(await matchMaker.query()).toHaveLength(1);
+  });
+  it('allocates demand rather than filling a high ceiling, with six full games and invite-ready reserves', async () => {
+    vi.useFakeTimers();
+    const director = new PopulationDirector(storage,owner,defaultPopulationPlans(),new ColyseusPopulationProvider(),3);
+    try {
+      await storage.control(1,'running',60,'test');
+      await director.tick();
+      expect(director.status().errors).toEqual([]);
+      expect(director.status().tables).toHaveLength(12);
+      expect(director.status().lobby).toHaveLength(3);
+      for (const game of ['51','duz','banko','yuzbir','ihale','tavla']) {
+        const table = director.status().tables.find(t => t.key === `${game}:showcase`)!;
+        expect(table.bots).toBe(game === 'tavla' ? 2 : 4);
+        const host = (await storage.rooms()).find(h => h.room_key === table.key)!;
+        expect((matchMaker.getLocalRoomById(host.room_id!) as any).startTimer, game).toBeTruthy();
+      }
+      expect((await storage.snapshot()).leases).toHaveLength(38);
+      expect(director.status()).toMatchObject({target_active:38,active_limit:60,capacity_limited:false});
+      await director.tick();
+      expect((await storage.snapshot()).leases).toHaveLength(38);
+      await vi.advanceTimersByTimeAsync(7100);
+      expect(director.status().tables.filter(t => t.phase === 'playing')).toHaveLength(6);
+    } finally {
+      await Promise.all(matchMaker.disconnectAll());
+      vi.useRealTimers();
+    }
+  });
+  it('preserves invite reserves under a low cap and never opens a half-filled showcase', async () => {
+    vi.useFakeTimers();
+    try {
+      await storage.control(1,'running',25,'test');
+      const director = new PopulationDirector(storage,owner,defaultPopulationPlans(),new ColyseusPopulationProvider(),3);
+      await director.tick();
+      expect(director.status().errors).toEqual([]);
+      expect(director.status().lobby).toHaveLength(3);
+      expect(director.status()).toMatchObject({target_active:38,active_limit:25,capacity_limited:true});
+      for (const table of director.status().tables.filter(t => t.key.endsWith(':showcase')))
+        expect(table.bots).toBe(table.key.startsWith('tavla') ? 2 : 4);
+      expect((await storage.snapshot()).leases.length).toBeLessThanOrEqual(25);
+    } finally {
+      await Promise.all(matchMaker.disconnectAll());vi.useRealTimers();
+    }
+  });
   it.each(['51','ihale','duz','banko','yuzbir','tavla'] as const)('creates, binds and retires %s before any simulated player joins', async game => {
     const provider = new ColyseusPopulationProvider();
     const p = plan(game);

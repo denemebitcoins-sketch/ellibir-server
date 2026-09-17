@@ -8,11 +8,14 @@ export interface PopulationTablePlan {
   team: boolean;
   bet: number;
   table: number;
+  /** Stable quota key, with a new available table selected after each retirement. */
+  tablePool?: readonly number[];
   kind: 'showcase' | 'waiting';
   waitingBots?: number;
 }
 export interface PopulationRoomProvider {
   inviteTarget?(uid: string): Promise<{ key: string; seat: number } | null>;
+  adopt?(uid: string, storage: PopulationStorage, owner: string, maxBet: number): Promise<PopulationRoomSession | null>;
   heartbeat?(): Promise<void>;
   retired?(room: PopulationRoomSession): Promise<void>;
   /** Return null when an existing human room/another owner prevents provisioning. */
@@ -20,7 +23,7 @@ export interface PopulationRoomProvider {
   /** Only called after retirement and when no seated human remains. */
   close(room: PopulationRoomSession): Promise<void>;
 }
-interface Managed { room: PopulationRoomSession; rotateAt: number; }
+interface Managed { room: PopulationRoomSession; rotateAt: number; invited?: boolean; }
 interface Lobby { lease: CharacterLease; rotateAt: number; }
 
 /** No constructor/startup side effects. A trusted caller drives tick() explicitly.
@@ -30,11 +33,13 @@ export class PopulationDirector {
   private readonly managed = new Map<string, Managed>();
   private readonly lobby = new Map<string, Lobby>();
   private readonly cooldown = new Map<string, number>();
+  private readonly resumeAt = new Map<string, number>();
   private tail: Promise<unknown> = Promise.resolve();
   private ticking: Promise<void> | null = null;
   private stopping = false;
   private readonly plans: PopulationTablePlan[];
   private errors: string[] = [];
+  private activeLimit = 0;
 
   constructor(readonly storage: PopulationStorage, readonly owner: string, plans: readonly PopulationTablePlan[],
     private readonly provider: PopulationRoomProvider, private readonly lobbyTarget = 3,
@@ -50,19 +55,25 @@ export class PopulationDirector {
       const identity = `${p.game}:${p.team}:${p.table}`;
       if (!['51', 'duz', 'banko', 'yuzbir', 'ihale', 'tavla'].includes(p.game) || typeof p.team !== 'boolean'
         || (p.game === 'tavla' && p.team) || !p.key || keys.has(p.key) || tables.has(identity)
-        || !Number.isInteger(p.table) || p.table < 1 || !Number.isInteger(p.bet) || p.bet < 500 || p.bet > 5000 || p.bet % 500
+        || !Number.isInteger(p.table) || p.table < 1
+        || (p.tablePool && (p.tablePool.length < 2 || p.tablePool.length > 20
+          || new Set(p.tablePool).size !== p.tablePool.length || p.tablePool.some(n => !Number.isInteger(n) || n < 1)))
+        || !Number.isInteger(p.bet) || p.bet < 500 || p.bet > 5000 || p.bet % 500
         || !['showcase', 'waiting'].includes(p.kind)
         || (p.kind === 'waiting' && (!Number.isInteger(p.waitingBots) || p.waitingBots! < 1 || p.waitingBots! >= size)))
         throw new Error('population_plan_invalid');
       keys.add(p.key); tables.add(identity);
       required += p.kind === 'showcase' ? size : p.waitingBots!;
-      return { ...p };
+      return { ...p, ...(p.tablePool ? {tablePool: [...p.tablePool]} : {}) };
     });
     if (required > 100) throw new Error('population_plan_capacity');
   }
 
   status() {
+    const target = this.plans.reduce((n, p) => n + (p.kind === 'showcase' ? (p.game === 'tavla' ? 2 : 4) : p.waitingBots!), this.lobbyTarget)
+      + [...this.managed.values()].filter(m => m.invited).reduce((n, m) => n + m.room.size, 0);
     return { stopping: this.stopping, lobby: [...this.lobby.keys()],
+      target_active: target, active_limit: this.activeLimit, capacity_limited: target > this.activeLimit,
       tables: [...this.managed].map(([key, m]) => ({ key, ...m.room.status(), bots: m.room.size, rotateAt: m.rotateAt })),
       errors: [...this.errors] };
   }
@@ -106,13 +117,28 @@ export class PopulationDirector {
     await this.provider.retired?.(managed.room);
     if (!managed.room.status().humanSeats.length) await this.provider.close(managed.room);
     this.managed.delete(key);
+    if (this.plans.find(p => p.key === key)?.tablePool)
+      this.resumeAt.set(key, this.now() + 20000 + Math.floor(this.random() * 40001));
     return true;
+  }
+
+  private async fillLobby(snapshot: PopulationSnapshot, used: Set<string>) {
+    for (const character of this.candidates(snapshot, used, 0)) {
+      if (this.stopping || this.lobby.size >= this.lobbyTarget || used.size >= snapshot.control.max_active) break;
+      try {
+        await this.funded(character, 0);
+        if (this.stopping) break;
+        const lease = await this.storage.claim(character.id, this.owner, randomUUID());
+        this.lobby.set(character.id, { lease, rotateAt: this.nextRotation() }); used.add(character.id);
+      } catch (e) { this.note('lobby', e); }
+    }
   }
 
   private async reconcile() {
     this.errors = [];
     await this.provider.heartbeat?.();
     const snapshot = await this.storage.snapshot();
+    this.activeLimit = snapshot.control.max_active;
     const running = !this.stopping && snapshot.control.mode === 'running';
     const used = this.leased(snapshot);
     for (const [id, until] of this.cooldown) if (until <= this.now()) this.cooldown.delete(id);
@@ -132,7 +158,9 @@ export class PopulationDirector {
       const state = item.room.status();
       try {
         if (!running || state.disposed || item.room.isDisposed
-          || (state.phase === 'ended' && state.humanSeats.length === 0)) {
+          || state.phase === 'ended'
+          || (item.invited && item.room.size === 0 && state.phase === 'waiting')
+          || (item.invited && !state.humanSeats.length && state.phase === 'waiting' && this.now() >= item.rotateAt)) {
           item.room.acceptNewMatches(false);
           await this.retire(key, item, used);
         } else item.room.acceptNewMatches(true);
@@ -145,9 +173,16 @@ export class PopulationDirector {
       - Number(!!this.managed.get(a.key)?.room.status().humanSeats.length));
     for (const plan of plans) {
       try {
+        // Keep invite-ready participants before spending the remaining capacity on bot-only games.
+        if (plan.kind === 'showcase') await this.fillLobby(snapshot, used);
         let item = this.managed.get(plan.key);
+        if (item?.invited) continue;
         if (!item) {
+          if ((this.resumeAt.get(plan.key) ?? 0) > this.now()) continue;
           if (used.size >= snapshot.control.max_active || !this.candidates(snapshot, used, plan.bet).length) continue;
+          const size = plan.game === 'tavla' ? 2 : 4;
+          if (plan.kind === 'showcase' && (snapshot.control.max_active - used.size < size
+            || this.candidates(snapshot, used, plan.bet).length < size)) continue;
           const room = await this.provider.open(plan, this.storage, this.owner);
           if (!room) continue;
           if (room.owner !== this.owner || room.game !== plan.game || room.bet !== plan.bet || room.room !== plan.key)
@@ -189,37 +224,66 @@ export class PopulationDirector {
         }
       } catch (e) { this.note(plan.key, e); }
     }
-    for (const character of this.candidates(snapshot, used, 0)) {
-      if (this.stopping || this.lobby.size >= this.lobbyTarget || used.size >= snapshot.control.max_active) break;
-      try {
-        await this.funded(character, 0);
-        if (this.stopping) break;
-        const lease = await this.storage.claim(character.id, this.owner, randomUUID());
-        this.lobby.set(character.id, { lease, rotateAt: this.nextRotation() }); used.add(character.id);
-      } catch (e) { this.note('lobby', e); }
-    }
+    await this.fillLobby(snapshot, used);
   }
 
   /** Trusted invite bridge only. The caller must authenticate and authorize the human inviter. */
   invite(characterId: string, key: string, seat: number): Promise<void> {
+    return this.serial(() => this.inviteInto(characterId, key, seat));
+  }
+
+  /** Resolve the authenticated user's live room on the server, never a client-supplied target. */
+  inviteHuman(uid: string, characterId: string): Promise<void> {
     return this.serial(async () => {
       const snapshot = await this.storage.snapshot();
-      const item = this.managed.get(key);
-      const state = item?.room.status();
-      if (this.stopping || snapshot.control.mode !== 'running' || !item || !state || state.phase !== 'waiting'
-        || state.starting || state.disposed || !state.humanSeats.length) throw new Error('population_invite_unavailable');
-      if (item.room.characterId(seat) === characterId) return;
-      if (!Number.isInteger(seat) || seat < 0 || seat >= (item.room.game === 'tavla' ? 2 : 4)
-        || state.occupiedSeats.includes(seat)) throw new Error('population_seat_unavailable');
-      const lobby = this.lobby.get(characterId);
-      if (!lobby) throw new Error('population_character_not_invitable');
       const character = snapshot.characters.find(c => c.id === characterId && c.enabled);
-      if (!character || character.chips < item.room.bet) throw new Error('insufficient_chips');
-      // Release then claim cannot double-seat: SQL claims are exclusive. Failed transfers go
-      // offline, not back into community under a stale lease. Atomic transfer can replace this.
-      await this.storage.release(characterId, this.owner, lobby.lease.token);
-      this.lobby.delete(characterId);
-      await item.room.reserve(characterId, seat);
+      if (this.stopping || snapshot.control.mode !== 'running' || !uid || !character
+        || !this.lobby.has(characterId)) throw new Error('population_invite_unavailable');
+      let adopted: Managed | undefined;
+      try {
+        let target = await this.provider.inviteTarget?.(uid);
+        if (!target) {
+          const room = await this.provider.adopt?.(uid, this.storage, this.owner, character.chips);
+          if (room) {
+            if (room.owner !== this.owner || this.managed.has(room.room)) throw new Error('population_room_contract');
+            adopted = { room, rotateAt: this.nextRotation(), invited: true };
+            this.managed.set(room.room, adopted);
+            target = await this.provider.inviteTarget?.(uid);
+          }
+        }
+        if (!target) throw new Error('population_invite_unavailable');
+        await this.inviteInto(characterId, target.key, target.seat, uid);
+      } catch (error) {
+        if (adopted && adopted.room.size === 0) {
+          try { await this.retire(adopted.room.room, adopted, this.leased(snapshot)); }
+          catch (cleanupError) { this.note(adopted.room.room, cleanupError); }
+        }
+        throw error;
+      }
     });
+  }
+
+  private async inviteInto(characterId: string, key: string, seat: number, uid?: string): Promise<void> {
+    const snapshot = await this.storage.snapshot();
+    const item = this.managed.get(key);
+    const state = item?.room.status();
+    if (this.stopping || snapshot.control.mode !== 'running' || !item || !state || state.phase !== 'waiting'
+      || state.starting || state.disposed || !state.humanSeats.length) throw new Error('population_invite_unavailable');
+    if (item.room.characterId(seat) === characterId) return;
+    if (!Number.isInteger(seat) || seat < 0 || seat >= (item.room.game === 'tavla' ? 2 : 4)
+      || state.occupiedSeats.includes(seat)) throw new Error('population_seat_unavailable');
+    const lobby = this.lobby.get(characterId);
+    if (!lobby) throw new Error('population_character_not_invitable');
+    const character = snapshot.characters.find(c => c.id === characterId && c.enabled);
+    if (!character || character.chips < item.room.bet) throw new Error('insufficient_chips');
+    if (uid) {
+      const target = await this.provider.inviteTarget?.(uid);
+      if (!target || target.key !== key || target.seat !== seat) throw new Error('population_invite_unavailable');
+    }
+    // Release then claim cannot double-seat: SQL claims are exclusive. Failed transfers go
+    // offline, not back into community under a stale lease. Atomic transfer can replace this.
+    await this.storage.release(characterId, this.owner, lobby.lease.token);
+    this.lobby.delete(characterId);
+    await item.room.reserve(characterId, seat);
   }
 }

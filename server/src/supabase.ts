@@ -353,7 +353,7 @@ export async function rpc(fn: string, args: Record<string, unknown>): Promise<bo
 }
 
 /** Service-role RPC with parsed JSON response; used by verified monetization callbacks. */
-export async function rpcService(fn: string, args: Record<string, unknown>): Promise<any> {
+export async function rpcService(fn: string, args: Record<string, unknown>, timeoutMs?: number): Promise<any> {
   if (!supabaseConfigured()) throw new Error('supabase_not_configured');
   const response = await fetch(`${URL}/rest/v1/rpc/${fn}`, {
     method: 'POST',
@@ -363,6 +363,7 @@ export async function rpcService(fn: string, args: Record<string, unknown>): Pro
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(args),
+    signal: timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs),
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`${fn}_http_${response.status}:${text.slice(0, 240)}`);

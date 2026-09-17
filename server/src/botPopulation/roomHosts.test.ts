@@ -12,7 +12,7 @@ const next = '00000000-0000-4000-8000-000000000002';
 const uuid = (i: number) => `30000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
 const room = 'ihale:team:1';
 const pool = initialCharacters();
-const migrations = ['20260917_01_bot_population_storage.sql', '20260917_02_bot_population_matches.sql', '20260917_03_bot_population_room_hosts.sql']
+const migrations = ['20260917_01_bot_population_storage.sql', '20260917_02_bot_population_matches.sql', '20260917_03_bot_population_room_hosts.sql', '20260917_08_bot_population_lock_time.sql']
   .map(f => readFileSync(resolve(__dirname, '../../migrations', f), 'utf8'));
 const rpc: PopulationRpc = async (name, args) => {
   if (!/^bot_population_[a-z_]+$/.test(name)) throw new Error('invalid_rpc');
@@ -61,7 +61,7 @@ async function mixedMatch() {
 describe('room ownership and orphan recovery with UUID human profiles', () => {
   it('is service-only and keeps migration replay idempotent/off by default', async () => {
     await store.control(1, 'off', 16, 'test');
-    await db.exec(migrations[2]);
+    for (const sql of migrations.slice(2)) await db.exec(sql);
     expect(await store.rooms()).toEqual([]);
     await expect(claim()).rejects.toThrow('population_not_running');
     await db.exec("set role authenticated; select set_config('request.jwt.claim.role','authenticated',false)");

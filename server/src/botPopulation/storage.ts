@@ -44,7 +44,7 @@ export interface PopulationMatch {
   winner_seat: number | null;
   house_amount: number;
 }
-export type PopulationRpc = (name: string, args: Record<string, unknown>) => Promise<any>;
+export type PopulationRpc = (name: string, args: Record<string, unknown>, timeoutMs?: number) => Promise<any>;
 
 /** No startup side effects: seed/control/claims require explicit orchestration.
  * The same RPC contract runs against local SQL in tests, never a fake human account.
@@ -106,6 +106,7 @@ export class PopulationStorage {
   processProgression(): Promise<{processed:number;failed:number;pending:number}> {
     return this.call('bot_population_process_progression', {});
   }
+  processSocial(): Promise<{emitted:number}> { return this.call('bot_population_process_social', {}, 3000); }
   health(owner: string, ready: boolean, error: string, details: Record<string, unknown>): Promise<boolean> {
     return this.call('bot_population_runtime_health', { p_owner: owner, p_ready: ready, p_error: error, p_details: details });
   }

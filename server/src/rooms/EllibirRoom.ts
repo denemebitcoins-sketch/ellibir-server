@@ -16,7 +16,7 @@ import { ellibirRuntime } from '../cardRoomRuntime';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
 import { PopulationStorage } from '../botPopulation/storage';
-import { attachPopulationBinding, populationBetOption, requirePopulationClient } from '../botPopulation/roomBinding';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan } from '../botPopulation/roomBinding';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -82,6 +82,7 @@ export class EllibirRoom extends Room {
   private populationAccepting = true;
   private entryStarting = false;
   private disposed = false;
+  private readonly populationClients = new PopulationClientSupport();
 
   // Process-only capability. Never read storage/owner/character options from client messages.
   bindPopulation(storage: PopulationStorage, owner: string, roomKey: string): PopulationRoomSession {
@@ -144,6 +145,14 @@ export class EllibirRoom extends Room {
     if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))) return -1;
     const occupied = this.occupiedSeats();
     return this.humanSeats.find(s => !occupied.has(s)) ?? -1;
+  }
+  populationAdoption(uid: string) {
+    if (!uid || !this.cfg || this.population || this.disposed || this.game || this.entryStarting || this.startTimer
+      || this.adminBots.size || !this.populationClients.ready(this.clients)) return null;
+    if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))
+      || [...this.seats.values()].some(s => !this.seatUsers.get(s)) || this.occupiedSeats().size >= this.humanSeats.length) return null;
+    return populationAdoptionPlan(this.gameKey === 'ihale' ? 'ihale' : '51', !!this.cfg.rules?.teamMode,
+      Number((this.metadata as any)?.table), this.bet);
   }
   private occupiedSeats(): Set<number> {
     return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
@@ -435,6 +444,7 @@ export class EllibirRoom extends Room {
 
   async onJoin(client: Client, options: any) {
     requirePopulationClient(this.population, options);
+    this.populationClients.observe(client, options, this.clients, this.seats.keys());
     if (options?.ihalePilotVersion === 1) this.ihalePilotClients.add(client.sessionId);
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
