@@ -56,7 +56,7 @@ export class PopulationRuntime {
       if (!this.seeded) { await this.storage.seed(); this.seeded = true; }
       const progression = await this.storage.processProgression();
       const snapshot = await this.storage.snapshot();
-      if (snapshot.control.mode !== 'running') await this.storage.recoverExpired();
+      await this.storage.recoverExpired();
       if (snapshot.control.mode === 'running' && !this.director) {
         this.provider = this.providerFactory();
         this.director = new PopulationDirector(this.storage, this.owner, defaultPopulationPlans(), this.provider, 3);

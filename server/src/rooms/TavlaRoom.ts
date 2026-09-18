@@ -9,7 +9,7 @@ import { tavlaViewFor } from '../tavlaView';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterChatText, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
-import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest } from '../gifts';
+import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest, giftRecipientsAllowed } from '../gifts';
 import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
 import { tavlaCanakChance } from '../canakPolicy';
 import { canUseReaction } from '../cosmetics';
@@ -288,6 +288,10 @@ export class TavlaRoom extends Room {
         const gift = normalizeGiftRequest(raw, 1);
         if (!gift) { client.send('giftFailed', { reason: 'Hediye veya hedef geçersiz.' }); return; }
         const { giftId: giftType, targets } = gift;
+        const recipientIds = targets.map(seat => this.seatUsers.get(seat));
+        if (!await giftRecipientsAllowed(recipientIds) || targets.some((seat, i) => this.seatUsers.get(seat) !== recipientIds[i])) {
+          client.send('giftFailed', { reason: 'Alıcı hediye kabul etmiyor veya tercih doğrulanamadı.' }); return;
+        }
         const fromUid = this.seatUsers.get(fromSeat);
         if (fromUid) {
           const cost = (GIFT_DIAMONDS[giftType] ?? 999) * targets.length;

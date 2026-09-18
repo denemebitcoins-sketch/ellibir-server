@@ -1,3 +1,13 @@
+import { onlineAuthRequired, rpcService, supabaseConfigured } from './supabase';
+
+export async function giftRecipientsAllowed(userIds: (string | undefined)[]): Promise<boolean> {
+  const ids = [...new Set(userIds.filter((id): id is string => !!id && !id.startsWith('bot:')))];
+  if (!ids.length) return true;
+  if (!supabaseConfigured()) return !onlineAuthRequired();
+  try { return await rpcService('gift_recipients_allowed', { p_users: ids }, 5000) === true; }
+  catch { return false; }
+}
+
 export const GIFT_HOURS: Record<number, number> = {
   1: 2, 2: 2, 3: 2, 4: 8, 5: 4, 6: 5, 7: 3, 8: 3, 9: 4, 10: 5, 11: 12, 12: 24,
 };

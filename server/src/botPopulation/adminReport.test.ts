@@ -27,6 +27,7 @@ beforeAll(async () => {
         return '{"ok":true}'::jsonb;
       end;$$;`);
   for (const sql of migrations) await db.exec(sql);
+  await db.exec(readFileSync(resolve(__dirname, '../../migrations/20260918_population_expiry_recovery.sql'), 'utf8'));
   store = new PopulationStorage(async (name, args) => {
     if (!/^bot_population_[a-z_]+$/.test(name)) throw new Error('invalid_rpc');
     const r = await db.query<{ value: any }>(`select public.${name}(${Object.keys(args).map((k,i) => `${k}=>$${i+1}`).join(',')}) value`,
@@ -175,6 +176,23 @@ describe('private population reporting and global drain', () => {
     expect((await store.match('cold-drain'))?.state).toBe('refunded');
     expect(await store.recoverExpired()).toBe(0);
     expect(await store.completeDrain()).toBe(true);
+    expect((await store.adminReport()).summary).toMatchObject({bot_net:0,human_net:0,house:0,refunds:1});
+  });
+  it('recovers a dead worker while running without touching live hosts or leases or paying twice', async () => {
+    await db.exec(readFileSync(resolve(__dirname, '../../migrations/20260918_population_expiry_recovery.sql'), 'utf8'));
+    await store.control(0,'running',24,'admin'); await match('cold-running');
+    expect(await store.recoverExpired()).toBe(0);
+    await db.exec("update bot_population.leases set expires_at=now()-interval '1 second'");
+    expect(await store.recoverExpired()).toBe(0);
+    await db.exec("update bot_population.leases set expires_at=now()+interval '45 seconds'; update bot_population.room_hosts set expires_at=now()-interval '1 second'");
+    expect(await store.recoverExpired()).toBe(0);
+    expect((await store.match('cold-running'))?.state).toBe('active');
+    await db.exec("update bot_population.room_hosts set expires_at=now()+interval '45 seconds'; update bot_population.leases set expires_at=now()-interval '1 second'; update bot_population.room_hosts set expires_at=now()-interval '1 second'");
+    expect(await store.recoverExpired()).toBe(1);
+    expect((await store.match('cold-running'))?.state).toBe('refunded');
+    expect(await store.recoverExpired()).toBe(0);
+    expect((await store.snapshot()).control).toMatchObject({mode:'running',max_active:24,revision:1});
+    expect((await db.query('select chips from public.profiles')).rows).toEqual([{chips:20000}]);
     expect((await store.adminReport()).summary).toMatchObject({bot_net:0,human_net:0,house:0,refunds:1});
   });
 });
