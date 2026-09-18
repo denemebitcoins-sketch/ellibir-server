@@ -23,6 +23,7 @@ beforeAll(async()=>{
     create table public.lobby_chat(id bigint generated always as identity primary key,text text);`);
   await db.exec(readFileSync(resolve(__dirname,'../../migrations/20260819_admin_clear_lobby_chat.sql'),'utf8'));
   for(const name of names) await db.exec(readFileSync(resolve(__dirname,`../../migrations/20260917_${name}.sql`),'utf8'));
+  await db.exec(readFileSync(resolve(__dirname,'../../migrations/20260918_bot_social_waiting_only.sql'),'utf8'));
   store=new PopulationStorage(async(name,args)=>{
     if(!/^bot_population_[a-z_]+$/.test(name)) throw new Error('invalid_rpc');
     const result=await db.query<{value:any}>(`select public.${name}(${Object.keys(args).map((key,i)=>`${key}=>$${i+1}`).join(',')}) value`,
@@ -58,24 +59,20 @@ describe('private authoritative bot community feed',()=>{
     expect((await db.query('select count(*) count from public.profiles')).rows[0]).toEqual({count:0});
     expect((await db.query('select count(*) count from public.presence')).rows[0]).toEqual({count:0});
   });
-  it('publishes bounded real arrivals with distinct negative IDs and no credential fields',async()=>{
+  it('tracks arrivals silently without polluting the human feed',async()=>{
     await open(0,1,2);
-    expect(await process()).toEqual({emitted:1});expect(await process()).toEqual({emitted:0});
-    const [row]=await feed();
-    expect(row).toMatchObject({user_id:`bot:${chars[0].id}`,name:'Arzu',role:'vip',kind:'system',is_system_bot:true});
-    expect(row.id).toBeLessThan(0);expect(row.text).toContain('(Bot)');
-    expect(JSON.stringify(row)).not.toMatch(/owner|token|initial_chips/);
-    await cooldown();expect(await process()).toEqual({emitted:1});
-    expect(await feed()).toHaveLength(2);
+    expect(await process()).toEqual({emitted:0});expect(await process()).toEqual({emitted:0});
+    expect(await feed()).toEqual([]);
+    expect((await db.query('select count(*) count from bot_population.social_seen where published_online')).rows[0]).toEqual({count:3});
   });
   it('emits a departure only for a previously announced identity and deduplicates retries',async()=>{
     await open(0,1);await process();
     await store.release(chars[1].id,owner,token(1));
     await cooldown();expect(await process()).toEqual({emitted:0});
     await store.release(chars[0].id,owner,token(0));
-    expect(await process()).toEqual({emitted:1});
+    expect(await process()).toEqual({emitted:0});
     await cooldown();expect(await process()).toEqual({emitted:0});
-    const rows=await feed();expect(rows).toHaveLength(2);expect(rows[0].text).toContain('ayr');
+    expect(await feed()).toEqual([]);
   });
   it('does not announce an expired character or a room with expired authority',async()=>{
     await open(0);await db.exec("update bot_population.leases set expires_at=now()-interval '1 second'");
@@ -90,6 +87,8 @@ describe('private authoritative bot community feed',()=>{
     expect(await process()).toEqual({emitted:0});await human();
     expect(await process()).toEqual({emitted:1});expect(await process()).toEqual({emitted:0});
     expect((await feed())[0]).toMatchObject({kind:'bot',role:'vip',text:'Herkese iyi oyunlar.',is_system_bot:true});
+    expect((await feed())[0].id).toBeLessThan(0);
+    expect(JSON.stringify(await feed())).not.toMatch(/owner|token|initial_chips/);
     const remaining=await db.query<{seconds:number}>('select extract(epoch from next_chat_at-now())::int seconds from bot_population.social_control');
     expect(remaining.rows[0].seconds).toBeGreaterThan(470);
   });
@@ -105,7 +104,7 @@ describe('private authoritative bot community feed',()=>{
   });
   it('caps storage and public history and keeps bot events read-only to authenticated users',async()=>{
     await db.query(`insert into bot_population.social_events(character_id,event,name,role,text)
-      select $1,'joined','Arzu','vip','Arzu (Bot)' from generate_series(1,220)`,[chars[0].id]);
+      select $1,'greeting','Arzu','vip','Herkese iyi oyunlar.' from generate_series(1,220)`,[chars[0].id]);
     await process();expect(await feed()).toHaveLength(12);
     expect((await db.query('select count(*) count from bot_population.social_events')).rows[0]).toEqual({count:200});
     await db.exec("set role authenticated;select set_config('request.jwt.claim.role','authenticated',false)");
@@ -117,7 +116,7 @@ describe('private authoritative bot community feed',()=>{
     await expect(process()).rejects.toThrow('service_required');
   });
   it('clears the bot feed through the existing authorized moderation RPC without resetting presence',async()=>{
-    await open(0);await process();expect(await feed()).toHaveLength(1);
+    await open(0);await human();await cooldown();await process();expect(await feed()).toHaveLength(1);
     await db.query('insert into auth.users values($1)',[owner]);
     await db.exec("insert into public.lobby_chat(text) values('human message')");
     await db.query("select set_config('request.jwt.claim.sub',$1,false)",[owner]);
@@ -128,8 +127,14 @@ describe('private authoritative bot community feed',()=>{
     const cleared=await db.query<{value:any}>('select public.admin_clear_lobby_chat() value');
     expect(cleared.rows[0].value).toEqual({ok:true,cleared_count:1});expect(await feed()).toEqual([]);
     await db.exec("reset role;select set_config('request.jwt.claim.role','service_role',false)");
-    await cooldown();expect(await process()).toEqual({emitted:0});
+    expect(await process()).toEqual({emitted:0});
     expect((await db.query('select published_online from bot_population.social_seen where character_id=$1',[chars[0].id])).rows[0])
       .toEqual({published_online:true});
+  });
+  it('filters already stored arrival and departure events without deleting history',async()=>{
+    await db.query(`insert into bot_population.social_events(character_id,event,name,role,text)
+      values($1,'joined','Arzu','vip','Arzu joined'),($1,'left','Arzu','vip','Arzu left')`,[chars[0].id]);
+    expect(await feed()).toEqual([]);
+    expect((await db.query('select count(*) count from bot_population.social_events')).rows[0]).toEqual({count:2});
   });
 });

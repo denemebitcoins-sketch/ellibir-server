@@ -89,44 +89,57 @@ describe('actual Colyseus room provisioning with current authority migrations', 
     expect(await storage.rooms()).toHaveLength(1);
     expect(await matchMaker.query()).toHaveLength(1);
   });
-  it('allocates demand rather than filling a high ceiling, with six full games and invite-ready reserves', async () => {
+  it('keeps six partial waiting tables and reserves, never starting a bots-only game', async () => {
     vi.useFakeTimers();
-    const director = new PopulationDirector(storage,owner,defaultPopulationPlans(),new ColyseusPopulationProvider(),3);
+    let now = Date.now();
+    const director = new PopulationDirector(storage,owner,defaultPopulationPlans(),new ColyseusPopulationProvider(),3,() => now);
     try {
       await storage.control(1,'running',60,'test');
       await director.tick();
       expect(director.status().errors).toEqual([]);
-      expect(director.status().tables).toHaveLength(12);
+      expect(director.status().tables).toHaveLength(6);
       expect(director.status().lobby).toHaveLength(3);
       for (const game of ['51','duz','banko','yuzbir','ihale','tavla']) {
-        const table = director.status().tables.find(t => t.key === `${game}:showcase`)!;
-        expect(table.bots).toBe(game === 'tavla' ? 2 : 4);
+        const table = director.status().tables.find(t => t.key === `${game}:waiting`)!;
+        expect(table.bots).toBe(game === 'tavla' ? 1 : game === '51' || game === 'duz' ? 3 : 2);
         const host = (await storage.rooms()).find(h => h.room_key === table.key)!;
-        expect((matchMaker.getLocalRoomById(host.room_id!) as any).startTimer, game).toBeTruthy();
+        expect((matchMaker.getLocalRoomById(host.room_id!) as any).startTimer, game).toBeFalsy();
       }
-      expect((await storage.snapshot()).leases).toHaveLength(38);
-      expect(director.status()).toMatchObject({target_active:38,active_limit:60,capacity_limited:false});
+      expect((await storage.snapshot()).leases).toHaveLength(16);
+      expect(director.status()).toMatchObject({target_active:16,active_limit:60,capacity_limited:false});
       await director.tick();
-      expect((await storage.snapshot()).leases).toHaveLength(38);
+      expect((await storage.snapshot()).leases).toHaveLength(16);
       await vi.advanceTimersByTimeAsync(7100);
-      expect(director.status().tables.filter(t => t.phase === 'playing')).toHaveLength(6);
+      expect(director.status().tables.filter(t => t.phase === 'playing')).toHaveLength(0);
+      const before = await storage.rooms();
+      const previousIds = (await storage.snapshot()).leases.map(l => l.character_id);
+      now += 301000;
+      await director.tick();
+      expect(director.status().tables).toHaveLength(0);
+      now += 61000;
+      await director.tick();
+      expect(director.status().tables).toHaveLength(6);
+      for (const room of await storage.rooms()) {
+        expect(room.table_no).not.toBe(before.find(r => r.room_key === room.room_key)!.table_no);
+      }
+      expect((await storage.snapshot()).leases.every(l => !previousIds.includes(l.character_id))).toBe(true);
+      expect(director.status().tables.every(t => t.phase === 'waiting')).toBe(true);
     } finally {
       await Promise.all(matchMaker.disconnectAll());
       vi.useRealTimers();
     }
   });
-  it('preserves invite reserves under a low cap and never opens a half-filled showcase', async () => {
+  it('preserves invite reserves under a low cap and never opens a showcase', async () => {
     vi.useFakeTimers();
     try {
-      await storage.control(1,'running',25,'test');
+      await storage.control(1,'running',10,'test');
       const director = new PopulationDirector(storage,owner,defaultPopulationPlans(),new ColyseusPopulationProvider(),3);
       await director.tick();
       expect(director.status().errors).toEqual([]);
       expect(director.status().lobby).toHaveLength(3);
-      expect(director.status()).toMatchObject({target_active:38,active_limit:25,capacity_limited:true});
-      for (const table of director.status().tables.filter(t => t.key.endsWith(':showcase')))
-        expect(table.bots).toBe(table.key.startsWith('tavla') ? 2 : 4);
-      expect((await storage.snapshot()).leases.length).toBeLessThanOrEqual(25);
+      expect(director.status()).toMatchObject({target_active:16,active_limit:10,capacity_limited:true});
+      expect(director.status().tables.some(t => t.key.endsWith(':showcase'))).toBe(false);
+      expect((await storage.snapshot()).leases.length).toBeLessThanOrEqual(10);
     } finally {
       await Promise.all(matchMaker.disconnectAll());vi.useRealTimers();
     }

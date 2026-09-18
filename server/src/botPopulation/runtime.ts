@@ -9,8 +9,6 @@ export function defaultPopulationPlans(): PopulationTablePlan[] {
   return [
     ...games.map(game => ({ key: `${game}:waiting`, game, team: false, table: 2, tablePool, bet: 500,
       kind: 'waiting' as const, waitingBots: game === 'tavla' ? 1 : game === '51' || game === 'duz' ? 3 : 2 })),
-    ...games.map(game => ({ key: `${game}:showcase`, game, team: game === 'ihale', table: 1, tablePool,
-      bet: 500, kind: 'showcase' as const })),
   ];
 }
 

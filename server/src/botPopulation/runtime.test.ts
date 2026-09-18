@@ -6,10 +6,10 @@ import {PopulationDirector} from './director';
 it('covers six games with rotating table quotas, not a fixed always-full table number',()=>{
   const plans=defaultPopulationPlans();
   expect(new Set(plans.map(p=>p.game)).size).toBe(6);
-  expect(plans.filter(p=>p.kind==='showcase')).toHaveLength(6);
-  expect(plans.reduce((n,p)=>n+(p.kind==='showcase'?(p.game==='tavla'?2:4):p.waitingBots!),3)).toBe(38);
+  expect(plans.filter(p=>p.kind==='showcase')).toHaveLength(0);
+  expect(plans.reduce((n,p)=>n+p.waitingBots!,3)).toBe(16);
   expect(plans.every(p => p.tablePool?.length === 8)).toBe(true);
-  expect(new Set(plans.map(p => p.key)).size).toBe(12);
+  expect(new Set(plans.map(p => p.key)).size).toBe(6);
   expect(plans.filter(p=>p.kind==='waiting' && p.waitingBots===3).map(p=>p.game)).toEqual(['51','duz']);
   expect(plans.filter(p=>p.kind==='waiting' && p.waitingBots===2)).toHaveLength(3);
   expect(plans.every(p=>p.kind==='showcase' || p.waitingBots! < (p.game==='tavla'?2:4))).toBe(true);

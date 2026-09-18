@@ -168,6 +168,8 @@ export class PopulationDirector {
     }
     if (!running) return;
 
+    await this.fillLobby(snapshot, used);
+
     // Existing tables with waiting humans take precedence over empty showcase quotas.
     const plans = [...this.plans].sort((a, b) => Number(!!this.managed.get(b.key)?.room.status().humanSeats.length)
       - Number(!!this.managed.get(a.key)?.room.status().humanSeats.length));
@@ -200,6 +202,11 @@ export class PopulationDirector {
           }
         }
         if (!state.humanSeats.length && this.now() >= item.rotateAt) {
+          if (plan.kind === 'waiting' && plan.tablePool) {
+            item.room.acceptNewMatches(false);
+            await this.retire(plan.key, item, used);
+            continue;
+          }
           const seats = item.room.seats();
           // Rotate one or two occupants instead of emptying every waiting table at once.
           const count = Math.min(seats.length, 1 + Math.floor(this.random() * 2));
