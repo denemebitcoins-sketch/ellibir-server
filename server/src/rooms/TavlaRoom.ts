@@ -10,8 +10,9 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterCha
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest, giftRecipientsAllowed } from '../gifts';
-import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat, selectSitSeat } from '../seatSelection';
 import { tavlaCanakChance } from '../canakPolicy';
+import { TavlaPresentationGate } from '../tavlaPresentation';
 import { canUseReaction } from '../cosmetics';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
@@ -44,12 +45,14 @@ export class TavlaRoom extends Room {
   private botTimer: NodeJS.Timeout | null = null;
   private humanTimer: NodeJS.Timeout | null = null;
   private gameTimer: NodeJS.Timeout | null = null;
+  private presentationTimer: NodeJS.Timeout | null = null;
+  private readonly presentation = new TavlaPresentationGate();
   private startAt = 0;
   private turnDeadlineAt = 0;
   private timerContext = '';
   private readonly START_MS = 7000;
   private readonly STEP_MS = 900;              // bot adım temposu (zar → hamle → hamle)
-  private readonly GAME_END_MS = 7000;         // oyun sonu gösterimi → yeni oyun
+  private readonly GAME_END_MS = 3500;         // el sonu gosterimi -> yeni oyun
   private readonly TURN_GRACE_MS = 6000;
   private bet = 0;
   private settled = false;
@@ -138,6 +141,7 @@ export class TavlaRoom extends Room {
     return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
   }
   private pausePopulationTimers() {
+    if (this.presentationTimer) { clearTimeout(this.presentationTimer); this.presentationTimer = null; }
     this.clearTurnTimers();
     this.turnDeadlineAt = 0;
     if (this.gameTimer) { clearTimeout(this.gameTimer); this.gameTimer = null; }
@@ -221,6 +225,9 @@ export class TavlaRoom extends Room {
       let cmd: any;
       try { cmd = typeof raw === 'string' ? JSON.parse(raw) : raw; }
       catch { client.send('moveError', { code: 'bad_json' }); return; }
+      if (this.presentation.remaining(Date.now()) > 0) {
+        client.send('moveError', { code: 'presentation_pending', message: 'Zarlar toplaniyor.' }); return;
+      }
       const r = applyTavlaMove(this.game, seat, cmd);
       if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
       this.afterChange();
@@ -438,11 +445,11 @@ export class TavlaRoom extends Room {
     const taken = this.occupiedSeats();
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
-    let seat: number;
-    const wanted = Number(rawSeat);
-    if (Number.isInteger(wanted) && free.includes(wanted)) seat = wanted;
-    else if (free.length === 1) seat = free[0]!;
-    else { client.send('sitError', { reason: 'koltuk seç' }); return; }
+    const decision = selectSitSeat(this.humanSeats, taken, rawSeat);
+    if (decision.seat == null) {
+      client.send('sitError', { reason: decision.error === 'seat_unavailable' ? 'Secilen koltuk dolu.' : 'Koltuk sec.' }); return;
+    }
+    const seat = decision.seat;
 
     this.spectators.delete(client.sessionId);
     this.spectatorNames.delete(client.sessionId);
@@ -730,6 +737,15 @@ export class TavlaRoom extends Room {
           this.afterChange();
         }, this.GAME_END_MS);
       }
+      this.pushViews(); return;
+    }
+    const presentationMs = this.presentation.observe(this.game, Date.now());
+    if (presentationMs > 0) {
+      this.clearTurnTimers(); this.turnDeadlineAt = 0;
+      if (!this.presentationTimer) this.presentationTimer = setTimeout(() => {
+        this.presentationTimer = null;
+        this.afterChange();
+      }, presentationMs);
       this.pushViews(); return;
     }
     this.scheduleTurn();

@@ -56,3 +56,13 @@ export function findExistingUserSeat(
   }
   return null;
 }
+
+/** Spectator sit requests preserve an explicit chair even if another chair is free. */
+export function selectSitSeat(humanSeats: readonly number[], occupied: ReadonlySet<number>, raw: unknown): JoinSeatDecision {
+  const automatic = raw === undefined || raw === null || raw === '' || raw === -1;
+  if (automatic && humanSeats.filter(s => !occupied.has(s)).length !== 1)
+    return { seat: null, error: 'invalid_seat' };
+  if (!automatic && (!Number.isInteger(Number(raw)) || Number(raw) < 0))
+    return { seat: null, error: 'invalid_seat' };
+  return selectJoinSeat(humanSeats, occupied, false, raw);
+}

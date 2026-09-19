@@ -17,6 +17,7 @@ beforeEach(() => {
   room.game.points[0] = -15;
   room.pushViews = vi.fn();
   room.afterChange();
+  vi.advanceTimersByTime(3100); // opening dice must finish before the first turn budget
 });
 afterEach(() => {
   room.clearTurnTimers();

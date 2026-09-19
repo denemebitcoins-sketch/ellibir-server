@@ -90,6 +90,10 @@ function makeTavla(seed = 123) {
   Object.defineProperty(r, 'metadata', { get: () => ({ mode: 'duo', table: 1 }) });
   r.cfg = { seed, names: ['A', 'B'], botSeats: [], rules: { ...DEFAULT_TAVLA_RULES, targetScore: 1 } };
   r.humanSeats = [0, 1]; r.bet = 1000; r.STEP_MS = 1;
+  // This accelerated SQL-ledger fixture fakes timers but intentionally not Date.
+  // Actual presentation/turn timing is exercised in feedback19/tavlaTurnTimer.
+  vi.spyOn(r.presentation, 'observe').mockReturnValue(0);
+  vi.spyOn(r.presentation, 'remaining').mockReturnValue(0);
   r.refreshCanak = vi.fn(); r.broadcast = vi.fn();
   const population = r.bindPopulation(storage, owner, 'tavla:solo:1');
   return { r, population };

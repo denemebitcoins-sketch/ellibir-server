@@ -26,4 +26,12 @@ describe('authenticated bot invitations',()=>{
     expect((await send({character})).status).toBe(429);
     expect(invite).toHaveBeenCalledOnce();
   });
+  it('accepts the other two bots from the same select-all burst, not a fourth',async()=>{
+    const id=(n:number)=>`b0700000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+    const replies=await Promise.all([send({character:id(2)}),send({character:id(3)})]);
+    expect(replies.map(r=>r.status)).toEqual([200,200]);
+    expect(invite).toHaveBeenCalledTimes(3);
+    expect((await send({character:id(4)})).status).toBe(429);
+    expect((await send({character:id(2)})).status).toBe(429);
+  });
 });

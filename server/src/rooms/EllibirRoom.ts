@@ -8,7 +8,7 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterCha
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest, giftRecipientsAllowed } from '../gifts';
-import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat, selectSitSeat } from '../seatSelection';
 import { ellibirCanakChance } from '../canakPolicy';
 import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
@@ -517,15 +517,11 @@ export class EllibirRoom extends Room {
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
 
-    let seat: number;
-    const wanted = Number(rawSeat);
-    if (Number.isInteger(wanted) && free.includes(wanted)) {
-      seat = wanted;
-    } else if (free.length === 1) {
-      seat = free[0]!;            // tek boş koltuk → otomatik otur
-    } else {
-      client.send('sitError', { reason: 'koltuk seç (raw.seat zorunlu)' }); return; // >1 boş, seçim yok
+    const decision = selectSitSeat(this.humanSeats, taken, rawSeat);
+    if (decision.seat == null) {
+      client.send('sitError', { reason: decision.error === 'seat_unavailable' ? 'Secilen koltuk dolu.' : 'Koltuk sec.' }); return;
     }
+    const seat = decision.seat;
 
     this.spectators.delete(client.sessionId);
     this.spectatorNames.delete(client.sessionId);
@@ -919,7 +915,7 @@ export class EllibirRoom extends Room {
       console.log('[el bitti] 3sn sonra yeni el');
       this.maybeCanak();
       if (this.handEndTimer) clearTimeout(this.handEndTimer);
-      this.handEndTimer = setTimeout(() => this.continueHand(), 3000);
+      this.handEndTimer = setTimeout(() => this.continueHand(), 3500);
     }
     if (this.game.phase === 'matchEnded' && !this.settled) {
       this.settled = true;

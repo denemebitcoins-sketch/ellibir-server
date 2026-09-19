@@ -1011,11 +1011,14 @@ function colorMultOf(state: OkeyGameState): number {
  * BANKO kişi çarpanı. Başka oyuncuların bankosu hedef oyuncuya taşınmaz:
  * yer rengi × kazananın bankosu × hedef oyuncunun kendi bankosu.
  * Kazanan için aynı banko iki kez sayılmaz; berabere elde yalnız kişinin kendi bankosu geçerlidir.
+ * Esli kazanan ortagin indirimi yalniz kendi bankosunu kullanir, ortaginkiyle katlanmaz.
  */
 export function bankoPlayerMultOf(state: OkeyGameState, winnerSeat: number, targetSeat: number): number {
   let m = colorMultOf(state);
   if (winnerSeat >= 0) {
-    if (state.bankoThisEl[winnerSeat]) m *= 2;
+    const winningPartner = state.rules.teamMode && targetSeat !== winnerSeat && targetSeat >= 0
+      && targetSeat % 2 === winnerSeat % 2;
+    if (!winningPartner && state.bankoThisEl[winnerSeat]) m *= 2;
     if (targetSeat >= 0 && targetSeat !== winnerSeat && state.bankoThisEl[targetSeat]) m *= 2;
   } else if (targetSeat >= 0 && state.bankoThisEl[targetSeat]) {
     m *= 2;

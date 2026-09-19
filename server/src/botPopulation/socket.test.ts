@@ -91,7 +91,7 @@ describe('real SDK + websocket population tables (isolated auth and SQL)',()=>{
     await director.tick();
     expect(room.population).toBeNull();expect(await storage.rooms()).toHaveLength(0);
     const invited=[...director.status().lobby];
-    for(const id of invited)await director.inviteHuman(ids.human,id);
+    await Promise.all(invited.map(id=>director.inviteHuman(ids.human,id)));
     expect(room.roomId).toBe(roomId);expect(JSON.stringify(room.cfg)).toBe(config);
     expect(room.seats.get(connection.sessionId)).toBe(0);
     expect((await matchMaker.query()).map(r=>r.roomId)).toEqual([roomId]);

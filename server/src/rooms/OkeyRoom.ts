@@ -10,7 +10,7 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterCha
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest, giftRecipientsAllowed } from '../gifts';
-import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from '../seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat, selectSitSeat } from '../seatSelection';
 import { okeyCanakChance } from '../canakPolicy';
 import { hasLowestScoreTie, isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
@@ -72,7 +72,7 @@ export class OkeyRoom extends Room {
   private turnDeadlineAt = 0;
   private readonly START_MS = 7000;
   private readonly STEP_MS = 1100;             // bot tur temposu (client uçuş animasyonuna yer)
-  private readonly EL_END_MS = 7000;           // el sonu gösterimi → yeni el
+  private readonly EL_END_MS = 3500;           // el sonu gosterimi -> yeni el
   private readonly BANKO_PHASE_MS = 10000;      // banko SEÇİM listesi süresi
   private bankoTimer: NodeJS.Timeout | null = null;
   private bankoTick: NodeJS.Timeout | null = null;
@@ -505,11 +505,11 @@ export class OkeyRoom extends Room {
     const taken = this.occupiedSeats();
     const free = this.humanSeats.filter((s) => !taken.has(s));
     if (free.length === 0) { client.send('sitError', { reason: 'boş koltuk yok' }); return; }
-    let seat: number;
-    const wanted = Number(rawSeat);
-    if (Number.isInteger(wanted) && free.includes(wanted)) seat = wanted;
-    else if (free.length === 1) seat = free[0]!;
-    else { client.send('sitError', { reason: 'koltuk seç' }); return; }
+    const decision = selectSitSeat(this.humanSeats, taken, rawSeat);
+    if (decision.seat == null) {
+      client.send('sitError', { reason: decision.error === 'seat_unavailable' ? 'Secilen koltuk dolu.' : 'Koltuk sec.' }); return;
+    }
+    const seat = decision.seat;
 
     this.spectators.delete(client.sessionId);
     this.spectatorNames.delete(client.sessionId);

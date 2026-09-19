@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat } from './seatSelection';
+import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat, selectSitSeat } from './seatSelection';
 
 describe('absolute room seat selection', () => {
   const humanSeats = [0, 1, 2, 3];
+  for (const game of ['ellibir','okey','tavla'] as const) {
+    it(`${game}: exact chair survives every occupancy and spectator-sit combination`, () => {
+      const seats = onlineHumanSeats(game);
+      for (const requested of seats) {
+        expect(selectSitSeat(seats, new Set(seats.filter(s=>s!==requested)), requested).seat).toBe(requested);
+        for (const free of seats.filter(s=>s!==requested)) {
+          const occupied = new Set(seats.filter(s=>s!==free));
+          expect(selectSitSeat(seats,occupied,requested)).toEqual({seat:null,error:'seat_unavailable'});
+          expect(selectJoinSeat(seats,occupied,false,requested)).toEqual({seat:null,error:'seat_unavailable'});
+        }
+      }
+      expect(selectSitSeat(seats,new Set(seats.slice(1)),-1).seat).toBe(0);
+      expect(selectSitSeat(seats,new Set(),'bad').error).toBe('invalid_seat');
+    });
+  }
 
   it('keeps the exact seat selected in the salon', () => {
     expect(selectJoinSeat(humanSeats, new Set([0]), false, 1)).toEqual({ seat: 1 });
