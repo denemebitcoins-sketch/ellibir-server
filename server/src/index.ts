@@ -30,12 +30,28 @@ const populationRuntime = new PopulationRuntime();
 app.use('/admin/bots', populationAdminRouter(populationRuntime.storage, () => populationRuntime.tick()));
 app.use('/bots', populationPublicRouter((uid,character) => populationRuntime.invite(uid,character)));
 app.get('/', (_req, res) => res.send('Elli Bir Colyseus sunucusu çalışıyor ✦'));
-app.get('/health', (_req, res) => res.json({
-  ok: true,
-  service: 'ellibir-server',
-  okey101Deal: true,
-  commit: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local',
-}));
+// SAĞLIK: matchmaker kapanma modundaysa (SHUTTING_DOWN=2) 503 döner → Render health check
+// başarısız sayar ve servisi yeniden başlatır. Eskiden hep 200 dönüyordu; süreç yarı ölü kalınca
+// (HTTP cevap veriyor, joinOrCreate 503) Render bunu fark etmiyordu.
+app.get('/health', (_req, res) => {
+  const shuttingDown = (matchMaker as any).state === 2;
+  res.status(shuttingDown ? 503 : 200).json({
+    ok: !shuttingDown,
+    service: 'ellibir-server',
+    okey101Deal: true,
+    matchmaker: shuttingDown ? 'shutting_down' : 'ready',
+    commit: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local',
+  });
+});
+
+// Arka plandaki bir Promise hatası tüm sunucuyu kapatmasın: Node, dinleyici yoksa bunu
+// uncaughtException'a çevirir, Colyseus da her uncaughtException'da graceful shutdown başlatır.
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[fatal?] unhandledRejection (sunucu açık kalıyor):', reason?.stack || reason);
+});
+process.on('uncaughtException', (err: any) => {
+  console.error('[fatal] uncaughtException → shutdown:', err?.stack || err);
+});
 app.get('/auth/email/status', (_req, res) => res.json(emailAuthStatus()));
 app.post('/auth/email/send-code', async (req, res) => {
   try {
@@ -234,9 +250,18 @@ gameServer.define('tavla', TavlaRoom).filterBy(['mode', 'table']);
 
 try { (matchMaker as any).controller.seatReservationTime = 60; } catch {}
 
-gameServer.onBeforeShutdown(() => populationRuntime.stop().catch(() => {
-  console.warn('[population] shutdown drain incomplete; lease recovery will reconcile');
-}));
+gameServer.onBeforeShutdown(() => {
+  // BEKÇİ: kapanma bir yerde takılırsa süreç yarı ölü kalıyordu (masa açılmıyor, 503).
+  // 25 sn içinde bitmezse zorla çık → Render yeni süreç başlatır.
+  console.warn('[shutdown] graceful shutdown başladı');
+  setTimeout(() => {
+    console.error('[shutdown] 25 sn içinde bitmedi → zorla çıkılıyor');
+    process.exit(1);
+  }, 25_000).unref();
+  return populationRuntime.stop().catch(() => {
+    console.warn('[population] shutdown drain incomplete; lease recovery will reconcile');
+  });
+});
 void gameServer.listen(port).then(() => populationRuntime.start()).catch(() => {
   console.error('[server] listen failed'); process.exitCode = 1;
 });
