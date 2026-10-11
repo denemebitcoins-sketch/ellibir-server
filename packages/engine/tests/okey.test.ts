@@ -804,6 +804,7 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
 
     st.turn = 0;
     st.phase = 'discard';
+    st.players[0]!.hand.push(t('Y', 2)); // yeni turda çekilen taş (atılacak taş elde kalmalı)
     expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-limit', tileId: c.id } as any).ok).toBe(true);
   });
 
@@ -1120,7 +1121,7 @@ describe('101 işlenen taş geri alma', () => {
     const st = g101();
     const run = [t('R', 1), t('R', 2), t('R', 3)];
     const a = t('R', 4), b = t('R', 5);
-    st.players[0]!.hand = [a, b];
+    st.players[0]!.hand = [a, b, t('Y', 9)]; // atılacak taş elde kalmalı
     st.players[0]!.hasOpened = true;
     st.players[0]!.openMode = 'melds';
     st.openMelds = [{ id: 'm1', ownerSeat: 0, kind: 'run', tiles: run, points: 6 }];

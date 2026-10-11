@@ -57,6 +57,28 @@ export function findExistingUserSeat(
   return null;
 }
 
+/**
+ * Human seats that would enter a fresh match with nobody able to play them: the seat was
+ * vacated while the entry fee was being collected, or its holder is only a dropped session
+ * waiting in the 180 s reconnection window. Such seats must start under bot control
+ * (exactly like a drop after the match started) instead of waiting out the human turn timer.
+ */
+export function seatsWithoutLivePlayer(
+  humanSeats: readonly number[],
+  seats: ReadonlyMap<string, number>,
+  connectedSessions: ReadonlySet<string>,
+  botSeats: Iterable<number>,
+): number[] {
+  const bots = new Set(botSeats);
+  const holder = new Map<number, string>();
+  for (const [sessionId, seat] of seats) holder.set(seat, sessionId);
+  return humanSeats.filter((seat) => {
+    if (bots.has(seat)) return false;
+    const sessionId = holder.get(seat);
+    return sessionId === undefined || !connectedSessions.has(sessionId);
+  });
+}
+
 /** Spectator sit requests preserve an explicit chair even if another chair is free. */
 export function selectSitSeat(humanSeats: readonly number[], occupied: ReadonlySet<number>, raw: unknown): JoinSeatDecision {
   const automatic = raw === undefined || raw === null || raw === '' || raw === -1;

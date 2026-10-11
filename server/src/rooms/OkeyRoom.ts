@@ -1,5 +1,5 @@
 import { Room, Client } from '@colyseus/core';
-import { SeatPresenceLeases, hasOpenTransport } from '../seatPresenceLease';
+import { SeatPresenceLeases, hasOpenTransport, pendingReconnection } from '../seatPresenceLease';
 import {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, playOkeyBotTurn,
   beginBankoPhase, resolveBankoPhase, botBankoDecide, DEFAULT_OKEY_RULES,
@@ -10,7 +10,7 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterCha
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest, giftRecipientsAllowed } from '../gifts';
-import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat, selectSitSeat } from '../seatSelection';
+import { ExistingUserSeat, findExistingUserSeat, onlineHumanSeats, seatsWithoutLivePlayer, selectJoinSeat, selectSitSeat } from '../seatSelection';
 import { okeyCanakChance } from '../canakPolicy';
 import { hasLowestScoreTie, isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
@@ -427,6 +427,7 @@ export class OkeyRoom extends Room {
       if (this.adminBots.delete(target)) {
         this.seatNames.delete(target);
         this.logEvent(`Yönetici koltuk ${target + 1} botunu kaldırdı`);
+        this.cancelShortStartCountdown();
         this.pushViews();
       }
     });
@@ -445,6 +446,7 @@ export class OkeyRoom extends Room {
     this.populationClients.observe(client, options, this.clients, this.seats.keys());
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing && this.reclaimDroppedSeat(client, existing, options)) return;
     if (existing) {
       this.spectators.add(client.sessionId);
       const meta = await resolveClientProfileMeta(uid, options, 'İzleyici');
@@ -564,6 +566,7 @@ export class OkeyRoom extends Room {
         if (p && name) p.name = name;
       }
       if (this.preLog.length) { this.game.matchLog.unshift(...this.preLog); this.preLog = []; }
+      this.abandonUnattendedSeatsAtStart();
       this.settled = false;
       this.settlePromise = null;
       this.rematchVotes.clear();
@@ -724,11 +727,62 @@ export class OkeyRoom extends Room {
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
     this.rematchVotes.delete(seat);
+    this.cancelShortStartCountdown();
     if (this.game?.matchEnded) {
       this.abandoned.delete(seat);
       void this.maybeStartRematch();
     }
     this.scheduleBotOnlyClose();
+  }
+
+  /** Aynı doğrulanmış hesap, koltuğu 180 sn reconnect beklemesindeyken reconnect token'ı OLMADAN
+   *  (yeni oturum: join retry'si yarıda kaldı, uygulama verisi silindi, başka cihaz) aynı masaya
+   *  dönerse İZLEYİCİYE DÜŞÜRME: eski bekleme iptal edilir, koltuk yeni oturuma devredilir.
+   *  Eski oturum hâlâ bağlıysa (iki cihaz) veya İZLE ile gelindiyse eski davranış korunur. */
+  private reclaimDroppedSeat(client: Client, existing: ExistingUserSeat, options: any): boolean {
+    if (options?.spectate === true || options?.spectate === 'true') return false;
+    const oldSessionId = existing.sessionId;
+    if (oldSessionId === client.sessionId || this.clients.some(c => c.sessionId === oldSessionId)) return false;
+    const hold = pendingReconnection(this, oldSessionId);
+    if (!hold) return false;
+    const seat = existing.seat;
+    // Lease'i önce durdur: eski onDrop'un await'i reddedilince owns()=false görür ve koltuğa dokunmaz.
+    this.presenceLeases.stop(oldSessionId);
+    this.seats.delete(oldSessionId);
+    this.seats.set(client.sessionId, seat);
+    this.messageGuard.forget(oldSessionId);
+    this.giftBusy.delete(oldSessionId);
+    this.lastReconnectAt.delete(oldSessionId);
+    this.takeoverPending.delete(oldSessionId);
+    this.abandoned.delete(seat);
+    hold.reject(new Error('seat_reclaimed_by_new_session'));
+    this.presenceLeases.restore(client.sessionId, this.seatUsers.get(seat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !!this.game);
+    console.log(`[OkeyRoom.onJoin] ayni uid yeni oturumla dondu -> koltuk ${seat} devredildi old=${oldSessionId} new=${client.sessionId}`);
+    this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
+    client.send('seat', { seat });
+    this.afterChange();
+    return true;
+  }
+
+  /** Oyun kurulurken koltukta OYNAYABİLECEK bağlı insan yoksa (giriş ücreti alınırken kalktı ya da
+   *  bekleme/rövanş sırasında düştü) koltuk HEMEN bota geçer; dönen oyuncuya onReconnect kontrolü verir. */
+  private abandonUnattendedSeatsAtStart() {
+    if (!this.game) return;
+    const connected = new Set(this.clients.map((c) => c.sessionId));
+    const bots = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
+    for (const seat of seatsWithoutLivePlayer(this.humanSeats, this.seats, connected, bots)) {
+      if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} masada değil — bot devraldı`);
+      this.abandoned.add(seat);
+    }
+  }
+
+  /** Geri sayım sürerken koltuk boşalırsa sayacı iptal et: sonra oturan oyuncu tam geri sayımla başlasın. */
+  private cancelShortStartCountdown() {
+    if (this.game || this.entryStarting || !this.startTimer) return;
+    if (this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length) return;
+    clearTimeout(this.startTimer); this.startTimer = null;
+    if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
+    this.startAt = 0;
   }
 
   /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */

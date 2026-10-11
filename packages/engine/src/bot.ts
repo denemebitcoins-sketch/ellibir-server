@@ -337,6 +337,11 @@ export class HeuristicBot implements MoveProvider {
   private handlePickup(view: PlayerView): Move | null {
     const pk = view.pickup;
     if (!pk || pk.committed) return null;
+    // AÇIK bot kullanamayacağı kartı SORMAZ (motor canSor ile aynı): VER çıkarsa kart
+    // zorunlu olur ve açık oyuncu kullanmadan atamaz → tur kilitlenirdi.
+    const pkCard = view.hand.find((c) => c.id === pk.cardId);
+    if (view.hasOpened && pkCard && !this.openedPickupUse(view, pkCard))
+      return pk.zorunlu ? null : { type: 'cancelPickup' };
     // Henüz sormadıysa kağıdı SOR (canSor koşullarını taklit: alan ve atan çift DEĞİL).
     // Atanın çift olup olmadığını öğrenmek doğal strateji; sorgu döngüsünü görünür kılar.
     if (!pk.sorguUsed && !pk.zorunlu && !view.isCift && view.hand.length > 2) {

@@ -1,5 +1,5 @@
 import { Room, Client } from '@colyseus/core';
-import { SeatPresenceLeases, hasOpenTransport } from '../seatPresenceLease';
+import { SeatPresenceLeases, hasOpenTransport, pendingReconnection } from '../seatPresenceLease';
 import { applySorguTimeout } from '../../../packages/engine/src/game';
 import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clearHandOrder, reconcileHandOrder } from '../clientView';
@@ -8,7 +8,7 @@ import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterCha
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest, giftRecipientsAllowed } from '../gifts';
-import { findExistingUserSeat, onlineHumanSeats, selectJoinSeat, selectSitSeat } from '../seatSelection';
+import { ExistingUserSeat, findExistingUserSeat, onlineHumanSeats, seatsWithoutLivePlayer, selectJoinSeat, selectSitSeat } from '../seatSelection';
 import { ellibirCanakChance } from '../canakPolicy';
 import { isOneRoundNoContest, shouldDeferEntryHouse } from '../noContest';
 import { canUseReaction } from '../cosmetics';
@@ -71,6 +71,7 @@ export class EllibirRoom extends Room {
   private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private rematchVotes = new Set<number>();    // maç sonu TEKRAR OYNA diyen insan koltukları
   private rematchStarting = false;             // çift ücret/yeni-maç başlangıcı koruması
+  private preStartAway = new Set<number>();    // oyun kurulmadan 'away' diyen koltuklar (oyun başlayınca bot devralır)
 
   private lastReconnectAt = new Map<string, number>();
   private takeoverPending = new Set<string>(); // TAKEOVER: zombiyi bilerek dusurduk, onDrop kalkanlari atlansin // STALE-DROP kalkanı (wifi→mobil geçişi)
@@ -261,6 +262,7 @@ export class EllibirRoom extends Room {
       if (this.adminBots.delete(target)) {
         this.seatNames.delete(target);
         this.logEvent(`Yönetici koltuk ${target + 1} botunu kaldırdı`);
+        this.cancelShortStartCountdown();
         this.pushViews();
       }
     });
@@ -378,6 +380,7 @@ export class EllibirRoom extends Room {
       if (!payloadWithinLimit(raw, 256) || !this.messageGuard.allow(client.sessionId, 'away', 6, 3000)) return;
       const away = raw?.away !== false;
       void keepSeatPresence(this.seatUsers.get(seat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !away, !!this.game);
+      if (!this.game) { if (away) this.preStartAway.add(seat); else this.preStartAway.delete(seat); }
       const ab: number[] = Array.isArray(this.game?.abandoned) ? this.game.abandoned : [];
       if (away) {
         if (!ab.includes(seat)) this.logEvent(`${this.nameOfSeat(seat)} masadan uzaklaştı — bot devraldı`);
@@ -452,6 +455,7 @@ export class EllibirRoom extends Room {
     if (options?.ihalePilotVersion === 1) this.ihalePilotClients.add(client.sessionId);
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
+    if (existing && this.reclaimDroppedSeat(client, existing, options)) return;
     if (existing) {
       this.spectators.add(client.sessionId);
       const meta = await resolveClientProfileMeta(uid, options, 'İzleyici');
@@ -571,6 +575,7 @@ export class EllibirRoom extends Room {
           const p = this.game.players.find((pl: any) => pl.seat === seat);
           if (p && name) p.name = name;
         }
+        this.abandonUnattendedSeatsAtStart();
         this.resetHandOrder();
         console.log(`[EllibirRoom] oyun başladı, players=${this.game?.players?.length}`);
         this.settled = false;
@@ -688,6 +693,7 @@ export class EllibirRoom extends Room {
     console.log(`[onReconnect] TETİKLENDİ sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
     const seat = this.seats.get(client.sessionId);
     if (seat == null) return;
+    this.preStartAway.delete(seat);
     this.setAbandoned(seat, false);            // bot diskalifiye
     if (this.forceBotSeat === seat) this.forceBotSeat = null;
     try { client.send('seat', { seat }); } catch { /* yoksay */ }
@@ -766,10 +772,72 @@ export class EllibirRoom extends Room {
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
     this.rematchVotes.delete(seat);
+    this.preStartAway.delete(seat);
+    this.cancelShortStartCountdown();
     // Mac sonucunda bekleyen bir oyuncu hazirken digeri cikarsa, kalan oyu yeniden
     // degerlendir. Eksik gercek oyunculu masa newMatch icinde lobby beklemesine doner.
     if (this.game?.phase === 'matchEnded') void this.maybeStartRematch();
     this.scheduleBotOnlyClose();
+  }
+
+  /** Aynı doğrulanmış hesap, koltuğu 180 sn reconnect beklemesindeyken reconnect token'ı OLMADAN
+   *  (yeni oturum: join retry'si yarıda kaldı, uygulama verisi silindi, başka cihaz) aynı masaya
+   *  dönerse İZLEYİCİYE DÜŞÜRME: eski bekleme iptal edilir, koltuk yeni oturuma devredilir.
+   *  Eski oturum hâlâ bağlıysa (iki cihaz) veya İZLE ile gelindiyse eski davranış korunur. */
+  private reclaimDroppedSeat(client: Client, existing: ExistingUserSeat, options: any): boolean {
+    if (options?.spectate === true || options?.spectate === 'true') return false;
+    const oldSessionId = existing.sessionId;
+    if (oldSessionId === client.sessionId || this.clients.some(c => c.sessionId === oldSessionId)) return false;
+    const hold = pendingReconnection(this, oldSessionId);
+    if (!hold) return false;
+    const seat = existing.seat;
+    // Lease'i önce durdur: eski onDrop'un await'i reddedilince owns()=false görür ve koltuğa dokunmaz.
+    this.presenceLeases.stop(oldSessionId);
+    this.seats.delete(oldSessionId);
+    this.seats.set(client.sessionId, seat);
+    this.messageGuard.forget(oldSessionId);
+    this.giftBusy.delete(oldSessionId);
+    this.lastReconnectAt.delete(oldSessionId);
+    this.takeoverPending.delete(oldSessionId);
+    this.preStartAway.delete(seat);
+    this.setAbandoned(seat, false);
+    if (this.forceBotSeat === seat) this.forceBotSeat = null;
+    this.ihalePilotClients.delete(oldSessionId);
+    hold.reject(new Error('seat_reclaimed_by_new_session'));
+    this.presenceLeases.restore(client.sessionId, this.seatUsers.get(seat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !!this.game);
+    console.log(`[EllibirRoom.onJoin] ayni uid yeni oturumla dondu -> koltuk ${seat} devredildi old=${oldSessionId} new=${client.sessionId}`);
+    this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
+    client.send('seat', { seat });
+    this.runEngine();
+    this.pushViews();
+    return true;
+  }
+
+  /** Oyun kurulurken koltukta OYNAYABİLECEK bağlı insan yoksa (giriş ücreti alınırken kalktı,
+   *  bekleme/geri sayımda düştü ya da arka plana geçti) koltuk HEMEN bota geçer; aksi halde her
+   *  turda tam tur süresi + grace beklenir. Oyuncu dönünce onReconnect/away=false kontrolü geri verir. */
+  private abandonUnattendedSeatsAtStart() {
+    if (!this.game) return;
+    const connected = new Set(this.clients.map((c) => c.sessionId));
+    const bots = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
+    const occupied = new Set(this.seats.values());
+    const unattended = new Set(seatsWithoutLivePlayer(this.humanSeats, this.seats, connected, bots));
+    for (const seat of this.preStartAway) if (occupied.has(seat)) unattended.add(seat);
+    this.preStartAway.clear();
+    for (const seat of unattended) {
+      this.setAbandoned(seat, true);
+      this.logEvent(`${this.nameOfSeat(seat)} masada değil — bot devraldı`);
+    }
+  }
+
+  /** Geri sayım sürerken koltuk boşalırsa sayacı iptal et: sonra oturan oyuncu kalan birkaç
+   *  saniyeyle değil, tam geri sayımla başlasın (eski sayaç ücreti habersiz kesiyordu). */
+  private cancelShortStartCountdown() {
+    if (this.game || this.entryStarting || !this.startTimer) return;
+    if (this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length) return;
+    clearTimeout(this.startTimer); this.startTimer = null;
+    if (this.startTick) { clearInterval(this.startTick); this.startTick = null; }
+    this.startAt = 0;
   }
 
   /** Gerçek oyuncu kalmadığında botların kendi kendine oynadığı zombi masayı lobby'den kaldır. */

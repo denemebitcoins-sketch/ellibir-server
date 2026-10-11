@@ -1,7 +1,7 @@
 /** TAVLA motoru — dış API. 51 ve OKEY motorlarıyla yan yana yaşar (packages/engine/src/tavla). */
 export {
   createTavlaGame, startNextGame, applyTavlaMove, autoTavlaMove,
-  legalSteps, stepFor, pipCount, DEFAULT_TAVLA_RULES,
+  legalSteps, playableSteps, stepFor, pipCount, DEFAULT_TAVLA_RULES,
 } from './game';
 export type {
   TavlaGameState, TavlaPlayer, TavlaMove, TavlaMoveResult, TavlaRuleConfig, TavlaStep,

@@ -5,6 +5,13 @@ import { PopulationRoomBinding } from './roomBinding';
 import { PopulationRoomSession } from './roomSession';
 import { PopulationRoomLease, PopulationStorage } from './storage';
 
+/** A salon shows ONE card per table number (per game, and per variant for okey) whatever the
+ * room mode is, while matchmaking keys rooms by mode too. A human duo/duo3/quad room therefore
+ * occupies that number for population purposes even though its `mode` differs from the bot plan. */
+function tableFilters(name: string, game: string, table: number): Record<string, unknown> {
+  return { name, table, ...(name === 'okey' ? { variant: game } : {}) };
+}
+
 interface Held {
   lease: PopulationRoomLease;
   storage: PopulationStorage;
@@ -101,9 +108,7 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
     for (const table of tables) {
       if (hosts.some(h => h.game === plan.game && h.team_mode === plan.team && h.table_no === table)) continue;
       const name = plan.game === '51' ? 'ellibir' : plan.game === 'ihale' ? 'ihale' : plan.game === 'tavla' ? 'tavla' : 'okey';
-      const filters = {name, mode: plan.team ? 'duo' : 'solo', table,
-        ...(name === 'okey' ? {variant: plan.game} : {})};
-      if ((await matchMaker.query(filters)).length) continue;
+      if ((await matchMaker.query(tableFilters(name, plan.game, table))).length) continue;
       const session = await this.openAtTable({...plan, table}, storage, owner);
       if (session) return session;
       // A competing owner may have claimed the quota, even on a different table.
@@ -134,8 +139,7 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
     if (held.lease.owner_id !== owner || held.storage !== storage) throw new Error('population_provider_owner');
     const name = plan.game === '51' ? 'ellibir' : plan.game === 'ihale' ? 'ihale' : plan.game === 'tavla' ? 'tavla' : 'okey';
     const mode = plan.team ? 'duo' : 'solo';
-    const filters: any = { name, mode, table: plan.table };
-    if (name === 'okey') filters.variant = plan.game;
+    const filters = tableFilters(name, plan.game, plan.table);
 
     // The prior authority has expired and SQL already refunded its orphan escrow.
     // Close only that exact recorded room, never an unrelated human-created room.

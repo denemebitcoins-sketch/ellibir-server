@@ -79,6 +79,22 @@ describe('actual Colyseus room provisioning with current authority migrations', 
     expect(await storage.rooms()).toEqual([]);
     expect(await matchMaker.query()).toHaveLength(2);
   });
+  it.each([['ihale','duo'],['tavla','duo'],['51','duo3']] as const)('treats a human %s %s room on the same table number as occupied', async (game, mode) => {
+    const name = game === '51' ? 'ellibir' : game;
+    const human = await matchMaker.handleCreateRoom(name, {mode,table:1,bet:1000});
+    const provider = new ColyseusPopulationProvider(() => 0.99);
+    expect(await provider.open(plan(game, 1), storage, owner)).toBeNull();
+    expect(await storage.rooms()).toEqual([]);
+    expect(await provider.open({...plan(game, 1), key:`${game}:showcase`, tablePool:[1,2]}, storage, owner)).toBeTruthy();
+    expect((await storage.rooms())[0].table_no).toBe(2);
+    expect((await matchMaker.query()).map(r => r.roomId)).toContain(human.roomId);
+  });
+  it('okey variants keep separate table numbers for population placement', async () => {
+    await matchMaker.handleCreateRoom('okey', {mode:'quad',table:1,bet:1000,variant:'yuzbir'});
+    const provider = new ColyseusPopulationProvider();
+    expect(await provider.open(plan('duz', 1), storage, owner)).toBeTruthy();
+    expect(await new ColyseusPopulationProvider().open(plan('yuzbir', 1), storage, next)).toBeNull();
+  });
   it('recovers a rotating quota in place after a lost publish response, without a second allocation', async () => {
     const provider = new ColyseusPopulationProvider(() => 0.99);
     const p = {...plan(),key:'ihale:showcase',tablePool:[2,3]};

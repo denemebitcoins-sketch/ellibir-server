@@ -369,6 +369,9 @@ function removeTiles(p: OkeyPlayer, ids: Iterable<string>): void {
   p.hand = p.hand.filter((t) => !rm.has(t.id));
 }
 
+/** 101: açma/işleme sonrası elde ATACAK en az bir taş kalmalı (bitiş = son taşı atmak). */
+export const YUZBIR_KEEP_ONE_ERROR = 'Elinde atacak en az bir taş kalmalı.';
+
 function pendingLeftError(p: OkeyPlayer, usedIds: Iterable<string>): string | null {
   const id = p.yuzbirPendingLeftTileId;
   if (!id) return null;
@@ -649,6 +652,7 @@ function openYuzbirMelds(state: OkeyGameState, seat: number, groups: string[][])
   if (typeof picked === 'string') return { ok: false, error: picked };
   if (picked.length === 0) return { ok: false, error: 'açmak için per seç' };
   const pickedIds = picked.flatMap((g) => g.map((t) => t.id));
+  if (p.hand.length - pickedIds.length < 1) return { ok: false, error: YUZBIR_KEEP_ONE_ERROR };
   const pendingErr = pendingLeftError(p, pickedIds);
   if (pendingErr) return { ok: false, error: pendingErr };
   let total = 0;
@@ -691,6 +695,7 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
   if (typeof picked === 'string') return { ok: false, error: picked };
   if (picked.length === 0) return { ok: false, error: 'açılacak çift seç' };
   const pickedIds = picked.flatMap((g) => g.map((t) => t.id));
+  if (p.hand.length - pickedIds.length < 1) return { ok: false, error: YUZBIR_KEEP_ONE_ERROR };
   const pendingErr = pendingLeftError(p, pickedIds);
   if (pendingErr) return { ok: false, error: pendingErr };
   if (!p.hasOpened) {
@@ -736,6 +741,8 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
   const previousTiles = meld.tiles.slice();
   const previousPoints = meld.points;
   const replacement = buildYuzbirJokerReplacement(state, meld, tile);
+  // Okey kurtarma eli küçültmez (okey ele döner); düz işleme son taşı tüketemez.
+  if (!replacement && p.hand.length <= 1) return { ok: false, error: YUZBIR_KEEP_ONE_ERROR };
   if (replacement) {
     meld.tiles = replacement.tiles;
   } else if (meld.kind === 'pair') {
@@ -876,7 +883,10 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       p.discardCount++;
       p.yuzbirPendingLeftTileId = undefined;
       if (state.rules.variant === 'yuzbir') {
-        const islekDiscard = isYuzbirIslekDiscard(state, tile);
+        // Bitiş atışı (açmış oyuncunun SON taşı) işlek cezası almaz — 51 ve 'finish' yoluyla aynı.
+        // Elde atacak tek taş kalma kuralıyla son taş işlek olsa da işlenemez; atmak zorunludur.
+        const finishing = p.hasOpened && p.hand.length === 0;
+        const islekDiscard = !finishing && isYuzbirIslekDiscard(state, tile);
         state.yuzbirMeldProcessCounts = {};
         state.islekHistory = state.islekHistory.filter((h) => h.seat !== seat);
         const penalty = state.rules.yuzbir.islekDiscardPenalty ?? 101;
@@ -1285,6 +1295,7 @@ export function autoOkeyMove(state: OkeyGameState, seat: number): void {
     }
   }
   tryAutoOpenYuzbir(state, seat);
+  if (p.hand.length === 0) return; // savunma: motor artık boş el üretmez
   // Okey atma: asla otomatik atılmaz; en son ele gelen (dizilim bozmaz) okey-dışı taş atılır.
   for (let i = p.hand.length - 1; i >= 0; i--) {
     const t = p.hand[i]!;

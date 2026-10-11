@@ -354,7 +354,26 @@ export function canSor(state: GameState, seat: number): boolean {
   const sorulan = state.players[prevActiveSeat(state, seat)];
   if (!sorulan) return false;
   if (sorulan.hasOpened) return false; // ELİ AÇIK olana sorgu açılamaz
-  return !sorulan.isCift; // atan kesin çiftse kart zaten kilitliydi
+  if (sorulan.isCift) return false; // atan kesin çiftse kart zaten kilitliydi
+  // AÇIK asker: VER çıkınca kart ZORUNLU olur ve açık oyuncu kartı kullanmadan atış
+  // yapamaz → kullanamayacağı kartı sorarsa tur KİLİTLENİR. Yalnız hemen kullanabileceği
+  // (işlek / joker takası / yeni per — atacak kart kalarak) kart için sorgu açılır.
+  if (player.hasOpened) {
+    const card = player.hand.find((x) => x.id === p.cardId);
+    if (!card) return false;
+    return canUseDiscardCard({
+      hand: player.hand.filter((x) => x.id !== p.cardId),
+      melds: state.melds,
+      top: card,
+      rules: state.rules,
+      hasOpened: true,
+      openMode: player.openMode,
+      ciftIslekUsed: state.ciftIslekUsed,
+      minPoints: 0,
+      minPairs: 0,
+    });
+  }
+  return true;
 }
 
 /** AÇIŞI GERİ AL hakkı: bu turda açtı, henüz kart atmadı (snapshot duruyor). */

@@ -1,5 +1,5 @@
 import {
-  TavlaGameState, TavlaStep, applyTavlaMove, legalSteps, stepFor, pipCount,
+  TavlaGameState, TavlaStep, applyTavlaMove, legalSteps, playableSteps, stepFor, pipCount,
 } from './game';
 
 /** Bot KATLAMA teklif etsin mi? Belirgin pip üstünlüğü + küp erişilebilir + tavan altı. */
@@ -158,7 +158,7 @@ export function tavlaHitRolls(st: TavlaGameState, defender: number): number[] {
       const step = stepFor(g, attacker, from, die);
       if (!step) return null;
       const next = cloneState(g);
-      if (!applyTavlaMove(next, attacker, { t: 'move', from, die }).ok) return null;
+      if (!applyTavlaMove(next, attacker, { t: 'move', from, die }, SIM).ok) return null;
       if (step.hit && own(st, defender, step.to) === 1) hitMask |= 1 << step.to;
       return { next, step };
     };
@@ -228,6 +228,8 @@ function cloneState(st: TavlaGameState): TavlaGameState {
 interface PlanNode { g: TavlaGameState; steps: TavlaStep[]; score: number; order: number; }
 
 const BEAM = 24;
+/** Arama simülasyonu: zorunlu-zar doğrulaması atlanır (plan zaten maksimum zarı korur). */
+const SIM = { skipDiceRule: true } as const;
 
 /** Bu turda oynanabilecek EN İYİ tam plan (adım listesi). Boş = hamle yok. */
 export function bestTavlaTurn(st: TavlaGameState, seat: number): TavlaStep[] {
@@ -245,7 +247,7 @@ export function bestTavlaTurn(st: TavlaGameState, seat: number): TavlaStep[] {
     let best = 0;
     for (const step of legalSteps(g, seat)) {
       const next = cloneState(g);
-      if (!applyTavlaMove(next, seat, { t: 'move', from: step.from, die: step.die }).ok) continue;
+      if (!applyTavlaMove(next, seat, { t: 'move', from: step.from, die: step.die }, SIM).ok) continue;
       best = Math.max(best, 1 + maxPlayable(next));
       if (best === g.movesLeft.length) break;
     }
@@ -262,7 +264,7 @@ export function bestTavlaTurn(st: TavlaGameState, seat: number): TavlaStep[] {
       if (steps.length === 0) continue;
       for (const s of steps) {
         const g2 = cloneState(node.g);
-        const r = applyTavlaMove(g2, seat, { t: 'move', from: s.from, die: s.die });
+        const r = applyTavlaMove(g2, seat, { t: 'move', from: s.from, die: s.die }, SIM);
         if (!r.ok) continue;
         const steps = [...node.steps, s];
         if (!g2.gameEnded && steps.length + maxPlayable(g2) < required) continue;
@@ -297,7 +299,13 @@ export function bestTavlaTurn(st: TavlaGameState, seat: number): TavlaStep[] {
 /** Sıradaki EN İYİ tek hamle = en iyi tam planın İLK adımı (server adım adım oynatır). */
 export function bestTavlaStep(st: TavlaGameState, seat: number): TavlaStep | null {
   const plan = bestTavlaTurn(st, seat);
-  return plan.length > 0 ? plan[0]! : null;
+  if (plan.length === 0) return null;
+  // Emniyet: motorun zorunlu-zar kuralı reddedeceği bir adımı ASLA döndürme (oda aynı
+  // reddedilen adımı sonsuza dek denerdi). Plan kurala uymuyorsa kurala uyan ilk adım.
+  const allowed = playableSteps(st, seat);
+  const first = plan[0]!;
+  if (allowed.some((a) => a.from === first.from && a.die === first.die)) return first;
+  return allowed[0] ?? null;
 }
 
 /** Bot tam turunu oynar: zar atar + planın tamamını uygular. */

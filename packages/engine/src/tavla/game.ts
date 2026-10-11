@@ -208,6 +208,59 @@ export function legalSteps(st: TavlaGameState, pl: number): TavlaStep[] {
   return out;
 }
 
+/** Arama için hafif kopya (matchLog/geçmiş paylaşılmaz). */
+function searchClone(st: TavlaGameState): TavlaGameState {
+  return { ...st, points: [...st.points], bar: [...st.bar], off: [...st.off],
+    movesLeft: [...st.movesLeft], matchLog: [], turnHistory: [] };
+}
+
+/** Adımı uygulayıp zarı düşer; oyunu bitirdiyse true. (Yalnız arama kopyalarında.) */
+function searchApply(g: TavlaGameState, pl: number, s: TavlaStep): boolean {
+  applyStep(g, pl, s);
+  g.movesLeft.splice(g.movesLeft.indexOf(s.die), 1);
+  return g.off[pl] === 15;
+}
+
+/** Bu konumdan oynanabilecek EN ÇOK zar sayısı (oyunu bitiren dal = tüm zarlar kullanılmış sayılır). */
+function maxDicePlayable(g: TavlaGameState, pl: number, memo: Map<string, number>): number {
+  if (g.movesLeft.length === 0) return 0;
+  const key = `${g.points.join(',')}|${g.bar.join(',')}|${g.off.join(',')}|${[...g.movesLeft].sort().join('')}`;
+  const hit = memo.get(key);
+  if (hit !== undefined) return hit;
+  let best = 0;
+  for (const s of legalSteps(g, pl)) {
+    const next = searchClone(g);
+    const v = searchApply(next, pl, s) ? g.movesLeft.length : 1 + maxDicePlayable(next, pl, memo);
+    if (v > best) best = v;
+    if (best === g.movesLeft.length) break;
+  }
+  memo.set(key, best);
+  return best;
+}
+
+/**
+ * ZORUNLU ZAR KURALI (standart tavla): oynanabilen EN ÇOK zar oynanmalı; iki farklı zardan
+ * yalnız biri oynanabiliyorsa (ikisi birden oynanamıyorsa) BÜYÜK zar oynanmalı.
+ * legalSteps'in bu kurala uyan alt kümesini döner (UI ipucu + motor doğrulaması).
+ */
+export function playableSteps(st: TavlaGameState, pl: number): TavlaStep[] {
+  const raw = legalSteps(st, pl);
+  if (raw.length <= 1 && st.movesLeft.length <= 1) return raw;
+  const memo = new Map<string, number>();
+  const vals = raw.map((s) => {
+    const next = searchClone(st);
+    return searchApply(next, pl, s) ? st.movesLeft.length : 1 + maxDicePlayable(next, pl, memo);
+  });
+  const max = Math.max(0, ...vals);
+  let out = raw.filter((_, i) => vals[i] === max);
+  const ml = st.movesLeft;
+  if (max === 1 && ml.length === 2 && ml[0] !== ml[1]) {
+    const hi = Math.max(ml[0]!, ml[1]!);
+    if (out.some((s) => s.die === hi)) out = out.filter((s) => s.die === hi);
+  }
+  return out;
+}
+
 /** Kırık pulu var VE rakip evinin 6 kapısı da kapalı → hiçbir zar giremez (tam kilit). */
 function barLocked(st: TavlaGameState, pl: number): boolean {
   if (st.bar[pl]! <= 0) return false;
@@ -246,7 +299,9 @@ function applyStep(st: TavlaGameState, pl: number, s: TavlaStep): void {
   st.points[s.to] = st.points[s.to]! + (pl === 0 ? 1 : -1);
 }
 
-export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove): TavlaMoveResult {
+/** opts.skipDiceRule: YALNIZ bot arama simülasyonu içindir (performans); oda/istemci yolu asla geçmez. */
+export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove,
+  opts?: { skipDiceRule?: boolean }): TavlaMoveResult {
   if (st.matchEnded) return { ok: false, error: 'maç bitti' };
   if (st.gameEnded) return { ok: false, error: 'oyun bitti' };
 
@@ -337,6 +392,16 @@ export function applyTavlaMove(st: TavlaGameState, seat: number, move: TavlaMove
   if (!st.movesLeft.includes(move.die)) return { ok: false, error: 'bu zar elinde yok' };
   const s = stepFor(st, seat, move.from, move.die);
   if (!s) return { ok: false, error: 'geçersiz hamle' };
+  if (!opts?.skipDiceRule) {
+    const allowed = playableSteps(st, seat);
+    if (!allowed.some((a) => a.from === s.from && a.die === s.die)) {
+      const ml = st.movesLeft;
+      const largerOnly = ml.length === 2 && ml[0] !== ml[1] && allowed.length > 0 && allowed.every((a) => a.die === Math.max(ml[0]!, ml[1]!));
+      return { ok: false, error: largerOnly
+        ? 'Tek zar oynanabiliyorsa büyük zar oynanmalı.'
+        : 'Zarların hepsini oynamalısın — bu hamle diğer zarı oynanamaz bırakıyor.' };
+    }
+  }
   st.turnHistory ??= [];
   st.turnHistory.push({ points: [...st.points], bar: [...st.bar], off: [...st.off], movesLeft: [...st.movesLeft] });
   applyStep(st, seat, s);
@@ -397,7 +462,7 @@ export function autoTavlaMove(st: TavlaGameState, seat: number): void {
   if (st.phase === 'roll') applyTavlaMove(st, seat, { t: 'roll' });
   let guard = 0;
   while (!st.gameEnded && st.turn === seat && st.phase === 'move' && guard++ < 8) {
-    const steps = legalSteps(st, seat);
+    const steps = playableSteps(st, seat);
     if (steps.length === 0) { endTurn(st); break; }
     applyTavlaMove(st, seat, { t: 'move', from: steps[0]!.from, die: steps[0]!.die });
   }

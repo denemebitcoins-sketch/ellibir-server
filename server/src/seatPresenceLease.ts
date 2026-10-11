@@ -6,6 +6,21 @@ export function hasOpenTransport(client: Client): boolean {
   return (client as Client & { readonly readyState?: number }).readyState === 1;
 }
 
+type PendingReconnection = { reject: (reason?: unknown) => void };
+
+/**
+ * The allowReconnection() hold Colyseus keeps for a dropped session, if any.
+ * (Room#_reconnections is internal: { [reconnectionToken]: [sessionId, Deferred] }.)
+ */
+export function pendingReconnection(room: unknown, sessionId: string): PendingReconnection | null {
+  const holds = (room as { _reconnections?: Record<string, [string, PendingReconnection]> })._reconnections;
+  if (!holds) return null;
+  for (const entry of Object.values(holds)) {
+    if (entry?.[0] === sessionId && typeof entry[1]?.reject === 'function') return entry[1];
+  }
+  return null;
+}
+
 export class SeatPresenceLeases {
   private leases = new Map<string, { timer: ReturnType<typeof setInterval>; token: object }>();
 
