@@ -20,7 +20,7 @@ describe('account deletion and deleted-device guard', () => {
     expect(index).toMatch(/post\('\/auth\/account\/delete'/i);
     expect(accountDeletion).toMatch(/verifyToken\(authHeader\(req\)\)/i);
     expect(accountDeletion).toMatch(/pinHash\(recovery\.email,\s*userId,\s*pin\)/i);
-    expect(accountDeletion).toMatch(/deleteKnownUserData\(userId\)/i);
+    expect(accountDeletion).toMatch(/deleteKnownUserData\(userId,\s*deviceHashes\)/i);
     expect(accountDeletion).toMatch(/\/rest\/v1\/profiles\?id=eq\.\$\{u\}/i);
     expect(accountDeletion).toMatch(/\/rest\/v1\/push_devices\?user_id=eq\.\$\{u\}/i);
     expect(accountDeletion).toMatch(/deleteAuthUser\(userId\)/i);

@@ -158,7 +158,9 @@ app.post('/auth/account/delete', async (req, res) => {
     const message = String(error?.message || 'account_delete_failed');
     const status = message === 'auth_required' ? 401
       : message === 'server_not_configured' ? 503
-      : message === 'pin_invalid' || message === 'pin_not_configured' ? 401
+      : message === 'too_many_requests' ? 429
+      : message === 'pin_invalid' || message === 'pin_not_configured' || message === 'pin_required' ? 401
+      : message === 'device_mismatch' ? 403
       : 400;
     res.status(status).json({ ok: false, error: message });
   }
