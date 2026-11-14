@@ -51,12 +51,14 @@ export interface ArrangedResult {
   pairCount: number;
   /** orderedHand ile aynı uzunlukta: 0=serbest, 1=seri/per, 2=çift. */
   blockKinds: number[];
+  /** Bir bloğun SON kartının indeksi (ardından başka kart varsa). İstemci per çizgisini bununla böler. */
+  blockEnds: number[];
 }
 
 /** C# ArrangedBlocks portu: handOrder sırasındaki ARDIŞIK geçerli seri/per (≥3) ve
  *  çift (=2) bloklarını bul. Önce en uzun per, sonra çift. */
 export function computeArrangedBlocks(orderedHand: any[], rules: any, dizMode: string = 'none'): ArrangedResult {
-  const res: ArrangedResult = { meldPoints: 0, pairCount: 0, blockKinds: orderedHand.map(() => 0) };
+  const res: ArrangedResult = { meldPoints: 0, pairCount: 0, blockKinds: orderedHand.map(() => 0), blockEnds: [] };
   const ciftMode = dizMode === 'cift';
   let i = 0;
   while (i < orderedHand.length) {
@@ -71,6 +73,7 @@ export function computeArrangedBlocks(orderedHand: any[], rules: any, dizMode: s
     if (bestLen >= 3) {
       try { res.meldPoints += meldPoints(orderedHand.slice(i, i + bestLen), rules) ?? 0; } catch { /* karışık */ }
       for (let j = 0; j < bestLen; j++) res.blockKinds[i + j] = 1;
+      if (i + bestLen < orderedHand.length) res.blockEnds.push(i + bestLen - 1);
       i += bestLen;
       continue;
     }
@@ -81,6 +84,7 @@ export function computeArrangedBlocks(orderedHand: any[], rules: any, dizMode: s
       if (isPair) {
         res.pairCount += 1;
         res.blockKinds[i] = 2; res.blockKinds[i + 1] = 2;
+        if (i + 2 < orderedHand.length) res.blockEnds.push(i + 1);
         i += 2;
         continue;
       }
@@ -222,7 +226,9 @@ export function clientViewFor(state: GameState, seat: number): Record<string, un
     pairsMin:          v.currentPairsMin ?? 0,
     teamMode:          rules?.teamMode ?? false,
     myHand:            handArr.map((c: any) => ({ ...mapCard(c), islek: islekOf(c), targets: targetsOf(c) })),
-    handGaps:          [], // C# online misafirde de boş — UI-display (tek cihaz) kavramı
+    // Bitişik iki per/çift arasındaki SINIR (blok son kartı). Dikey istemci per çizgisini bununla böler;
+    // yoksa okey sınırda kalınca (A A ★ 9 10 J) çizgiyi "A A ★ 9 | 10 J" diye yanlış kesiyordu.
+    handGaps:          arranged.blockEnds,
     melds:             Array.isArray(v.melds)   ? v.melds.map(mapMeld)   : [],
     seats:             Array.isArray(v.players) ? v.players.map(mapSeat) : [],
     hasDiscard:        (v.discardCount ?? 0) > 0,

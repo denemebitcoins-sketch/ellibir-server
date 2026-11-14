@@ -184,13 +184,39 @@ describe('açma / perde işleme / joker', () => {
     expect(next.players[0]!.hand.some((x) => x.id === jk.id)).toBe(true);
   });
 
-  it('küt jokerini eksik renklerden biri kurtarır, mevcut renk kurtaramaz', () => {
+  it('küt jokeri iki renk eksikken kurtarılamaz; tek eksik renk kalınca yalnız o kurtarır (14.11.2026)', () => {
     const rules = makeRules({});
     const jk = joker(2);
-    const setMeld = meld('m1', 'set', [c('S', 12), c('H', 12), jk]);
-    expect(canRetrieveJoker(setMeld, c('D', 12), rules)).toBe(jk.id);
-    expect(canRetrieveJoker(setMeld, c('C', 12), rules)).toBe(jk.id);
-    expect(canRetrieveJoker(setMeld, c('S', 12, 99), rules)).toBeNull();
+    // ♠ ♥ ★: okeyin yeri belli değil (♦ ya da ♣) — hiçbir kart okeyi alamaz.
+    const three = meld('m1', 'set', [c('S', 12), c('H', 12), jk]);
+    expect(canRetrieveJoker(three, c('D', 12), rules)).toBeNull();
+    expect(canRetrieveJoker(three, c('C', 12), rules)).toBeNull();
+    expect(canRetrieveJoker(three, c('S', 12, 99), rules)).toBeNull();
+    // ♠ ♥ ♦ ★: okey artık ♣ — yalnız ♣ okeyi alır, per dört gerçek kartla tamamlanır.
+    const four = meld('m1', 'set', [c('S', 12), c('H', 12), c('D', 12), jk]);
+    expect(canRetrieveJoker(four, c('C', 12), rules)).toBe(jk.id);
+    expect(canRetrieveJoker(four, c('D', 12, 99), rules)).toBeNull();
+  });
+
+  it('yerde A♥ A♦ ★ varken A♠ işlenir, okey yerde kalır; A♣ ile okey alınır (kullanıcı örneği)', () => {
+    const rules = makeRules({});
+    const jk = joker(2);
+    const aS = c('S', 1), aC = c('C', 1);
+    let state = createGame({ seed: 1, dealerSeat: 0 });
+    state = rig(state, {
+      currentSeat: 0, phase: 'action',
+      hands: { 0: [aS, aC, c('S', 3), c('D', 7)] },
+      opened: [0],
+      melds: [meld('m1', 'set', [c('H', 1), c('D', 1), jk])],
+    });
+    expect(canRetrieveJoker(state.melds[0]!, aS, rules)).toBeNull();
+    state = applyMove(state, { type: 'extend', meldId: 'm1', cardId: aS.id });
+    expect(state.melds[0]!.cards).toHaveLength(4);
+    expect(state.melds[0]!.cards.some((x) => x.id === jk.id)).toBe(true);
+    expect(state.players[0]!.hand.some((x) => x.id === jk.id)).toBe(false);
+    state = applyMove(state, { type: 'retrieveJoker', meldId: 'm1', cardId: aC.id });
+    expect(state.melds[0]!.cards.every((x) => !x.joker)).toBe(true);
+    expect(state.players[0]!.hand.some((x) => x.id === jk.id)).toBe(true);
   });
 });
 

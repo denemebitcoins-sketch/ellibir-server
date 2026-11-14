@@ -586,6 +586,10 @@ export function canRetrieveJoker(
         : analyzeRun(meld.cards, rules);
   if (!analysis) return null;
   for (const slot of analysis.jokers) {
+    // KÜT (14.11.2026, kullanıcı kuralı): okeyin yerini tuttuğu kart ancak TEK eksik renk kaldığında
+    // bellidir. Yerde A♥ A♦ ★ varken A♠ işlemek okeyi vermez (★ artık A♣ sayılır, A♠ küte eklenir);
+    // okey yalnız eksik A♣ ile, per dört gerçek kartla tamamlanınca alınır.
+    if (meld.type === 'set' && slot.suits.length !== 1) continue;
     if (slot.rank === replacement.rank && slot.suits.includes(replacement.suit)) {
       return slot.jokerId;
     }

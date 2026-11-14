@@ -41,7 +41,8 @@ describe('gameCommands processAllIslek', () => {
       currentSeat: 0,
       phase: 'action',
       opened: [0],
-      melds: [meld('set-joker', 'set', [c('S', 12), c('H', 12), jk])],
+      // küt jokeri ancak tek eksik renk kalınca kurtarılır (♠ ♥ ♣ ★ → ♦)
+      melds: [meld('set-joker', 'set', [c('S', 12), c('H', 12), c('C', 12), jk])],
       hands: { 0: [replacement, filler] },
     });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_RULES } from '../../packages/engine/src/rules';
 import type { Card, NormalCard } from '../../packages/engine/src/types';
-import { sortHandOrder } from './clientView';
+import { computeArrangedBlocks, sortHandOrder } from './clientView';
 
 describe('51 visual hand arrangement', () => {
   it('reallocates an overlapping ace into its set instead of leaving two aces loose', () => {
@@ -60,5 +60,19 @@ describe('51 visual hand arrangement', () => {
     expect(nines).toEqual([nines[0]!, nines[0]! + 1, nines[0]! + 2]);
     const i2 = order.indexOf('h2'), i4 = order.indexOf('h4'), io = order.indexOf('okey');
     expect(Math.abs(i2 - io) === 1 && Math.abs(i4 - io) === 1).toBe(false);
+  });
+  it('marks the boundary between A-A-okey and 9-10-J so the meld line is not drawn as A A okey 9 | 10 J', () => {
+    const hand: Card[] = [
+      { id: 'ha', joker: false, suit: 'H', rank: 1 },
+      { id: 'sa', joker: false, suit: 'S', rank: 1 },
+      { id: 'okey', joker: true },
+      { id: 'c9', joker: false, suit: 'C', rank: 9 },
+      { id: 'c10', joker: false, suit: 'C', rank: 10 },
+      { id: 'cj', joker: false, suit: 'C', rank: 11 },
+    ];
+    const r = computeArrangedBlocks(hand, DEFAULT_RULES, 'seri');
+    expect(r.blockKinds).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(r.blockEnds).toEqual([2]); // sınır okeyden sonra, 9'dan önce
+    expect(r.meldPoints).toBe(33 + 9 + 10 + 10);
   });
 });
