@@ -223,11 +223,12 @@ export function ihaleBotCommand(s: IhaleState): IhaleCommand {
   if (i.dummySeat >= 0) known.set(i.dummySeat, s.players[i.dummySeat].hand);
   const cards = legalIhaleCards(s).sort((a, b) => botCardCost(s, known, a) - botCardCost(s, known, b));
   requireRule(cards.length, 'no_legal_move');
+  const hidden = hiddenModel(s, known);
   let best = cards[0], bestValue = -1;
   for (const card of cards) {
     const trick = [...i.trick, { seat: s.currentSeat, card }];
     const value = visibleTrickValue(known, trick, (s.currentSeat + 1) % 4, 3 - i.trick.length,
-      actor, s.currentSeat, s.rules.teamMode, i.trump!, i.overtrumpRequired, i.trick.length === 0);
+      actor, s.currentSeat, s.rules.teamMode, i.trump!, i.overtrumpRequired, i.trick.length === 0, hidden);
     if (value > bestValue) { best = card; bestValue = value; }
   }
   return { t: 'ihalePlay', revision, cardId: best.id };
@@ -286,8 +287,50 @@ function botCardCost(s: IhaleState, known: Map<number, NormalCard[]>, card: Norm
   return cost;
 }
 
+/**
+ * GARANTİCİ model (14.11.2026): kapalı eller okunmaz, ama kapalı RAKİP "görülmemiş herhangi bir kart
+ * elinde olabilir" sayılır. Önceden kapalı oyuncular hiç hesaba katılmıyordu; bot 6'lık açışı da
+ * "alır" sanıp As/Papaz yerine küçük kart atıyordu. Rakip, bilinen renk boşluğu yoksa renge uyar.
+ */
+interface HiddenModel { unseen: NormalCard[]; voids: Set<Suit>[] }
+function hiddenModel(s: IhaleState, known: Map<number, NormalCard[]>): HiddenModel {
+  const i = s.ihale;
+  const seenIds = new Set<string>();
+  const observed = [...(i.played ?? []), ...i.trick].filter(x => {
+    if (seenIds.has(x.card.id)) return false;
+    seenIds.add(x.card.id); return true;
+  });
+  const seenKey = new Set<string>([...observed.map(x => x.card), ...[...known.values()].flat()]
+    .map(c => c.suit + ihaleRank(c)));
+  const unseen: NormalCard[] = [];
+  for (const suit of IHALE_SUITS) for (let rank = 2; rank <= 14; rank++)
+    if (!seenKey.has(suit + rank)) unseen.push({ id: 'u' + suit + rank, suit, rank: (rank === 14 ? 1 : rank) as NormalCard['rank'], joker: false });
+  const voids = Array.from({ length: 4 }, () => new Set<Suit>());
+  observed.forEach((play, n) => {
+    const lead = observed[n - n % 4].card.suit;
+    if (play.card.suit === lead) return;
+    voids[play.seat].add(lead);
+    if (play.card.suit !== i.trump) voids[play.seat].add(i.trump!);
+  });
+  return { unseen, voids };
+}
+/** Kapalı rakibin el kazanmak için oynayabileceği EN GÜÇLÜ görülmemiş kart; geçemiyorsa null. */
+function hiddenOpponentThreat(trick: IhaleTrickCard[], trump: Suit, seat: number, h: HiddenModel): NormalCard | null {
+  const lead = trick[0].card.suit;
+  const winSeat = ihaleTrickWinner(trick, trump);
+  const w = trick.find(x => x.seat === winSeat)!.card;
+  const v = h.voids[seat];
+  const top = (suit: Suit, above: number) => h.unseen
+    .filter(c => c.suit === suit && ihaleRank(c) > above)
+    .sort((a, b) => ihaleRank(b) - ihaleRank(a))[0] ?? null;
+  if (!v.has(lead)) return w.suit === lead ? top(lead, ihaleRank(w)) : null; // kesilmiş lead'i renge uyan geçemez
+  if (v.has(trump)) return null;
+  return top(trump, w.suit === trump ? ihaleRank(w) : 0);
+}
+
 function visibleTrickValue(known: Map<number, NormalCard[]>, trick: IhaleTrickCard[], next: number,
-  remaining: number, actor: number, playedSeat: number, team: boolean, trump: Suit, overtrump: boolean, opening: boolean): number {
+  remaining: number, actor: number, playedSeat: number, team: boolean, trump: Suit, overtrump: boolean, opening: boolean,
+  hidden?: HiddenModel): number {
   if (!remaining) {
     const winner = ihaleTrickWinner(trick, trump);
     if (winner !== actor && !(team && winner % 2 === actor % 2)) return 0;
@@ -297,14 +340,25 @@ function visibleTrickValue(known: Map<number, NormalCard[]>, trick: IhaleTrickCa
       && ihaleRank(trick[0].card) <= 11 ? 2 : 1;
   }
   const hand = known.get(next);
-  if (!hand?.length) return visibleTrickValue(known, trick, (next + 1) % 4, remaining - 1,
-    actor, playedSeat, team, trump, overtrump, opening);
   const ally = next === actor || team && next % 2 === actor % 2;
+  if (!hand?.length) {
+    // Kapalı rakip bizim/ortağımızın kazanan kartını geçebiliyorsa bu el garanti değildir.
+    const threat = !ally && hidden && trick.length ? hiddenOpponentThreat(trick, trump, next, hidden) : null;
+    if (threat) {
+      trick.push({ seat: next, card: threat });
+      const value = visibleTrickValue(known, trick, (next + 1) % 4, remaining - 1,
+        actor, playedSeat, team, trump, overtrump, opening, hidden);
+      trick.pop();
+      return value;
+    }
+    return visibleTrickValue(known, trick, (next + 1) % 4, remaining - 1,
+      actor, playedSeat, team, trump, overtrump, opening, hidden);
+  }
   let result = ally ? -1 : 3;
   for (const card of legalFromHand(hand, trick, trump, overtrump)) {
     trick.push({ seat: next, card });
     const value = visibleTrickValue(known, trick, (next + 1) % 4, remaining - 1,
-      actor, playedSeat, team, trump, overtrump, opening);
+      actor, playedSeat, team, trump, overtrump, opening, hidden);
     trick.pop();
     result = ally ? Math.max(result, value) : Math.min(result, value);
   }

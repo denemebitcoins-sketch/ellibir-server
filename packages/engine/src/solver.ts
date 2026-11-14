@@ -130,8 +130,8 @@ export function enumerateCandidateMelds(hand: readonly Card[], rules: RuleConfig
  * Çakışmayan perde alt kümesini seçer.
  * objective 'points': toplam puanı maksimize eder (açma kararı).
  * objective 'cards' : önce eritilen kart sayısını, sonra puanı maksimize eder (bitirme).
- * objective 'arrange': önce dizilen kart sayısını; eşitlikte okeyi gereksiz yere
- * kütlere bağlamamayı, ardından puanı tercih eder (oyuncu eli görsel dizimi).
+ * objective 'arrange': önce dizilen kart sayısını, sonra PUANI; tam eşitlikte okeyi gereksiz yere
+ * kütlere bağlamamayı tercih eder (oyuncu eli görsel dizimi).
  */
 export function solveHand(
   hand: readonly Card[],
@@ -149,9 +149,11 @@ export function solveHand(
       return a.points > b.points || (a.points === b.points && a.cards > b.cards);
     }
     if (objective === 'arrange') {
+      // 51 puana dayalı: aynı sayıda kart dizilebiliyorsa okey EN YÜKSEK puanlı pere gider
+      // (2♥,4♥,9♠,9♥,★ → 9-9-★ = 27, 2-★-4 = 9 değil). Okeyi kütten uzak tutmak yalnız eşitlik bozucu.
       return a.cards > b.cards
-        || (a.cards === b.cards && a.setJokers < b.setJokers)
-        || (a.cards === b.cards && a.setJokers === b.setJokers && a.points > b.points);
+        || (a.cards === b.cards && a.points > b.points)
+        || (a.cards === b.cards && a.points === b.points && a.setJokers < b.setJokers);
     }
     return a.cards > b.cards || (a.cards === b.cards && a.points > b.points);
   };

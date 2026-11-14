@@ -557,12 +557,15 @@ function resolveYuzbirRun(state: OkeyGameState, tiles: readonly OkeyTile[]): Res
   return null;
 }
 
-function buildYuzbirRunExtension(state: OkeyGameState, tiles: readonly OkeyTile[], tile: OkeyTile): OkeyTile[] | null {
+function buildYuzbirRunExtension(state: OkeyGameState, tiles: readonly OkeyTile[], tile: OkeyTile,
+  side?: 'left' | 'right'): OkeyTile[] | null {
   const run = resolveYuzbirRun(state, tiles);
   if (!run) return null;
   const incoming = identityOf(tile, state.okeyColor, state.okeyRank);
   const end = run.start + run.tiles.length - 1;
   if (incoming.wild) {
+    // Oyuncu okeyi perin SOLUNA ya da SAĞINA bırakabilir (14.11.2026); seçilen taraf mümkün değilse diğeri.
+    if (side === 'left' && run.start > 1) return [tile, ...run.tiles];
     if (end < 13) return [...run.tiles, tile];
     if (run.start > 1) return [tile, ...run.tiles];
     return null;
@@ -723,7 +726,8 @@ function openYuzbirPairs(state: OkeyGameState, seat: number, pairs: string[][]):
   return { ok: true };
 }
 
-function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, tileId: string): OkeyMoveResult {
+function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, tileId: string,
+  side?: 'left' | 'right'): OkeyMoveResult {
   if (state.rules.variant !== 'yuzbir') return { ok: false, error: 'bu masa 101 değil' };
   if (state.phase !== 'discard') return { ok: false, error: 'işlemek için önce taş çekmelisin' };
   const p = state.players[seat]!;
@@ -753,7 +757,7 @@ function extendYuzbirMeld(state: OkeyGameState, seat: number, meldId: string, ti
     meld.tiles.push(tile);
     meld.tiles = sortYuzbirMeldTiles(state, meld.kind, meld.tiles);
   } else {
-    const next = buildYuzbirRunExtension(state, meld.tiles, tile);
+    const next = buildYuzbirRunExtension(state, meld.tiles, tile, side);
     if (!next) return { ok: false, error: 'taş bu seriye işlenemez' };
     meld.tiles = next;
   }
@@ -813,7 +817,7 @@ export type OkeyMove =
   | { t: 'returnLeft' }
   | { t: 'open'; groups: string[][] }
   | { t: 'openPairs'; pairs: string[][] }
-  | { t: 'extend'; meldId: string; tileId: string }
+  | { t: 'extend'; meldId: string; tileId: string; side?: 'left' | 'right' }
   | { t: 'retrieveTile' }  // 101: bu turda işlenen son taşı geri al
   | { t: 'discard'; tileId: string }
   | { t: 'finish'; tileId: string }
@@ -868,7 +872,8 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
     case 'openPairs':
       return openYuzbirPairs(state, seat, move.pairs);
     case 'extend':
-      return extendYuzbirMeld(state, seat, move.meldId, move.tileId);
+      return extendYuzbirMeld(state, seat, move.meldId, move.tileId,
+        move.side === 'left' || move.side === 'right' ? move.side : undefined);
     case 'retrieveTile':
       return retrieveLastIslek(state, seat);
     case 'discard': {

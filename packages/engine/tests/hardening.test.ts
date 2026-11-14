@@ -56,7 +56,7 @@ describe('seri sınır durumları', () => {
     expect(usedJokers).toHaveLength(2);
   });
 
-  it('seri diz çakışan Ası doğal küte ayırır ve okeyli yüksek seriyi korur', () => {
+  it('seri diz çakışan Ası küte ayırır ve okeyi en yüksek puana koyar', () => {
     // Kupa 10-J-Q-Okey-As ile iki farklı As çakışıyor. Görsel dizilim bütün
     // yedi kartı kullanmalı; okeyi hazır üçlü As kütüne dördüncü taş diye
     // bağlayıp seriyi bozmak yerine Kupa Ası diğer Aslarla birleştirmeli.
@@ -68,10 +68,11 @@ describe('seri sınır durumları', () => {
     const solved = solveHand(hand, R, 'arrange');
 
     expect(solved.cardCount).toBe(7);
-    const aceSet = solved.melds.find((m) => m.length === 3 && m.every((x) => !x.joker && x.rank === 1));
-    const highRun = solved.melds.find((m) => m.some((x) => x.joker) && m.some((x) => !x.joker && x.rank === 10));
+    // 51 puana dayalı (kullanıcı kuralı 14.11): okey en yüksek puanlı yere gider.
+    // 10-J-Q + A-A-A-★ = 30 + 44 = 74 > 10-J-Q-★ + A-A-A = 40 + 33 = 73.
+    expect(solved.totalPoints).toBe(74);
+    const aceSet = solved.melds.find((m) => m.filter((x) => !x.joker).every((x) => x.rank === 1));
     expect(aceSet?.map((x) => x.id)).toContain(heartAce.id);
-    expect(highRun?.filter((x) => !x.joker).map((x) => x.rank)).toEqual([10, 11, 12]);
   });
 
   it('otomatik dizme okeyi PUAN ÖNCELİĞİYLE yerleştirir', () => {

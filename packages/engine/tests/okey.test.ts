@@ -614,6 +614,22 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.players[0]!.hand.some((x) => x.id === okey.id)).toBe(false);
   });
 
+  it.each([
+    ['left', 'okeyFirst'], ['right', 'okeyLast'], [undefined, 'okeyLast'],
+  ] as const)('101de okey açılmış serinin seçilen tarafına işlenir (side=%s)', (side, expected) => {
+    const st = g101();
+    const okey = t('K', 13), r8 = t('R', 8), r9 = t('R', 9), r10 = t('R', 10);
+    st.openMelds = [{ id: 'm1', ownerSeat: 1, kind: 'run', points: 27, tiles: [r8, r9, r10] }];
+    st.players[0]!.hasOpened = true;
+    st.players[0]!.openMode = 'melds';
+    st.players[0]!.hand = [okey, t('B', 2)];
+    const r = applyOkeyMove(st, 0, { t: 'extend', meldId: 'm1', tileId: okey.id, side } as any);
+    expect(r.ok).toBe(true);
+    const ids = st.openMelds[0]!.tiles.map((x) => x.id);
+    expect(ids).toEqual(expected === 'okeyFirst' ? [okey.id, r8.id, r9.id, r10.id] : [r8.id, r9.id, r10.id, okey.id]);
+    expect(st.openMelds[0]!.points).toBe(expected === 'okeyFirst' ? 7 + 8 + 9 + 10 : 8 + 9 + 10 + 11);
+  });
+
   it('101 renkli perde okeyi yalnız dört taşlık per tamamlanınca geri verir', () => {
     const st = g101();
     const r11 = t('R', 11), y11 = t('Y', 11), b11 = t('B', 11), k11 = t('K', 11), okey = t('K', 13);

@@ -59,10 +59,28 @@ describe('Ihale bot visible-hand tactics', () => {
     s.ihale.played = [1, 2, 3, 0].map((seat, n) => ({ seat, card: card('C', [1, 4, 5, 6][n]) }));
     expect(choose(s)).toBe('C13-0');
   });
-  it('develops a low long-suit card without cashing the ace or volunteering the king', () => {
+  it('garantici: cashes a sure ace before developing a long suit, never volunteers the unsupported king', () => {
     const s = position(); s.currentSeat = 0; s.ihale.trick = []; s.ihale.dummySeat = -1;
     s.players[0].hand = [card('C', 13), card('C', 7), card('C', 9), card('S', 1), card('D', 2)];
-    expect(choose(s)).toBe('C7-0');
+    expect(choose(s)).toBe('S1-0');
+  });
+  it('garantici: with A K Q J of a suit it leads the ace, not a 6 or 7 (user report 14.11)', () => {
+    const s = position(); s.currentSeat = 0; s.ihale.trick = []; s.ihale.dummySeat = -1;
+    // A-K-Q-J elde: dördü de garanti el; hangisi açılırsa açılsın 6/7 atılmaz.
+    s.players[0].hand = [card('S', 1), card('S', 13), card('S', 12), card('S', 11), card('D', 6), card('C', 7)];
+    expect(['S1-0', 'S13-0', 'S12-0', 'S11-0']).toContain(choose(s));
+    // Yalnız Papaz + küçükler: As görülmediyse Papaz garanti değil, As çıktıktan sonra Papaz oynanır.
+    s.players[0].hand = [card('S', 13), card('D', 6), card('C', 7)];
+    s.ihale.played = [0, 1, 2, 3].map((seat, n) => ({ seat, card: card('S', [1, 4, 5, 8][n]) }));
+    expect(choose(s)).toBe('S13-0');
+  });
+  it('garantici: takes a trick with a master card when following, plays low when it cannot be sure', () => {
+    const s = position(); s.currentSeat = 1; s.ihale.dummySeat = -1;
+    s.ihale.trick = [{ seat: 0, card: card('S', 5) }];
+    s.players[1].hand = [card('S', 1), card('S', 6), card('D', 9)];
+    expect(choose(s)).toBe('S1-0');
+    s.players[1].hand = [card('S', 13), card('S', 6), card('D', 9)];
+    expect(choose(s)).toBe('S6-0'); // As görülmedi: Papaz garanti değil
   });
   it('remembers an enemy ruff and avoids leading that suit, but distinguishes an enemy without trumps', () => {
     const s = position(); s.currentSeat = 0; s.ihale.trick = []; s.ihale.dummySeat = -1;

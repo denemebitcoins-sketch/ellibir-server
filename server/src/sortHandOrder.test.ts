@@ -46,4 +46,19 @@ describe('51 visual hand arrangement', () => {
       expect(suits.size).toBe(3);
     }
   });
+  it('puts the okey into the highest-scoring meld (9-9-okey 27, not 2-okey-4 9)', () => {
+    const hand: Card[] = [
+      { id: 'h2', joker: false, suit: 'H', rank: 2 },
+      { id: 'h4', joker: false, suit: 'H', rank: 4 },
+      { id: 's9', joker: false, suit: 'S', rank: 9 },
+      { id: 'h9', joker: false, suit: 'H', rank: 9 },
+      { id: 'okey', joker: true },
+      { id: 'ck', joker: false, suit: 'C', rank: 13 },
+    ];
+    const order = sortHandOrder(hand, DEFAULT_RULES, 'seri');
+    const nines = ['s9', 'h9', 'okey'].map((id) => order.indexOf(id)).sort((a, b) => a - b);
+    expect(nines).toEqual([nines[0]!, nines[0]! + 1, nines[0]! + 2]);
+    const i2 = order.indexOf('h2'), i4 = order.indexOf('h4'), io = order.indexOf('okey');
+    expect(Math.abs(i2 - io) === 1 && Math.abs(i4 - io) === 1).toBe(false);
+  });
 });
