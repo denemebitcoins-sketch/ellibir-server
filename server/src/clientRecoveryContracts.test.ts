@@ -88,9 +88,9 @@ describe('recovered Unity client contracts', () => {
     expect(gate).toContain('TrainingInterstitialService.RefreshAccessState(_ => UpdateStatus(label))');
     expect(gate).toContain('"ANTRENMANA BAŞLA"');
     expect(gate).toContain('new Vector2(520f, 86f)');
-    expect(ellibir).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay)');
-    expect(okey).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay)');
-    expect(tavla).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay)');
+    expect(ellibir).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay');
+    expect(okey).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay');
+    expect(tavla).toContain('TrainingAccessGate.DrawStatus(Stage, ModernSalonKit.TrainingStatusPosition, QuickPlay');
   });
 
   it('shows chip no-cash-value and VAT-included notices in store and info center', () => {

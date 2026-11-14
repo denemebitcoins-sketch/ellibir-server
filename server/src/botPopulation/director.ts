@@ -1,3 +1,4 @@
+import { isPopulationBet } from '../tableBets';
 import { randomUUID } from 'node:crypto';
 import { CharacterLease, CharacterRecord, PopulationGame, PopulationSnapshot, PopulationStorage } from './storage';
 import { PopulationRoomSession } from './roomSession';
@@ -58,7 +59,7 @@ export class PopulationDirector {
         || !Number.isInteger(p.table) || p.table < 1
         || (p.tablePool && (p.tablePool.length < 2 || p.tablePool.length > 20
           || new Set(p.tablePool).size !== p.tablePool.length || p.tablePool.some(n => !Number.isInteger(n) || n < 1)))
-        || !Number.isInteger(p.bet) || p.bet < 500 || p.bet > 5000 || p.bet % 500
+        || !isPopulationBet(p.bet)
         || !['showcase', 'waiting'].includes(p.kind)
         || (p.kind === 'waiting' && (!Number.isInteger(p.waitingBots) || p.waitingBots! < 1 || p.waitingBots! >= size)))
         throw new Error('population_plan_invalid');

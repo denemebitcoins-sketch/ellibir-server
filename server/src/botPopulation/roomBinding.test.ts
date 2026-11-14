@@ -22,9 +22,9 @@ it('requires explicit support from every connected client and never accepts an e
   expect(support.ready([first])).toBe(false);
 });
 it('keeps a supported table identity and does not silently normalize a disallowed bet', () => {
-  expect(populationAdoptionPlan('banko',true,7,2500)).toEqual({
-    key:'banko:team:7',game:'banko',team:true,table:7,bet:2500,kind:'waiting',waitingBots:1,
+  expect(populationAdoptionPlan('banko',true,7,10000)).toEqual({
+    key:'banko:team:7',game:'banko',team:true,table:7,bet:10000,kind:'waiting',waitingBots:1,
   });
-  for(const bet of [100,250,750,5500,NaN])expect(populationAdoptionPlan('ihale',false,7,bet)).toBeNull();
-  expect(populationAdoptionPlan('ihale',false,0,500)).toBeNull();
+  for(const bet of [100,250,500,2500,5500,30000,NaN])expect(populationAdoptionPlan('ihale',false,7,bet)).toBeNull();
+  expect(populationAdoptionPlan('ihale',false,0,5000)).toBeNull();
 });

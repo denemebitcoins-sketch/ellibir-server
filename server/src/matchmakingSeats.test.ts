@@ -164,14 +164,18 @@ describe.each(rooms)('%s same account returning without a reconnection token', (
     if (room.abandoned) expect(isBotControlled(0)).toBe(false);
   });
 
-  it('keeps the spectator behaviour while the original session is still connected', async () => {
+  it('hands the seat to a new session of the same account even while the old socket still looks connected', async () => {
+    // Ağ değişimi / uygulama yeniden açılışı: eski soket sunucuda henüz ölmemiş olabilir → son giren kazanır.
     const { room, clients } = await seatedRoom(name, options);
-    const fresh = fakeClient('fresh', clients[0].auth);
+    const old = clients[0];
+    old.leave = vi.fn();
+    const fresh = fakeClient('fresh', old.auth);
     room.clients.push(fresh);
     await room.onJoin(fresh, { populationVersion: 1 });
-    expect(room.seats.get(clients[0].sessionId)).toBe(0);
-    expect(room.seats.has('fresh')).toBe(false);
-    expect(room.spectators.has('fresh')).toBe(true);
+    expect(room.seats.get('fresh')).toBe(0);
+    expect(room.seats.has(old.sessionId)).toBe(false);
+    expect(room.spectators.has('fresh')).toBe(false);
+    expect(old.leave).toHaveBeenCalledWith(4001, expect.any(String));
   });
 
   it('does not reclaim when the account only asked to watch', async () => {

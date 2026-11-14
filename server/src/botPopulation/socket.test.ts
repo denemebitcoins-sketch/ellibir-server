@@ -36,6 +36,7 @@ beforeAll(async()=>{
     create table public.profiles(id uuid primary key,chips bigint not null);`);
   for(const name of ['01_bot_population_storage','02_bot_population_matches','03_bot_population_room_hosts','04_bot_population_admin','05_bot_population_presence','08_bot_population_lock_time'])
     await db.exec(readFileSync(resolve(__dirname,`../../migrations/20260917_${name}.sql`),'utf8'));
+  await db.exec(readFileSync(resolve(__dirname,'../../migrations/20261114_table_bets_5k_25k.sql'),'utf8'));
   storage=new PopulationStorage(async(name,args)=>{
     if(!/^bot_population_[a-z_]+$/.test(name))throw new Error('invalid_rpc');
     const r=await db.query<{value:any}>(`select public.${name}(${Object.keys(args).map((k,i)=>`${k}=>$${i+1}`).join(',')}) value`,
@@ -73,7 +74,7 @@ const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(test:()=>boolean,timeout=8000){const until=Date.now()+timeout;while(!test()){if(Date.now()>until)throw new Error('socket_condition_timeout');await delay(25);}}
 async function humanTable(game:PopulationGame, options:any={}){
   const name=game==='51'?'ellibir':game==='ihale'?'ihale':game==='tavla'?'tavla':'okey';
-  const listing=await matchMaker.handleCreateRoom(name,{mode:game==='tavla'?'solo':'duo',table:7,bet:1000,
+  const listing=await matchMaker.handleCreateRoom(name,{mode:game==='tavla'?'solo':'duo',table:7,bet:10000,
     variant:game,rules:{variant:game,totalHands:3,totalEls:3},...options});
   const client=new Client(endpoint);
   const connection=await client.joinById(listing.roomId,{token:'local-valid-token',populationVersion:1,ihalePilotVersion:1,...options});
@@ -103,9 +104,9 @@ describe('real SDK + websocket population tables (isolated auth and SQL)',()=>{
     await until(()=>!!room.game);
     const matches=await db.query<{roster:any;team_mode:boolean;bet:number}>('select roster,team_mode,bet from bot_population.matches');
     expect(matches.rows).toHaveLength(1);
-    expect(matches.rows[0]).toMatchObject({team_mode:game!=='tavla',bet:1000});
+    expect(matches.rows[0]).toMatchObject({team_mode:game!=='tavla',bet:10000});
     expect(matches.rows[0].roster.filter((p:any)=>p.kind==='human')).toEqual([{seat:0,kind:'human',id:ids.human}]);
-    expect(Number((await db.query<{chips:string}>('select chips from public.profiles where id=$1',[ids.human])).rows[0].chips)).toBe(19000);
+    expect(Number((await db.query<{chips:string}>('select chips from public.profiles where id=$1',[ids.human])).rows[0].chips)).toBe(10000);
     expect(room.matchRewardsEligible).toBe(false);
     await storage.control(1,'draining',24,'test');await director.tick();
     expect(room.population.activeMatch).toBe(true);expect(connection.connection.isOpen).toBe(true);
@@ -119,7 +120,7 @@ describe('real SDK + websocket population tables (isolated auth and SQL)',()=>{
     room.populationClients.observe(room.clients[0],{populationVersion:1},room.clients);
     room.bet=100;
     await expect(director.inviteHuman(ids.human,bot)).rejects.toThrow('population_invite_unavailable');
-    room.bet=1000;room.adminBots.set(1,'Test bot');
+    room.bet=10000;room.adminBots.set(1,'Test bot');
     await expect(director.inviteHuman(ids.human,bot)).rejects.toThrow('population_invite_unavailable');
     room.adminBots.clear();
     await expect(director.inviteHuman('forged',bot)).rejects.toThrow('population_invite_unavailable');
@@ -223,7 +224,7 @@ describe('real SDK + websocket population tables (isolated auth and SQL)',()=>{
   });
 
   it.each(['51','ihale','duz','banko','yuzbir','tavla'] as const)('joins %s, receives bot disclosure and preserves an active match during drain',async game=>{
-    const p:PopulationTablePlan={key:`${game}:solo:2`,game,team:false,table:2,bet:500,kind:'waiting',waitingBots:game==='tavla'?1:2};
+    const p:PopulationTablePlan={key:`${game}:solo:2`,game,team:false,table:2,bet:5000,kind:'waiting',waitingBots:game==='tavla'?1:2};
     const provider=new ColyseusPopulationProvider();
     const director=new PopulationDirector(storage,ids.owner,[p],provider,1);
     await director.tick();
@@ -250,7 +251,7 @@ describe('real SDK + websocket population tables (isolated auth and SQL)',()=>{
     }
     await until(()=>!!room.game);
     expect((await storage.adminReport()).summary.active_matches).toBe(1);
-    expect(Number((await db.query<{chips:string}>('select chips from public.profiles where id=$1',[ids.human])).rows[0].chips)).toBe(19500);
+    expect(Number((await db.query<{chips:string}>('select chips from public.profiles where id=$1',[ids.human])).rows[0].chips)).toBe(15000);
     const seat=game==='tavla'?1:2;
     const reconnectToken=connection.reconnectionToken;
     const abandoned=()=>game==='51'||game==='ihale'?room.game.abandoned?.includes(seat):room.abandoned.has(seat);
@@ -262,7 +263,7 @@ describe('real SDK + websocket population tables (isolated auth and SQL)',()=>{
     joined.push(resumed);resumed.onMessage('*',(type,message)=>messages.push({type,message}));
     await until(()=>!abandoned());
     expect(room.seats.get(resumed.sessionId)).toBe(seat);
-    expect(Number((await db.query<{chips:string}>('select chips from public.profiles where id=$1',[ids.human])).rows[0].chips)).toBe(19500);
+    expect(Number((await db.query<{chips:string}>('select chips from public.profiles where id=$1',[ids.human])).rows[0].chips)).toBe(15000);
     await storage.control(1,'draining',24,'test');
     await director.tick();
     expect(room.population.status().phase).toBe('playing');

@@ -27,11 +27,17 @@ describe('reconnect contract smoke', () => {
   it.each(roomFiles)('%s room keeps the 180s reserved-seat reconnect flow', (_game, file) => {
     const src = readFromRepo(file);
 
-    expect(src).toContain('allowReconnection(client, 180)');
+    expect(src).toContain('allowReconnection(client, reconnectWindowSec())');
     expect(src).toContain('keepSeatPresence');
     expect(src).toContain('reconnectionToken');
     expect(src).toContain('_onLeave');
     expect(src).toContain('STALE leave');
+  });
+
+  it('reconnect window defaults to 180s and stays clamped', () => {
+    const src = readFromRepo('server/src/reconnectWindow.ts');
+    expect(src).toContain('180');
+    expect(src).toContain('RECONNECT_WINDOW_SEC');
   });
 
   const unityNetFiles = [

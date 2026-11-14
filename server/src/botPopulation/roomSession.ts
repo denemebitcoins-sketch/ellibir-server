@@ -1,3 +1,4 @@
+import { isPopulationBet } from '../tableBets';
 import { randomUUID } from 'node:crypto';
 import { PopulationTableChat } from './tableChat';
 import { CharacterLease, CharacterRecord, PopulationGame, PopulationMatch, PopulationParticipant, PopulationStorage } from './storage';
@@ -39,7 +40,7 @@ export class PopulationRoomSession {
   constructor(readonly storage: PopulationStorage, readonly owner: string, readonly room: string,
     readonly game: PopulationGame, readonly bet: number, private readonly host: PopulationRoomHost) {
     if (!(storage instanceof PopulationStorage)) throw new Error('population_server_capability_required');
-    if (!Number.isInteger(bet) || bet < 500 || bet > 5000 || bet % 500 !== 0) throw new Error('population_bet_invalid');
+    if (!isPopulationBet(bet)) throw new Error('population_bet_invalid');
   }
 
   get size() { return this.occupants.size; }

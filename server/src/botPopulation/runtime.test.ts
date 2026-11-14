@@ -13,7 +13,7 @@ it('covers six games with rotating table quotas, not a fixed always-full table n
   expect(plans.filter(p=>p.kind==='waiting' && p.waitingBots===3).map(p=>p.game)).toEqual(['51','duz']);
   expect(plans.filter(p=>p.kind==='waiting' && p.waitingBots===2)).toHaveLength(3);
   expect(plans.every(p=>p.kind==='showcase' || p.waitingBots! < (p.game==='tavla'?2:4))).toBe(true);
-  expect(plans.every(p=>p.bet===500)).toBe(true);
+  expect(plans.every(p=>p.bet===5000)).toBe(true);
 });
 it('off startup seeds and recovers but never provisions, then permanently stops ticks',async()=>{
   const rpc=vi.fn(async(name:string)=>{

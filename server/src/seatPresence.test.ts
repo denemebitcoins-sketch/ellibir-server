@@ -27,10 +27,10 @@ it('serializes reservation/release and scopes both writes to the original Ihale 
   expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ status: 'lobi', table_no: 0, table_seat: -1 });
 });
 
-it('51 new cards enter on the left without re-sorting an explicitly arranged hand', () => {
+it('51 new cards enter on the right without re-sorting an explicitly arranged hand', () => {
   const state: any = { players: [{ seat: 0, hand: ['a', 'b', 'c'].map(id => ({ id })) }] };
   expect(reconcileHandOrder(state, 0)).toEqual(['a', 'b', 'c']);
   state.handOrder[0] = ['c', 'a', 'b']; state.players[0].hand.push({ id: 'new' });
-  expect(reconcileHandOrder(state, 0)).toEqual(['new', 'c', 'a', 'b']);
-  expect(reconcileHandOrder(state, 0)).toEqual(['new', 'c', 'a', 'b']);
+  expect(reconcileHandOrder(state, 0)).toEqual(['c', 'a', 'b', 'new']);
+  expect(reconcileHandOrder(state, 0)).toEqual(['c', 'a', 'b', 'new']);
 });

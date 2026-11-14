@@ -1,3 +1,4 @@
+import { isPopulationBet, isTableBet } from '../tableBets';
 import { PopulationRoomSession } from './roomSession';
 import { Client, ServerError } from '@colyseus/core';
 import { PopulationStorage } from './storage';
@@ -10,7 +11,7 @@ interface BindableRoom { bindPopulation(storage: PopulationStorage, owner: strin
 export class PopulationRoomBinding {
   session: PopulationRoomSession | null = null;
   constructor(readonly storage: PopulationStorage, readonly owner: string, readonly key: string, readonly bet: number) {
-    if (!Number.isInteger(bet) || bet < 500 || bet > 5000 || bet % 500) throw new Error('population_bet_invalid');
+    if (!isPopulationBet(bet)) throw new Error('population_bet_invalid');
   }
   attach(room: BindableRoom): void {
     if (this.session) throw new Error('population_binding_reused');
@@ -45,6 +46,6 @@ export class PopulationClientSupport {
 }
 
 export function populationAdoptionPlan(game: PopulationGame, team: boolean, table: number, bet: number): PopulationTablePlan | null {
-  if (!Number.isInteger(table) || table < 1 || !Number.isInteger(bet) || bet < 500 || bet > 5000 || bet % 500) return null;
+  if (!Number.isInteger(table) || table < 1 || !isTableBet(bet)) return null; // devralınan insan masası: yalnız masa bahisleri
   return {key: `${game}:${team ? 'team' : 'solo'}:${table}`, game, team, table, bet, kind: 'waiting', waitingBots: 1};
 }

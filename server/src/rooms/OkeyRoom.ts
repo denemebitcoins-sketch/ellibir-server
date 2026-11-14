@@ -1,4 +1,6 @@
 import { Room, Client } from '@colyseus/core';
+import { reconnectWindowSec } from '../reconnectWindow';
+import { TABLE_BETS } from '../tableBets';
 import { SeatPresenceLeases, hasOpenTransport, pendingReconnection } from '../seatPresenceLease';
 import {
   createOkeyGame, startNextEl, applyOkeyMove, autoOkeyMove, playOkeyBotTurn,
@@ -251,7 +253,7 @@ export class OkeyRoom extends Room {
     if (rules.variant === 'duz' && ![20, 24, 28, 30].includes(rules.scoring.startScore)) rules.scoring.startScore = 24;
     rules.teamMode = mode === 'duo';
 
-    this.bet = populationBetOption(options) ?? normalizeRoomBet(options?.bet, [500, 1000, 2500, 5000], 'okey');
+    this.bet = populationBetOption(options) ?? normalizeRoomBet(options?.bet, TABLE_BETS, 'okey');
     this.cfg = { seed, names, botSeats, rules };
     attachPopulationBinding(options, this);
     this.setMetadata({ game: 'okey', mode, table: tableNo, variant: rules.variant, humans: this.humanSeats.length });
@@ -638,7 +640,7 @@ export class OkeyRoom extends Room {
     const tableNo = Number((this.metadata as any)?.table) || 1;
     const reservation = this.presenceLeases.reserve(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
     try {
-      const back = await this.allowReconnection(client, 180);
+      const back = await this.allowReconnection(client, reconnectWindowSec());
       console.log(`[OkeyRoom.onDrop-SUCCESS] seat=${seat} geri döndü`);
       if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
       this.presenceLeases.restore(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
@@ -738,13 +740,18 @@ export class OkeyRoom extends Room {
   /** Aynı doğrulanmış hesap, koltuğu 180 sn reconnect beklemesindeyken reconnect token'ı OLMADAN
    *  (yeni oturum: join retry'si yarıda kaldı, uygulama verisi silindi, başka cihaz) aynı masaya
    *  dönerse İZLEYİCİYE DÜŞÜRME: eski bekleme iptal edilir, koltuk yeni oturuma devredilir.
-   *  Eski oturum hâlâ bağlıysa (iki cihaz) veya İZLE ile gelindiyse eski davranış korunur. */
+   *  Eski oturum hâlâ bağlı görünse bile (ağ değişimi / ölü soket) koltuk yeni oturuma geçer, eski 4001 ile kapanır.
+   *  Yalnız İZLE ile gelindiyse izleyici olunur. */
   private reclaimDroppedSeat(client: Client, existing: ExistingUserSeat, options: any): boolean {
     if (options?.spectate === true || options?.spectate === 'true') return false;
     const oldSessionId = existing.sessionId;
-    if (oldSessionId === client.sessionId || this.clients.some(c => c.sessionId === oldSessionId)) return false;
-    const hold = pendingReconnection(this, oldSessionId);
-    if (!hold) return false;
+    if (oldSessionId === client.sessionId) return false;
+    // AĞ DEĞİŞİMİ / UYGULAMA YENİDEN AÇILIŞI: eski bağlantı sunucuda hâlâ açık görünebilir (ölü soket ~15 sn'de
+    // sezilir). Aynı doğrulanmış hesap yeni oturumla geldiyse "son giren kazanır": koltuk yeni oturuma geçer,
+    // eski bağlantı 4001 ile kapatılır. (Eskiden yeni giriş İZLEYİCİ oluyor, koltuk bota kalıyordu.)
+    const live = this.clients.find(c => c.sessionId === oldSessionId);
+    const hold = live ? null : pendingReconnection(this, oldSessionId);
+    if (!live && !hold) return false;
     const seat = existing.seat;
     // Lease'i önce durdur: eski onDrop'un await'i reddedilince owns()=false görür ve koltuğa dokunmaz.
     this.presenceLeases.stop(oldSessionId);
@@ -755,7 +762,11 @@ export class OkeyRoom extends Room {
     this.lastReconnectAt.delete(oldSessionId);
     this.takeoverPending.delete(oldSessionId);
     this.abandoned.delete(seat);
-    hold.reject(new Error('seat_reclaimed_by_new_session'));
+    if (hold) hold.reject(new Error('seat_reclaimed_by_new_session'));
+    if (live) {
+      console.log(`[OkeyRoom.onJoin] ayni uid yeni oturumla geldi, eski baglanti canli -> devralma old=${oldSessionId}`);
+      try { live.leave(4001, 'Bu hesap baska bir baglantidan masaya girdi.'); } catch { /* yoksay */ }
+    }
     this.presenceLeases.restore(client.sessionId, this.seatUsers.get(seat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !!this.game);
     console.log(`[OkeyRoom.onJoin] ayni uid yeni oturumla dondu -> koltuk ${seat} devredildi old=${oldSessionId} new=${client.sessionId}`);
     this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);

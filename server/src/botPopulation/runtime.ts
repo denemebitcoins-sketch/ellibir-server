@@ -1,3 +1,4 @@
+import { TABLE_BET_MIN } from '../tableBets';
 import { randomUUID } from 'node:crypto';
 import { PopulationStorage } from './storage';
 import { PopulationDirector, PopulationRoomProvider, PopulationTablePlan } from './director';
@@ -7,7 +8,7 @@ export function defaultPopulationPlans(): PopulationTablePlan[] {
   const games = ['51','duz','banko','yuzbir','ihale','tavla'] as const;
   const tablePool = Array.from({length: 8}, (_, i) => i + 1);
   return [
-    ...games.map(game => ({ key: `${game}:waiting`, game, team: false, table: 2, tablePool, bet: 500,
+    ...games.map(game => ({ key: `${game}:waiting`, game, team: false, table: 2, tablePool, bet: TABLE_BET_MIN,
       kind: 'waiting' as const, waitingBots: game === 'tavla' ? 1 : game === '51' || game === 'duz' ? 3 : 2 })),
   ];
 }
