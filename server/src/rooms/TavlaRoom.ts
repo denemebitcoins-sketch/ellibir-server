@@ -39,7 +39,7 @@ export class TavlaRoom extends Room {
   private spectators = new Set<string>();
   private spectatorNames = new Map<string, string>();
   private spectatorMeta = new Map<string, { gender: string; role: string; adminBadgeHidden: boolean }>();
-  private seatMeta = new Map<number, { gender: string; role: string; adminBadgeHidden: boolean }>();
+  private seatMeta = new Map<number, { gender: string; role: string; adminBadgeHidden: boolean; nameStyle?: string }>();
   private humanSeats: number[] = [];
   private seatUsers = new Map<number, string>();
   private seatNames = new Map<number, string>();
@@ -430,7 +430,7 @@ export class TavlaRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden, nameStyle: meta.nameStyle ?? '' });
     client.send('seat', { seat });
     console.log(`[TavlaRoom.onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();
@@ -467,7 +467,7 @@ export class TavlaRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden, nameStyle: meta.nameStyle ?? '' });
     client.send('seat', { seat });
     this.startGameIfReady();
     this.pushViews();
@@ -1049,7 +1049,7 @@ export class TavlaRoom extends Room {
       if (Array.isArray(v.players))
         for (const s of v.players) {
           const m = this.seatMeta.get(s.seat);
-          if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; }
+          if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; s.name_style = m.nameStyle ?? ''; }
           s.uid = this.seatUsers.get(s.seat) ?? ''; // profil tıklaması (public kimlik)
           s.abandoned = this.abandoned.has(s.seat);
           if (s.abandoned) s.isBot = true;

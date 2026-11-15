@@ -44,7 +44,7 @@ export class EllibirRoom extends Room {
   private spectators = new Set<string>();      // sessionId → izleyici (koltuksuz, seat=-1)
   private spectatorNames = new Map<string, string>(); // sessionId → izleyici görünen ad (yazboz paneli için)
   private spectatorMeta = new Map<string, { gender: string; role: string; adminBadgeHidden: boolean }>(); // izleyici cinsiyet/rol (isim rengi/rozet için)
-  private seatMeta = new Map<number, { gender: string; role: string; adminBadgeHidden: boolean }>();        // koltuk → cinsiyet/rol (yazboz sol panel zengin gösterim)
+  private seatMeta = new Map<number, { gender: string; role: string; adminBadgeHidden: boolean; nameStyle?: string }>();        // koltuk → cinsiyet/rol (yazboz sol panel zengin gösterim)
   private humanSeats: number[] = [];
   private handEndTimer: NodeJS.Timeout | null = null;
   private startTimer: NodeJS.Timeout | null = null;
@@ -503,7 +503,7 @@ export class EllibirRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden, nameStyle: meta.nameStyle ?? '' });
     client.send('seat', { seat });
     console.log(`[onJoin] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();   // tüm insanlar geldiyse oyunu BAŞLAT (kartları şimdi dağıt)
@@ -541,7 +541,7 @@ export class EllibirRoom extends Room {
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
     this.seatNames.set(seat, meta.name);
-    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
+    this.seatMeta.set(seat, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden, nameStyle: meta.nameStyle ?? '' });
     client.send('seat', { seat });
     console.log(`[sit] koltuk=${seat}, dolu=`, [...this.seats.values()]);
     this.startGameIfReady();
@@ -1257,7 +1257,7 @@ export class EllibirRoom extends Room {
     const specGenders = specClients.map((c) => this.spectatorMeta.get(c.sessionId)?.gender ?? '');
     // Koltuk listesine cinsiyet/rol + UID enjekte et (isim rengi/rozet + masa-içi MiniProfile:
     // profil kartından MESAJ/ARKADAŞ akışı uid ister — okey/tavla ile parite).
-    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; } s.uid = this.seatUsers.get(s.seat) ?? ''; this.population?.decorate(s); } };
+    const decorate = (arr: any) => { if (Array.isArray(arr)) for (const s of arr) { const m = this.seatMeta.get(s.seat); if (m) { s.role = m.role; s.gender = m.gender; s.admin_badge_hidden = m.adminBadgeHidden === true; s.name_style = m.nameStyle ?? ''; } s.uid = this.seatUsers.get(s.seat) ?? ''; this.population?.decorate(s); } };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
       if (seat == null) {

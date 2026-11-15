@@ -86,7 +86,9 @@ export function safeClientName(raw: unknown, fallback: string): string {
   return n || fallback;
 }
 
-export type ClientProfileMeta = { name: string; gender: string; role: string; adminBadgeHidden: boolean };
+export type ClientProfileMeta = { name: string; gender: string; role: string; adminBadgeHidden: boolean; nameStyle?: string };
+
+const NAME_STYLES = new Set(['name_style_silver', 'name_style_copper', 'name_style_fire', 'name_style_ice', 'name_style_gold_shimmer', 'name_style_rainbow']);
 
 export function authUserIdFromClient(client: any): string | null {
   const auth = client?.auth;
@@ -127,7 +129,7 @@ export async function resolveClientProfileMeta(
   if (!userId || !supabaseConfigured()) return fallback;
   try {
     const r = await fetch(
-      `${URL}/rest/v1/profiles?id=eq.${userId}&select=name,gender,role,vip_until,admin_badge_hidden`,
+      `${URL}/rest/v1/profiles?id=eq.${userId}&select=name,gender,role,vip_until,admin_badge_hidden,equipped_name_style`,
       { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
     );
     if (!r.ok) return fallback;
@@ -140,6 +142,7 @@ export async function resolveClientProfileMeta(
       gender: safeClientGender(row?.gender),
       role,
       adminBadgeHidden: role === 'admin' && row?.admin_badge_hidden === true,
+      nameStyle: NAME_STYLES.has(String(row?.equipped_name_style ?? '')) ? String(row.equipped_name_style) : '',
     };
   } catch (e: any) {
     console.error('[supabase] resolveClientProfileMeta:', e?.message);

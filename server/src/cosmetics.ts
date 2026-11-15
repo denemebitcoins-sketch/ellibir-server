@@ -4,7 +4,7 @@ import { rpcService, verifyToken } from './supabase';
 const URL = process.env.SUPABASE_URL ?? '';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
-type CosmeticCategory = 'profile_frame' | 'emoji_pack';
+type CosmeticCategory = 'profile_frame' | 'emoji_pack' | 'name_style' | 'ui_theme';
 type CosmeticDef = {
   id: string;
   category: CosmeticCategory;
@@ -17,6 +17,26 @@ const DEFAULT_PROFILE_FRAME = 'profile_frame_default';
 const GOLD_TEAL_FRAME = 'profile_frame_gold_teal_v1';
 const MIMIK_PACK_1 = 'emoji_pack_mimik_1';
 
+/** İsim stilleri (masa kartı + çevrimiçi liste + sohbet). Giriş 250, orta 600, üst 1200 elmas. */
+export const NAME_STYLE_IDS = [
+  'name_style_silver', 'name_style_copper', 'name_style_fire', 'name_style_ice',
+  'name_style_gold_shimmer', 'name_style_rainbow',
+] as const;
+const NAME_STYLE_PRICES: Record<string, number> = {
+  name_style_silver: 250, name_style_copper: 250, name_style_fire: 250, name_style_ice: 250,
+  name_style_gold_shimmer: 600, name_style_rainbow: 1200,
+};
+/** Elmasla açılan arayüz temaları (Grafit + Gece Mavisi ücretsiz, istemcide). */
+const UI_THEME_PRICES: Record<string, number> = {
+  ui_theme_zumrut: 150, ui_theme_sutlu_kahve: 150, ui_theme_bordo_kadife: 150,
+};
+
+/** Görünüme/odalara gidecek stil kimliği: yalnız katalogdaki değerler, aksi halde ''. */
+export function normalizeNameStyle(raw: unknown): string {
+  const id = String(raw ?? '').trim();
+  return (NAME_STYLE_IDS as readonly string[]).includes(id) ? id : '';
+}
+
 const DEFAULT_REACTIONS = new Set(['clap', 'smile', 'wow', 'angry']);
 const COSMETICS: Record<string, CosmeticDef> = {
   [DEFAULT_PROFILE_FRAME]: { id: DEFAULT_PROFILE_FRAME, category: 'profile_frame', priceDiamonds: 0, default: true },
@@ -28,6 +48,8 @@ const COSMETICS: Record<string, CosmeticDef> = {
     reactions: ['giggle', 'angry_shout', 'tease_smirk', 'sad_shy'],
   },
 };
+for (const [id, price] of Object.entries(NAME_STYLE_PRICES)) COSMETICS[id] = { id, category: 'name_style', priceDiamonds: price };
+for (const [id, price] of Object.entries(UI_THEME_PRICES)) COSMETICS[id] = { id, category: 'ui_theme', priceDiamonds: price };
 
 const REACTION_PACK = new Map<string, string>();
 for (const item of Object.values(COSMETICS)) {
@@ -128,7 +150,7 @@ export async function cosmeticInventory(req: Request): Promise<Record<string, un
     fetch(`${URL}/rest/v1/cosmetic_ownerships?user_id=eq.${userId}&select=cosmetic_id,category,acquired_at&order=acquired_at.asc`, {
       headers: serviceHeaders(),
     }),
-    fetch(`${URL}/rest/v1/profiles?id=eq.${userId}&select=diamonds,equipped_profile_frame,role&limit=1`, {
+    fetch(`${URL}/rest/v1/profiles?id=eq.${userId}&select=diamonds,equipped_profile_frame,equipped_name_style,role&limit=1`, {
       headers: serviceHeaders(),
     }),
   ]);
@@ -149,6 +171,7 @@ export async function cosmeticInventory(req: Request): Promise<Record<string, un
     owned: [...owned],
     diamonds: Number(profile?.diamonds ?? 0),
     equipped_profile_frame: profile?.equipped_profile_frame || DEFAULT_PROFILE_FRAME,
+    equipped_name_style: normalizeNameStyle(profile?.equipped_name_style),
   };
 }
 
@@ -172,8 +195,21 @@ export async function purchaseCosmetic(req: Request): Promise<Record<string, unk
 export async function equipCosmetic(req: Request): Promise<Record<string, unknown>> {
   requireServer();
   const userId = await requireUser(req);
+  // İsim stili: kategori 'name_style' ile '' (standart) da gönderilebilir.
+  if (String(req.body?.category ?? '') === 'name_style') {
+    const styleId = normalizeCosmeticId(req.body?.cosmetic_id);
+    if (styleId && knownCosmetic(styleId).category !== 'name_style') throw new Error('cosmetic_not_equippable');
+    const r = await rpcService('equip_name_style', { p_user_id: userId, p_cosmetic_id: styleId });
+    if (r?.ok !== true) return { ok: false, error: r?.error ?? 'equip_failed' };
+    return { ok: true, equipped_name_style: normalizeNameStyle(r.equipped_name_style) };
+  }
   const id = normalizeCosmeticId(req.body?.cosmetic_id) || DEFAULT_PROFILE_FRAME;
   const item = knownCosmetic(id);
+  if (item.category === 'name_style') {
+    const r = await rpcService('equip_name_style', { p_user_id: userId, p_cosmetic_id: item.id });
+    if (r?.ok !== true) return { ok: false, error: r?.error ?? 'equip_failed' };
+    return { ok: true, equipped_name_style: normalizeNameStyle(r.equipped_name_style) };
+  }
   if (item.category !== 'profile_frame') throw new Error('cosmetic_not_equippable');
   const result = await rpcService('equip_profile_frame', {
     p_user_id: userId,
