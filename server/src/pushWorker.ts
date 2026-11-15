@@ -130,14 +130,18 @@ export async function drainPushOutbox(): Promise<number> {
   }
 }
 
+export const PUSH_IDLE_POLL_MS = 15_000;
+export const PUSH_BUSY_POLL_MS = 2_000;
+
 export function startPushWorker(): void {
   if (!configured()) {
     console.warn('[push] disabled: Firebase service account environment is incomplete');
     return;
   }
+  // Kuyruk boşken 15 sn'de bir bak; iş bulunca kuyruk bitene kadar 2 sn arayla devam et.
   const tick = async () => {
-    await drainPushOutbox().catch((error: any) => console.error('[push]', error?.message));
-    timer = setTimeout(tick, 4_000);
+    const handled = await drainPushOutbox().catch((error: any) => { console.error('[push]', error?.message); return 0; });
+    timer = setTimeout(tick, handled > 0 ? PUSH_BUSY_POLL_MS : PUSH_IDLE_POLL_MS);
     timer.unref?.();
   };
   void tick();

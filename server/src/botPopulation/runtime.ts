@@ -13,7 +13,16 @@ export function defaultPopulationPlans(): PopulationTablePlan[] {
   ];
 }
 
+/** Botlar aktifken (running/draining) yönetici döngü sıklığı. */
+export const POPULATION_ACTIVE_TICK_MS = 10_000;
+/** Botlar KAPALI (off) iken: sadece mod kontrolü + sağlık kaydı, 10 dakikada bir.
+ *  Admin panelinden açma komutu ve rapor isteği döngüyü anında tetikler (gecikme yok). */
+export const POPULATION_IDLE_TICK_MS = 600_000;
+
 export class PopulationRuntime {
+  private idle = false;
+  private idleMaintained = false;
+  private lastProgressionPending = 0;
   private director: PopulationDirector | null = null;
   private provider: PopulationRoomProvider | null = null;
   private pending: Promise<void> | null = null;
@@ -27,13 +36,24 @@ export class PopulationRuntime {
 
   start() {
     if (this.timer || this.stopped) return;
-    this.timer = setInterval(() => { void this.tick().catch(() => {}); }, 10000);
-    this.timer.unref?.();
-    void this.tick().catch(() => {});
+    this.schedule(0);
   }
+  /** Bir sonraki turu kur: kapalıyken 10 dk, aktifken 10 sn (setInterval yerine kendini yeniden kuran zincir). */
+  private schedule(ms: number) {
+    if (this.stopped) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.tick().catch(() => {}).finally(() => {
+        if (!this.stopped && !this.timer) this.schedule(this.idle ? POPULATION_IDLE_TICK_MS : POPULATION_ACTIVE_TICK_MS);
+      });
+    }, ms);
+    this.timer.unref?.();
+  }
+  get isIdle() { return this.idle; }
   async stop(): Promise<void> {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     try { await this.pending; } catch { }
     await this.director?.requestDrain();
@@ -55,6 +75,18 @@ export class PopulationRuntime {
   private async update() {
     try {
       if (!this.seeded) { await this.storage.seed(); this.seeded = true; }
+      // KAPALI + bakım zaten yapıldıysa: yalnız modu oku ve sağlık yaz (2 istek). İlerleme/sosyal/kurtarma
+      // işleri botlar kapalıyken yapılacak bir şey üretmez; açılınca tam tura geçilir.
+      if (this.idle && this.idleMaintained && !this.director) {
+        const light = await this.storage.snapshot();
+        if (light.control.mode === 'off') {
+          this.lastTick = new Date().toISOString(); this.error = '';
+          await this.storage.health(this.owner, true, '', { tables: 0, lobby: 0,
+            progression_pending: this.lastProgressionPending, target_active: 0,
+            active_limit: light.control.max_active, capacity_limited: false, idle: true, errors: [] });
+          return;
+        }
+      }
       const progression = await this.storage.processProgression();
       const snapshot = await this.storage.snapshot();
       await this.storage.recoverExpired();
@@ -72,6 +104,12 @@ export class PopulationRuntime {
         if (snapshot.control.mode === 'draining')
           await this.storage.completeDrain();
       }
+      const wasIdle = this.idle;
+      this.idle = snapshot.control.mode === 'off' && !this.director;
+      this.idleMaintained = this.idle;
+      this.lastProgressionPending = progression.pending;
+      // Kapalıdan aktife geçildiyse (admin komutu) 10 dk beklemeden hızlı tura dön.
+      if (wasIdle && !this.idle && !this.stopped) this.schedule(POPULATION_ACTIVE_TICK_MS);
       this.lastTick = new Date().toISOString(); this.error = '';
       await this.storage.health(this.owner, true, '', { tables: state?.tables.length ?? 0,
         lobby: state?.lobby.length ?? 0, progression_pending: progression.pending,

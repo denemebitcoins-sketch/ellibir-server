@@ -1,5 +1,5 @@
 import {expect,it,vi} from 'vitest';
-import {PopulationRuntime,defaultPopulationPlans} from './runtime';
+import {PopulationRuntime,defaultPopulationPlans,POPULATION_IDLE_TICK_MS,POPULATION_ACTIVE_TICK_MS} from './runtime';
 import {PopulationStorage} from './storage';
 import {PopulationDirector} from './director';
 
@@ -101,4 +101,39 @@ it('routes verified invite identities through the serialized director adoption p
     await expect(runtime.invite('verified-user','not-a-character')).rejects.toThrow('population_invite_invalid');
     expect(invite).toHaveBeenCalledTimes(1);
   } finally {invite.mockRestore();await runtime.stop();}
+});
+
+it('kapaliyken ilk turdan sonra yalniz mod okur + saglik yazar, 10 dk araliga gecer',async()=>{
+  const rpc=vi.fn(async(name:string)=>{
+    if(name==='bot_population_snapshot') return {control:{mode:'off',max_active:10},characters:[],leases:[]};
+    if(name==='bot_population_process_progression') return {processed:0,failed:0,pending:2};
+    return true;
+  });
+  const runtime=new PopulationRuntime(new PopulationStorage(rpc),undefined,vi.fn());
+  await runtime.tick();
+  expect(runtime.isIdle).toBe(true);
+  rpc.mockClear();
+  await runtime.tick();
+  expect(rpc.mock.calls.map(c=>c[0])).toEqual(['bot_population_snapshot','bot_population_runtime_health']);
+  expect(JSON.stringify(rpc.mock.calls[1])).toContain('"progression_pending":2');
+  expect(POPULATION_IDLE_TICK_MS).toBe(600_000);
+  expect(POPULATION_ACTIVE_TICK_MS).toBe(10_000);
+  await runtime.stop();
+});
+it('kapali iken acilinca ayni turda tam bakima ve hizli araliga doner',async()=>{
+  let mode='off';
+  const rpc=vi.fn(async(name:string)=>{
+    if(name==='bot_population_snapshot') return {control:{mode,max_active:0},characters:[],leases:[]};
+    if(name==='bot_population_process_progression') return {processed:0,failed:0,pending:0};
+    return true;
+  });
+  const provider={open:vi.fn(async()=>null),close:vi.fn(async()=>{})};
+  const runtime=new PopulationRuntime(new PopulationStorage(rpc),undefined,()=>provider);
+  await runtime.tick(); await runtime.tick();
+  expect(runtime.isIdle).toBe(true);
+  mode='running'; rpc.mockClear();
+  await runtime.tick();
+  expect(runtime.isIdle).toBe(false);
+  expect(rpc.mock.calls.some(c=>c[0]==='bot_population_process_progression')).toBe(true);
+  await runtime.stop();
 });

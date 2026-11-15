@@ -105,7 +105,8 @@ describe('population admin HTTP trust boundary', () => {
     expect((await get()).status).toBe(200);
     expect((await post(body)).status).toBe(429);
     expect(rpc).toHaveBeenCalledTimes(5);
-    expect(refresh).toHaveBeenCalledTimes(2);
+    // 2 kontrol yazımı + 3 rapor isteği: rapor da (botlar kapalıyken seyrek dönen) döngüyü tazeler.
+    expect(refresh).toHaveBeenCalledTimes(5);
   });
   it('keys limits by verified administrator and always rechecks authorization', async () => {
     rpc.mockResolvedValue({ok:true});

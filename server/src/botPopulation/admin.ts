@@ -39,6 +39,8 @@ export function populationAdminRouter(storage: PopulationStorage, refresh: () =>
     try {
       const actor = await authorizePopulationAdmin(req);
       if (!admit(actor, 'report', res)) return;
+      // Botlar kapalıyken döngü 10 dk'da bir döner; panel açılınca sağlık kaydı taze olsun diye tazele.
+      await refresh().catch(() => {});
       res.json(await storage.adminReport());
     }
     catch (error) { handleError(res, error); }
