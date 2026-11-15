@@ -372,11 +372,10 @@ function removeTiles(p: OkeyPlayer, ids: Iterable<string>): void {
 /** 101: açma/işleme sonrası elde ATACAK en az bir taş kalmalı (bitiş = son taşı atmak). */
 export const YUZBIR_KEEP_ONE_ERROR = 'Elinde atacak en az bir taş kalmalı.';
 
-function pendingLeftError(p: OkeyPlayer, usedIds: Iterable<string>): string | null {
-  const id = p.yuzbirPendingLeftTileId;
-  if (!id) return null;
-  for (const used of usedIds) if (used === id) return null;
-  return 'soldan aldığın taşı aynı turda açmalı veya işlemelisin';
+/** Eskiden soldan alınan taşı kullanmayan açışı engelliyordu. Kullanıcı kuralı (2026-11-16):
+ *  oyuncunun eline karışılmaz — açışta serbest; kullanılmazsa atışta ceza yer. */
+function pendingLeftError(_p: OkeyPlayer, _usedIds: Iterable<string>): string | null {
+  return null;
 }
 
 function clearPendingLeftIfUsed(p: OkeyPlayer, usedIds: Iterable<string>): void {
@@ -878,10 +877,10 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
       return retrieveLastIslek(state, seat);
     case 'discard': {
       if (state.phase !== 'discard') return { ok: false, error: 'önce taş çekmelisin' };
-      if (state.rules.variant === 'yuzbir' && p.yuzbirPendingLeftTileId)
-        return { ok: false, error: 'soldan aldığın taşı açmadan/işlemeden taş atamazsın' };
       const idx = tileById(p, move.tileId);
       if (idx < 0) return { ok: false, error: 'taş elinde değil' };
+      // 101: soldan alınıp açılmadan/işlenmeden kalan taş → atış serbest, ceza yazılır.
+      const leftUnused = state.rules.variant === 'yuzbir' && !!p.yuzbirPendingLeftTileId;
       const tile = p.hand.splice(idx, 1)[0]!;
       state.discards[seat]!.push(tile);
       forgetPublicPickup(state, tile);
@@ -898,6 +897,11 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
         if (islekDiscard && penalty > 0) {
           state.scores[seat] = state.scores[seat]! + penalty;
           state.matchLog.push(`${p.name} işlek taş attı (+${penalty} ceza)`);
+        }
+        const leftPenalty = state.rules.yuzbir.leftUnusedPenalty ?? 101;
+        if (leftUnused && !finishing && leftPenalty > 0) {
+          state.scores[seat] = state.scores[seat]! + leftPenalty;
+          state.matchLog.push(`${p.name} soldan aldığı taşı kullanmadı (+${leftPenalty} ceza)`);
         }
         // Açılmış oyuncu son taşını iskartaya bırakarak biter. Bu kontrol stok
         // beraberliğinden önce yapılmalı; ayrı bir bitiş hedefi gerektirmez.
@@ -919,8 +923,6 @@ export function applyOkeyMove(state: OkeyGameState, seat: number, move: OkeyMove
     }
     case 'finish': {
       if (state.phase !== 'discard') return { ok: false, error: 'önce taş çekmelisin' };
-      if (state.rules.variant === 'yuzbir' && p.yuzbirPendingLeftTileId)
-        return { ok: false, error: 'soldan aldığın taşı açmadan/işlemeden bitemezsin' };
       const idx = tileById(p, move.tileId);
       if (idx < 0) return { ok: false, error: 'taş elinde değil' };
       const thrown = p.hand[idx]!;

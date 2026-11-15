@@ -12,6 +12,7 @@ export interface OkeyYuzbirConfig {
   pairPenaltyX: number;     // çift bitiş/çift açmış oyuncu ceza çarpanı
   okeyFinishX: number;      // okey atarak bitiş çarpanı
   islekDiscardPenalty: number; // açık taşlara işleyebilen taş atma cezası
+  leftUnusedPenalty?: number;  // soldan alıp açmadan/işlemeden taş atma cezası (oyuncu serbest, ceza yer)
 }
 
 export interface OkeyRuleConfig {
@@ -45,5 +46,6 @@ export const DEFAULT_OKEY_RULES: OkeyRuleConfig = {
     pairPenaltyX: 2,
     okeyFinishX: 2,
     islekDiscardPenalty: 101,
+    leftUnusedPenalty: 101,
   },
 };

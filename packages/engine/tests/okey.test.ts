@@ -698,7 +698,6 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.players[0]!.yuzbirPendingLeftTileId).toBe(left.id);
     expect(st.discards[3]!.length).toBe(0);
     expect(st.players[0]!.hand.some((x) => x.id === left.id)).toBe(true);
-    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: st.players[0]!.hand[0]!.id } as any).ok).toBe(false);
 
     const ret = applyOkeyMove(st, 0, { t: 'returnLeft' } as any);
     expect(ret.ok).toBe(true);
@@ -750,7 +749,7 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(st.players[0]!.hand).toHaveLength(0);
   });
 
-  it('101de soldan alınan taş aynı turda açılmadan atış yapılamaz, açınca kilit kalkar', () => {
+  it('101de soldan alınan taş açışta kullanılınca kilit kalkar (cezasız atış)', () => {
     const st = g101();
     const g1 = [t('R', 10), t('R', 11), t('R', 12)];
     const left = t('R', 13);
@@ -764,7 +763,6 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
 
     expect(applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any).ok).toBe(true);
     expect(st.players[0]!.yuzbirPendingLeftTileId).toBe(left.id);
-    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(false);
 
     const open = [[...g1, left], g2, g3];
     const r = applyOkeyMove(st, 0, { t: 'open', groups: open.map((x) => x.map((z) => z.id)) } as any);
@@ -773,7 +771,7 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
   });
 
-  it('101de soldan alınan taş aynı turda yere işlenirse atış serbest kalır', () => {
+  it('101de soldan alınan taş aynı turda yere işlenirse kilit kalkar', () => {
     const st = g101();
     const publicRun = [t('R', 10), t('R', 11), t('R', 12)];
     const left = t('R', 13);
@@ -787,11 +785,28 @@ describe('OKEY 101 modu: açma, çift açma ve yazboz', () => {
     st.turn = 0;
 
     expect(applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any).ok).toBe(true);
-    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(false);
     expect(applyOkeyMove(st, 0, { t: 'extend', meldId: 'm-left', tileId: left.id } as any).ok).toBe(true);
     expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
     expect(st.openMelds[0]!.tiles.map((x) => x.id)).toContain(left.id);
     expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
+  });
+
+  it('101de soldan alınan taş kullanılmadan atılabilir; atan 101 ceza yer (oyuncunun eline karışılmaz)', () => {
+    const st = g101();
+    const left = t('R', 13);
+    const loose = t('Y', 1);
+    st.players[0]!.hand = [t('R', 1), t('Y', 3), t('B', 5), loose];
+    st.discards[3]!.push(left);
+    st.phase = 'draw';
+    st.turn = 0;
+    const before = st.scores[0]!;
+
+    expect(applyOkeyMove(st, 0, { t: 'draw', from: 'left' } as any).ok).toBe(true);
+    expect(applyOkeyMove(st, 0, { t: 'discard', tileId: loose.id } as any).ok).toBe(true);
+    expect(st.scores[0]).toBe(before + 101);
+    expect(st.matchLog.some((l) => l.includes('soldan aldığı taşı kullanmadı'))).toBe(true);
+    expect(st.players[0]!.yuzbirPendingLeftTileId).toBeUndefined();
+    expect(st.turn).toBe(1);
   });
 
   it('101de aynı oyuncu aynı pere aynı sırada en fazla 2 taş işler', () => {
