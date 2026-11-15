@@ -1,3 +1,4 @@
+import { sendView, wantsCompressedViews } from '../viewWire';
 import { Room, Client } from '@colyseus/core';
 import { reconnectWindowSec } from '../reconnectWindow';
 import { TABLE_BETS } from '../tableBets';
@@ -52,6 +53,8 @@ export function normalizeOkeyJoinOptions(options: any): { parsed: any; variant: 
  * mode: 'solo' (1 insan + 3 bot) | 'duo' (eşli: 0&2 insan) | 'quad' (4 insan).
  */
 export class OkeyRoom extends Room {
+  /** 'viewz' (sıkıştırılmış view) destekleyen oturumlar (reconnect aynı sessionId ile gelir). */
+  private readonly zvSessions = new Set<string>();
   maxClients = 8;
 
   private game: OkeyGameState | null = null;
@@ -444,6 +447,7 @@ export class OkeyRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    if (wantsCompressedViews(options)) this.zvSessions.add(client.sessionId); // sıkıştırılmış view isteyen istemci
     requirePopulationClient(this.population, options);
     this.populationClients.observe(client, options, this.clients, this.seats.keys());
     const uid = authUserIdFromClient(client);
@@ -1177,7 +1181,7 @@ export class OkeyRoom extends Room {
       const seat = this.seats.get(c.sessionId);
       const v: any = okeyViewFor(this.game, seat == null ? -1 : seat);
       decorate(v);
-      c.send('view', JSON.stringify(v));
+      sendView(c, JSON.stringify(v), this.zvSessions.has(c.sessionId));
     });
   }
 

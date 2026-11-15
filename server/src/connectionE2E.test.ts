@@ -228,3 +228,28 @@ describe.each(GAMES)('%s gerçek bağlantı senaryoları', game => {
     await until(() => disposed(t.roomId), 8000, 'room disposed when last human left');
   }, 40000);
 });
+
+describe.each(GAMES)('%s sıkıştırılmış view (viewz)', game => {
+  it('zv=1 istemci viewz (deflate) alır, eski istemci JSON view almaya devam eder', async () => {
+    const { inflateRawSync } = await import('node:zlib');
+    const opts: any = { mode: 'solo', table: ++tableSeq };
+    if (game === 'okey') opts.variant = 'duz';
+    const listing = await matchMaker.handleCreateRoom(game, opts);
+    const newC = new Client(endpoint), oldC = new Client(endpoint);
+    const zViews: string[] = [], plainViews: string[] = [], plainOnNew: string[] = [];
+    const a = await newC.joinById(listing.roomId, { ...opts, token: `tok-z${game}${tableSeq}a`, populationVersion: 1, ihalePilotVersion: 1, zv: 1 });
+    a.onMessage('viewz', (b: any) => zViews.push(inflateRawSync(Buffer.from(b)).toString('utf8')));
+    a.onMessage('view', (j: string) => plainOnNew.push(j));
+    a.onMessage('*', () => {});
+    const b = await oldC.joinById(listing.roomId, { ...opts, token: `tok-z${game}${tableSeq}b`, populationVersion: 1, ihalePilotVersion: 1 });
+    b.onMessage('view', (j: string) => plainViews.push(j));
+    b.onMessage('*', () => {});
+    open.push(a, b);
+    await until(() => zViews.length > 0 && plainViews.length > 0, 10000, 'views');
+    const zv = JSON.parse(zViews[zViews.length - 1]);
+    const pv = JSON.parse(plainViews[plainViews.length - 1]);
+    expect(zv.viewVersion).toBe(pv.viewVersion);
+    // küçük bekleme ekranı view'leri (<256 char) düz gidebilir; sıkıştırılmış olanlar birebir JSON olmalı
+    for (const j of plainOnNew) expect(j.length).toBeLessThan(256);
+  }, 30000);
+});

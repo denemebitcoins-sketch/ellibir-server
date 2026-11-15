@@ -1,3 +1,4 @@
+import { sendView, wantsCompressedViews } from '../viewWire';
 import { Room, Client } from '@colyseus/core';
 import { reconnectWindowSec } from '../reconnectWindow';
 import { TABLE_BETS } from '../tableBets';
@@ -29,6 +30,8 @@ import { attachPopulationBinding, populationBetOption, requirePopulationClient, 
  * sinifina girmez; baslamis macta dusen koltuk icin devralma botu korunur.
  */
 export class TavlaRoom extends Room {
+  /** 'viewz' (sıkıştırılmış view) destekleyen oturumlar (reconnect aynı sessionId ile gelir). */
+  private readonly zvSessions = new Set<string>();
   maxClients = 8;
 
   private game: TavlaGameState | null = null;
@@ -385,6 +388,7 @@ export class TavlaRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    if (wantsCompressedViews(options)) this.zvSessions.add(client.sessionId); // sıkıştırılmış view isteyen istemci
     requirePopulationClient(this.population, options);
     this.populationClients.observe(client, options, this.clients, this.seats.keys());
     const uid = authUserIdFromClient(client);
@@ -1072,7 +1076,7 @@ export class TavlaRoom extends Room {
       const seat = this.seats.get(c.sessionId);
       const v: any = tavlaViewFor(this.game, seat == null ? -1 : seat);
       decorate(v);
-      c.send('view', JSON.stringify(v));
+      sendView(c, JSON.stringify(v), this.zvSessions.has(c.sessionId));
     });
   }
 

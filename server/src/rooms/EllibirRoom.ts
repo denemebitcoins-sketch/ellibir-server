@@ -1,3 +1,4 @@
+import { sendView, wantsCompressedViews } from '../viewWire';
 import { Room, Client } from '@colyseus/core';
 import { reconnectWindowSec } from '../reconnectWindow';
 import { TABLE_BETS } from '../tableBets';
@@ -27,6 +28,8 @@ import { attachPopulationBinding, populationBetOption, requirePopulationClient, 
  * botların çekip atması istemcide animasyonlu görünür (Edge "frames" modelinin karşılığı).
  */
 export class EllibirRoom extends Room {
+  /** 'viewz' (sıkıştırılmış view) destekleyen oturumlar (reconnect aynı sessionId ile gelir). */
+  private readonly zvSessions = new Set<string>();
   protected gameKey = '51';
   protected runtime = ellibirRuntime;
   private ihaleDeadline = 0;
@@ -452,6 +455,7 @@ export class EllibirRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    if (wantsCompressedViews(options)) this.zvSessions.add(client.sessionId); // sıkıştırılmış view isteyen istemci
     requirePopulationClient(this.population, options);
     this.populationClients.observe(client, options, this.clients, this.seats.keys());
     if (options?.ihalePilotVersion === 1) this.ihalePilotClients.add(client.sessionId);
@@ -1275,7 +1279,7 @@ export class EllibirRoom extends Room {
         sv.canakWinName = this.canakWin?.name ?? '';
         sv.canakWinAmount = this.canakWin?.amount ?? 0;
         sv.rematchVotes = [...this.rematchVotes];
-        c.send('view', JSON.stringify(sv));
+        sendView(c, JSON.stringify(sv), this.zvSessions.has(c.sessionId));
         return;
       }
       const view: any = this.runtime.view(this.game, seat);
@@ -1300,7 +1304,7 @@ export class EllibirRoom extends Room {
       view.canakWinName = this.canakWin?.name ?? '';
       view.canakWinAmount = this.canakWin?.amount ?? 0;
       view.rematchVotes = [...this.rematchVotes];
-      c.send('view', JSON.stringify(view));
+      sendView(c, JSON.stringify(view), this.zvSessions.has(c.sessionId));
     });
   }
 
