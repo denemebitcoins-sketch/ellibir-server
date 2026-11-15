@@ -1263,6 +1263,7 @@ export class EllibirRoom extends Room {
       if (seat == null) {
         // İzleyici: gizli el YOK, yalnız masadaki açık bilgi (sıra/skor/açık perler).
         const sv: any = this.runtime.view(this.game, -1);
+        this.applyWaitingRules(sv);
         if (sv.ihale) sv.ihale.turnMs = Math.max(0, this.ihaleDeadline - Date.now());
         decorate(sv.seats);
         sv.spectators = specList;
@@ -1283,6 +1284,7 @@ export class EllibirRoom extends Room {
         return;
       }
       const view: any = this.runtime.view(this.game, seat);
+      this.applyWaitingRules(view);
       if (view.ihale) {
         view.ihale.turnMs = Math.max(0, this.ihaleDeadline - Date.now());
         view.ihale.autoPilot = this.ihaleAutoPilot.has(seat);
@@ -1320,5 +1322,16 @@ export class EllibirRoom extends Room {
     this.clearSorguTimer();
     this.clearTurnTimer();
     return this.population?.dispose();
+  }
+
+  /** Oyun kurulmadan (masa beklerken) giden boş görünüm varsayılanları (Tekli/5 el) taşıyordu;
+   *  masanın GERÇEK ayarlarını yaz → bekleme ekranı "Eşli" masada "Tekli" göstermesin. */
+  private applyWaitingRules(v: any): void {
+    if (this.game || !this.cfg?.rules) return;
+    const r: any = this.cfg.rules;
+    v.teamMode = !!r.teamMode;
+    if (typeof r.totalHands === 'number') { v.totalHands = r.totalHands; v.baseHands = r.totalHands; }
+    if (typeof r.openingMinPoints === 'number') v.openingMin = r.openingMinPoints;
+    if (typeof r.turnTimerSeconds === 'number') v.turnTimerSeconds = r.turnTimerSeconds;
   }
 }

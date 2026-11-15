@@ -18,6 +18,8 @@ export interface IhaleState {
   seed: number; rules: RuleConfig; players: IhalePlayer[];
   phase: 'action' | 'handEnded' | 'matchEnded'; currentSeat: number;
   handNumber: number; dealerSeat: number; revision: number;
+  /** Masada seçilen el sayısı. Son elde puan eşitse totalHands uzar; bu değer DEĞİŞMEZ. */
+  baseHands?: number;
   matchWinnerSeat: number; matchDraw: boolean; matchLog: string[];
   lastHandResult: IhaleHandResult | null; history: IhaleHandResult[];
   ihale: {
@@ -189,8 +191,11 @@ export function collectIhaleTrick(original: IhaleState): IhaleState {
   const contenders = s.players.slice(0, s.rules.teamMode ? 2 : 4);
   const highest = Math.max(...contenders.map(p => p.totalScore));
   const leaders = contenders.filter(p => p.totalScore === highest);
-  if (s.handNumber >= s.rules.totalHands && leaders.length > 1)
+  if (s.handNumber >= s.rules.totalHands && leaders.length > 1) {
+    s.baseHands ??= s.rules.totalHands;
     s.rules = { ...s.rules, totalHands: s.handNumber + 1 };
+    s.matchLog.push('Puanlar eşit — uzatma eli oynanacak');
+  }
   s.phase = s.handNumber >= s.rules.totalHands ? 'matchEnded' : 'handEnded';
   if (s.phase === 'matchEnded') {
     s.matchDraw = false;

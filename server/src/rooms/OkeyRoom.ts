@@ -248,7 +248,7 @@ export class OkeyRoom extends Room {
       yuzbir: { ...DEFAULT_OKEY_RULES.yuzbir, ...(parsed?.yuzbir ?? {}) },
     };
     rules.variant = requestedVariant;
-    rules.totalEls = normalizeRoomOption(rules.totalEls, [1, 5, 9, 11], DEFAULT_OKEY_RULES.totalEls, 'okey_hands');
+    rules.totalEls = normalizeRoomOption(rules.totalEls, [1, 3, 5, 7, 9, 11], DEFAULT_OKEY_RULES.totalEls, 'okey_hands');
     rules.turnTimerSeconds = normalizeRoomOption(rules.turnTimerSeconds, [30, 45, 60], DEFAULT_OKEY_RULES.turnTimerSeconds, 'okey_turn');
     // Biriktirme modelleri (banko + 101): 0'dan başlanır, sabit el, en düşük kazanır (kullanıcı kuralı).
     if (rules.variant === 'yuzbir' || rules.variant === 'banko') rules.scoring.startScore = 0;
@@ -1164,6 +1164,13 @@ export class OkeyRoom extends Room {
       v.spectatorRoles = specRoles;
       v.spectatorGenders = specGenders;
       v.waitingForPlayers = waiting;
+      if (waiting && this.cfg?.rules) {
+        // Boş görünüm Tekli/0 el varsayılanı taşır → masanın gerçek ayarlarını yaz.
+        const r: any = this.cfg.rules;
+        v.teamMode = !!r.teamMode; v.totalEls = r.totalEls; v.variant = r.variant ?? v.variant;
+        v.turnTimerSeconds = r.turnTimerSeconds ?? v.turnTimerSeconds;
+        if (r.scoring?.startScore != null) v.startScore = r.scoring.startScore;
+      }
       v.starting = starting;
       v.seated = seated;
       v.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;

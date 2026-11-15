@@ -1059,6 +1059,11 @@ export class TavlaRoom extends Room {
       v.spectatorRoles = specRoles;
       v.spectatorGenders = specGenders;
       v.waitingForPlayers = waiting;
+      if (waiting && this.cfg?.rules) {
+        const r: any = this.cfg.rules;
+        v.targetScore = r.targetScore ?? v.targetScore;
+        v.turnTimerSeconds = r.turnTimerSeconds ?? v.turnTimerSeconds;
+      }
       v.starting = starting;
       v.seated = seated;
       v.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyIhaleCommand, collectIhaleTrick, createIhaleGame, ihaleBotCommand, ihaleController,
   ihaleBidOptions, ihaleTrickWinner, legalIhaleCards, nextIhaleHand, scoreIhaleTeams, scoreIhaleSolo } from '../../packages/engine/src/ihale';
 import type { IhaleState } from '../../packages/engine/src/ihale';
+import { ihaleClientView } from './cardRoomRuntime';
 import type { NormalCard, Rank, Suit } from '../../packages/engine/src/types';
 const card = (suit: Suit, rank: number): NormalCard => ({ id: `${suit}${rank}-0`, suit, rank: rank as Rank, joker: false });
 const game = () => createIhaleGame({ seed: 42, rules: { teamMode: true, totalHands: 1 } });
@@ -128,6 +129,16 @@ describe('Ihale rules and authority', () => {
     s = collectIhaleTrick(s);
     expect(s.phase).toBe('handEnded'); expect(s.rules.totalHands).toBe(2);
     s = nextIhaleHand(s); expect(s.dealerSeat).toBe(1); expect(s.currentSeat).toBe(1);
+  });
+  it('marks the tie-break hand in the client view and keeps the chosen hand count', () => {
+    let s = playState(); s.ihale.phase = 'trickEnd'; s.ihale.tricks = [4, 3, 4, 2]; s.ihale.bid = 8;
+    s.players[1].totalScore = 30; s.players[3].totalScore = 30;
+    expect(ihaleClientView(s, 0).tiebreak).toBe(false);
+    s = collectIhaleTrick(s);
+    expect(s.baseHands).toBe(1); expect(s.matchLog.at(-1)).toContain('uzatma');
+    let v = ihaleClientView(s, 0); expect(v.tiebreak).toBe(true); expect(v.baseHands).toBe(1);
+    s = nextIhaleHand(s);
+    v = ihaleClientView(s, 0); expect(v.tiebreak).toBe(true); expect(v.handNumber).toBe(2); expect(v.totalHands).toBe(2); expect(v.baseHands).toBe(1);
   });
   it.each([
     [[5, 0, 4, 4], 5, [50, -50, 40, 40]],

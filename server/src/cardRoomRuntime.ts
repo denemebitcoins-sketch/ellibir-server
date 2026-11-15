@@ -15,6 +15,8 @@ export function ihaleClientView(s: IhaleState | null, seat: number): any {
   const yours = seat >= 0 && s.phase === 'action' && ['bid', 'trump', 'play'].includes(i.phase) && ihaleController(s) === seat;
   return { seat, spectator: seat < 0, phase: s.phase, currentSeat: s.currentSeat, yourTurn: yours,
     handNumber: s.handNumber, totalHands: s.rules.totalHands, teamMode: s.rules.teamMode,
+    baseHands: s.baseHands ?? s.rules.totalHands, tiebreak: s.handNumber > (s.baseHands ?? s.rules.totalHands)
+      || (s.phase === 'handEnded' && s.baseHands != null && s.handNumber >= s.baseHands),
     matchWinnerSeat: s.matchWinnerSeat, handWinnerSeat: -1,
     myHand: seat >= 0 ? s.players[seat].hand.map(cardView) : [],
     seats: s.players.map(p => ({ seat: p.seat, name: p.name, isBot: p.isBot, totalScore: p.totalScore,
