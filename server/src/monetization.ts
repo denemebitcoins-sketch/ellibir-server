@@ -121,16 +121,18 @@ async function googleAccessToken(): Promise<string> {
 }
 
 const PRODUCTS: Record<string, { type: 'consumable' | 'subscription'; chips?: number; diamonds?: number; vipMonths?: number }> = {
-  'onlinekahvem.chips.100k': { type: 'consumable', chips: 100_000 },
-  'onlinekahvem.chips.250k': { type: 'consumable', chips: 250_000 },
-  'onlinekahvem.chips.600k': { type: 'consumable', chips: 600_000 },
-  'onlinekahvem.chips.1500k': { type: 'consumable', chips: 1_500_000 },
-  'onlinekahvem.chips.4000k': { type: 'consumable', chips: 4_000_000 },
-  'onlinekahvem.diamond.100': { type: 'consumable', diamonds: 100 },
-  'onlinekahvem.diamond.300': { type: 'consumable', diamonds: 300 },
-  'onlinekahvem.diamond.750': { type: 'consumable', diamonds: 750 },
-  'onlinekahvem.diamond.1750': { type: 'consumable', diamonds: 1750 },
-  'onlinekahvem.diamond.4000': { type: 'consumable', diamonds: 4000 },
+  // 2026-11-16: fiyatlar aynı, miktarlar büyütüldü (çip ×5, elmas ×7,5). Ürün kimlikleri değişmedi;
+  // gerçek yükleme DB finalize_play_purchase ile aynı değerleri kullanır.
+  'onlinekahvem.chips.100k': { type: 'consumable', chips: 500_000 },
+  'onlinekahvem.chips.250k': { type: 'consumable', chips: 1_250_000 },
+  'onlinekahvem.chips.600k': { type: 'consumable', chips: 3_000_000 },
+  'onlinekahvem.chips.1500k': { type: 'consumable', chips: 7_500_000 },
+  'onlinekahvem.chips.4000k': { type: 'consumable', chips: 20_000_000 },
+  'onlinekahvem.diamond.100': { type: 'consumable', diamonds: 750 },
+  'onlinekahvem.diamond.300': { type: 'consumable', diamonds: 2_250 },
+  'onlinekahvem.diamond.750': { type: 'consumable', diamonds: 5_600 },
+  'onlinekahvem.diamond.1750': { type: 'consumable', diamonds: 13_000 },
+  'onlinekahvem.diamond.4000': { type: 'consumable', diamonds: 30_000 },
   'onlinekahvem.vip.1month': { type: 'subscription', vipMonths: 1 },
   'onlinekahvem.vip.6month': { type: 'subscription', vipMonths: 6 },
   'onlinekahvem.vip.12month': { type: 'subscription', vipMonths: 12 },

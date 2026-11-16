@@ -17,18 +17,18 @@ const DEFAULT_PROFILE_FRAME = 'profile_frame_default';
 const GOLD_TEAL_FRAME = 'profile_frame_gold_teal_v1';
 const MIMIK_PACK_1 = 'emoji_pack_mimik_1';
 
-/** İsim stilleri (masa kartı + çevrimiçi liste + sohbet). Giriş 250, orta 600, üst 1200 elmas. */
+/** İsim stilleri (masa kartı + çevrimiçi liste + sohbet). Giriş 1250, orta 2400, üst 4800 elmas (2026-11-16). */
 export const NAME_STYLE_IDS = [
   'name_style_silver', 'name_style_copper', 'name_style_fire', 'name_style_ice',
   'name_style_gold_shimmer', 'name_style_rainbow',
 ] as const;
 const NAME_STYLE_PRICES: Record<string, number> = {
-  name_style_silver: 250, name_style_copper: 250, name_style_fire: 250, name_style_ice: 250,
-  name_style_gold_shimmer: 600, name_style_rainbow: 1200,
+  name_style_silver: 1250, name_style_copper: 1250, name_style_fire: 1250, name_style_ice: 1250,
+  name_style_gold_shimmer: 2400, name_style_rainbow: 4800,
 };
 /** Elmasla açılan arayüz temaları (Grafit + Gece Mavisi ücretsiz, istemcide). */
 const UI_THEME_PRICES: Record<string, number> = {
-  ui_theme_zumrut: 150, ui_theme_sutlu_kahve: 150, ui_theme_bordo_kadife: 150,
+  ui_theme_zumrut: 1000, ui_theme_sutlu_kahve: 1000, ui_theme_bordo_kadife: 1000,
 };
 
 /** Görünüme/odalara gidecek stil kimliği: yalnız katalogdaki değerler, aksi halde ''. */
@@ -44,7 +44,7 @@ const COSMETICS: Record<string, CosmeticDef> = {
   [MIMIK_PACK_1]: {
     id: MIMIK_PACK_1,
     category: 'emoji_pack',
-    priceDiamonds: 180,
+    priceDiamonds: 1000,
     reactions: ['giggle', 'angry_shout', 'tease_smirk', 'sad_shy'],
   },
 };
