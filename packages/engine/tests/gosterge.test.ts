@@ -124,6 +124,56 @@ describe('gösterge — kurulum ve görünürlük', () => {
     expect(exchanged.stock[0]!.id).toBe(exchangeCard.id);
   });
 
+  it('çiftleri masaya AÇTIKTAN sonra da (elde + açılmış ≥ 4 çift) göstergeyi takas edebilir', () => {
+    const s = createGame({ seed: 13 });
+    const dealer = s.players[s.currentSeat]!;
+    const afterDiscard = applyMove(s, { type: 'discard', cardId: dealer.hand[dealer.hand.length - 1]!.id });
+    const seat = afterDiscard.currentSeat;
+    const gKart = afterDiscard.gostergeKart;
+    if (!gKart || !isNormalCard(gKart)) throw new Error('test göstergesi normal kart olmalı');
+    const hand = fourPairsPlus(gKart);
+    const shown = applyMove(withHand(afterDiscard, seat, hand), { type: 'gostergeGoster', cardId: hand[0]!.id });
+    // 4 çifti masaya açılmış gibi taşı: elde yalnız gösterge eşi + tek kart kalır (elde 0 çift).
+    const opened: GameState = {
+      ...shown,
+      melds: [
+        ...shown.melds,
+        { id: 'op1', ownerSeat: seat, type: 'pair', cards: [hand[1]!, hand[2]!] },
+        { id: 'op2', ownerSeat: seat, type: 'pair', cards: [hand[3]!, hand[4]!] },
+        { id: 'op3', ownerSeat: seat, type: 'pair', cards: [hand[5]!, hand[6]!] },
+        { id: 'op4', ownerSeat: seat, type: 'pair', cards: [hand[7]!, hand[8]!] },
+      ],
+      players: shown.players.map((p) => (p.seat === seat ? { ...p, hand: [hand[0]!, hand[9]!] } : p)),
+    };
+    expect(viewFor(opened, seat).gostergeCanTake).toBe(true);
+    const exchanged = applyMove(opened, { type: 'gostergeAl', cardId: hand[9]!.id });
+    expect(exchanged.gostergeTaken).toBe(true);
+    expect(exchanged.players[seat]!.hand.some((card) => card.id === gKart.id)).toBe(true);
+  });
+
+  it('elde + açılmış toplam 3 çiftle gösterge takası yapılamaz', () => {
+    const s = createGame({ seed: 13 });
+    const dealer = s.players[s.currentSeat]!;
+    const afterDiscard = applyMove(s, { type: 'discard', cardId: dealer.hand[dealer.hand.length - 1]!.id });
+    const seat = afterDiscard.currentSeat;
+    const gKart = afterDiscard.gostergeKart;
+    if (!gKart || !isNormalCard(gKart)) throw new Error('test göstergesi normal kart olmalı');
+    const hand = fourPairsPlus(gKart);
+    const shown = applyMove(withHand(afterDiscard, seat, hand), { type: 'gostergeGoster', cardId: hand[0]!.id });
+    const opened: GameState = {
+      ...shown,
+      melds: [
+        ...shown.melds,
+        { id: 'op1', ownerSeat: seat, type: 'pair', cards: [hand[1]!, hand[2]!] },
+        { id: 'op2', ownerSeat: seat, type: 'pair', cards: [hand[3]!, hand[4]!] },
+        { id: 'op3', ownerSeat: seat, type: 'pair', cards: [hand[5]!, hand[6]!] },
+      ],
+      players: shown.players.map((p) => (p.seat === seat ? { ...p, hand: [hand[0]!, hand[9]!, hand[7]!] } : p)),
+    };
+    expect(viewFor(opened, seat).gostergeCanTake).toBe(false);
+    expect(() => applyMove(opened, { type: 'gostergeAl', cardId: hand[9]!.id })).toThrow(/en az 4 çift/);
+  });
+
   it('gösterge takasında gösterge eşi veya çiftin parçası verilemez', () => {
     const s = createGame({ seed: 14 });
     const dealer = s.players[s.currentSeat]!;

@@ -1425,6 +1425,11 @@ function applyGostergeGoster(state: GameState, cardId: CardId): GameState {
 }
 
 /** GÖSTERGE AL: önce göstermiş + eşi elde + 4+ çift; çift dışı bir kart verip göstergeyi al. */
+/** Oyuncunun masaya AÇTIĞI çift sayısı (gösterge takasında eldeki çiftlerle birlikte sayılır). */
+function openedPairCount(state: GameState, seat: number): number {
+  return state.melds.filter((m) => m.ownerSeat === seat && m.type === 'pair').length;
+}
+
 function applyGostergeAl(state: GameState, cardId: CardId): GameState {
   const g = state.gostergeKart;
   if (!g || state.gostergeTaken)
@@ -1441,8 +1446,11 @@ function applyGostergeAl(state: GameState, cardId: CardId): GameState {
   if (!mate)
     throw new MoveError('gosterge', 'Gösterge eşini elinde tutmalısın.');
   // ÇİFT sayısı UI'daki "Puan-çift" (myPairCount) ile AYNI hesap — OKEY (joker) dahil.
+  // KURAL: elde + masaya açılmış TOPLAM en az 4 çift → gösterge 5. (ya da sonraki) çifti yapar.
+  //   (Eskiden yalnız ELDEKİ çiftler sayılıyordu → 5 çift açan oyuncu takas yapamıyordu.)
+  const opened = openedPairCount(state, seat);
   const pairBefore = analyzeHand(player.hand, state.rules).pairCount;
-  if (pairBefore < 4)
+  if (pairBefore + opened < 4)
     throw new MoveError('gosterge', 'Göstergeyi almak için en az 4 çiftin olmalı.');
   const verilen = player.hand.find((c) => c.id === cardId);
   if (!verilen) throw new MoveError('notInHand', 'Kart elde değil.');
@@ -1452,7 +1460,7 @@ function applyGostergeAl(state: GameState, cardId: CardId): GameState {
   if (analyzeHand(withoutGiven, state.rules).pairCount !== pairBefore)
     throw new MoveError('gosterge', 'Gösterge için çift olmayan bir kart bırakmalısın.');
   const newHand = [...withoutGiven, g];
-  if (analyzeHand(newHand, state.rules).pairCount < 5)
+  if (analyzeHand(newHand, state.rules).pairCount + opened < 5)
     throw new MoveError('gosterge', 'Gösterge eşi elinde kalmalı; gösterge 5. çiftini tamamlamalı.');
   // Gösterge ele gelir; verilen kart destenin dibine (stock[0]) gider VE artık gösterge
   // pozisyonunda AÇIK görünür (yeni deste dibi). Alan DİREKT ÇİFT olur. Tekrar alınamaz (taken).
@@ -1617,7 +1625,7 @@ export function viewFor(state: GameState, seat: number): PlayerView {
       (state.phase === 'draw' || state.phase === 'action') &&
       (state.gostergeShown ?? []).includes(seat) &&
       hasGostergeMate &&
-      analyzeHand(me.hand, state.rules).pairCount >= 4,
+      analyzeHand(me.hand, state.rules).pairCount + openedPairCount(state, seat) >= 4,
     players: state.players.map((p) => ({
       seat: p.seat,
       name: p.name,
