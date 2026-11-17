@@ -114,6 +114,6 @@ begin
   return new;
 end $$;
 
-drop trigger if exists reports_admin_web_push on public.reports;
+do $x$ begin if exists (select 1 from pg_trigger where tgname = 'reports_admin_web_push') then execute 'drop trigger reports_admin_web_push on public.reports'; end if; end $x$;
 create trigger reports_admin_web_push after insert on public.reports
   for each row execute function public.trg_reports_admin_web_push();
