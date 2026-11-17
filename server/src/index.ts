@@ -13,6 +13,7 @@ import { OkeyRoom } from './rooms/OkeyRoom';
 import { TavlaRoom } from './rooms/TavlaRoom';
 import { handleAdMobSsv, verifyPlayPurchase } from './monetization';
 import { startPushWorker } from './pushWorker';
+import { startAdminWebPush } from './adminWebPush';
 import { emailAuthStatus, requestEmailCode, verifyEmailCode } from './emailAuth';
 import { adminResetPinRecovery, adminSecureDeviceRecovery, createPinAccount, loginLegacyDeviceAccount, loginPinRecovery, pinRecoveryStatus, setupPinRecovery, startDeviceAccount } from './recoveryAuth';
 import { submitPreAuthSupport } from './preAuthSupport';
@@ -283,6 +284,7 @@ void gameServer.listen(port).then(() => populationRuntime.start()).catch(() => {
   console.error('[server] listen failed'); process.exitCode = 1;
 });
 startPushWorker();
+startAdminWebPush();
 
 // GÜNLÜK ÖDÜL HATIRLATMASI: her gün 19:00'da (yerel) ödülünü almamış + push cihazı açık
 // kullanıcılara bildirim kuyrukla. SQL: migrations/20260726_game_interest_and_daily_reminders.sql
