@@ -26,6 +26,21 @@ const port = Number(process.env.PORT) || 2567;
 
 const app = express();
 app.use(express.json({ limit: '96kb' }));
+// Yönetim web sayfası (site alanından) yalnız giriş ve admin kurtarma uçlarına erişebilsin (CORS).
+const ADMIN_WEB_ORIGINS = new Set(['https://online-kahvem.web.app', 'https://online-kahvem.firebaseapp.com']);
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || '');
+  const allowedPath = req.path === '/auth/recovery/login' || req.path.startsWith('/auth/recovery/admin-');
+  if (origin && ADMIN_WEB_ORIGINS.has(origin) && allowedPath) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '600');
+    if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+  }
+  next();
+});
 const populationRuntime = new PopulationRuntime();
 app.use('/admin/bots', populationAdminRouter(populationRuntime.storage, () => populationRuntime.tick()));
 app.use('/bots', populationPublicRouter((uid,character) => populationRuntime.invite(uid,character)));
