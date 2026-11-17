@@ -1164,6 +1164,7 @@ export class OkeyRoom extends Room {
       v.spectatorRoles = specRoles;
       v.spectatorGenders = specGenders;
       v.waitingForPlayers = waiting;
+      v.bet = this.bet; // masanın GERÇEK bahsi (izleyici/katılan kendi kayıtlı ayarını değil bunu görsün)
       if (waiting && this.cfg?.rules) {
         // Boş görünüm Tekli/0 el varsayılanı taşır → masanın gerçek ayarlarını yaz.
         const r: any = this.cfg.rules;

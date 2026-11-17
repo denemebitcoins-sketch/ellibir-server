@@ -1059,6 +1059,7 @@ export class TavlaRoom extends Room {
       v.spectatorRoles = specRoles;
       v.spectatorGenders = specGenders;
       v.waitingForPlayers = waiting;
+      v.bet = this.bet; // masanın GERÇEK bahsi
       if (waiting && this.cfg?.rules) {
         const r: any = this.cfg.rules;
         v.targetScore = r.targetScore ?? v.targetScore;

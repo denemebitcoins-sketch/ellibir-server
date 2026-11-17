@@ -1270,6 +1270,7 @@ export class EllibirRoom extends Room {
         sv.spectatorRoles = specRoles;
         sv.spectatorGenders = specGenders;
         sv.waitingForPlayers = waiting;
+        sv.bet = this.bet; // masanın GERÇEK bahsi
         sv.starting = starting;
         sv.seated = seated;
         sv.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
@@ -1296,6 +1297,7 @@ export class EllibirRoom extends Room {
       view.spectatorRoles = specRoles;
       view.spectatorGenders = specGenders;
       view.waitingForPlayers = waiting;
+      view.bet = this.bet; // masanın GERÇEK bahsi
       view.starting = starting;
       view.seated = seated;   // bekleme ekranında masadaki oyuncular
       view.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0; // geri sayım
