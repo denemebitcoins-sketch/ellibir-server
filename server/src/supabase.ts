@@ -757,6 +757,14 @@ export async function settleMatch(opts: {
     await rpc('record_match_stats', { p_user_id: uid, p_won: true,  p_winnings: Math.max(0, perWinner - economyBet) });
   for (const { uid } of losers)
     await rpc('record_match_stats', { p_user_id: uid, p_won: false, p_winnings: 0 });
+  // 6.8 TOPLULUK: büyük kazanç (net ≥ 10.000) lobi sohbetine sistem satırı olarak düşer (DB tarafında hız sınırlı).
+  if (economyBet > 0) {
+    const net = perWinner - economyBet;
+    if (net >= 10000)
+      for (const { uid } of winners)
+        void rpcService('lobby_win_event', { p_user: uid, p_game: opts.gameVariant || opts.game || '', p_amount: net }, 8000)
+          .catch((e: any) => console.warn('[settle] lobby_win_event:', e?.message));
+  }
   if (opts.matchRewardsEligible === true) {
     for (const { uid } of winners) questMatchEvent(uid, true, opts.game);
     for (const { uid } of losers) questMatchEvent(uid, false, opts.game);
