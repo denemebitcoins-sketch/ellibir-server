@@ -1,4 +1,4 @@
--- 6.8: bot masası table_info'suna el/puan eklendi (salon etiketi "9 el - tekli - 2.000 çip"). Oda varsayılanları:
+-- 6.8: bot masası table_info'suna el/puan eklendi (18.11: ihale de 11 el — bot ihale odaları DEFAULT_RULES.totalHands=11) (salon etiketi "9 el - tekli - 2.000 çip"). Oda varsayılanları:
 -- okey 9 el, 51 11 el, tavla 5 puan (bot odaları kural geçmeden açılır).
 -- Explicit bot identities; never insert simulated humans into auth/profiles/presence.
 begin;
@@ -17,7 +17,7 @@ begin
     'table_info',case when h.room_key is null then '' else
       (case h.game when 'yuzbir' then '101' when 'banko' then 'BANKO' when 'duz' then 'KLASIK' when 'ihale' then 'IHALE' when 'tavla' then 'TAVLA' else '51' end)
       ||' · '||case when h.team_mode then 'ESLI' else 'TEK' end||' · '||h.bet||' çip'
-      ||case h.game when 'tavla' then ' · 5 puan' when 'ihale' then '' when '51' then ' · 11 el' else ' · 9 el' end end,
+      ||case h.game when 'tavla' then ' · 5 puan' when 'ihale' then ' · 11 el' when '51' then ' · 11 el' else ' · 9 el' end end,
     'table_started',l.active_match is not null,'allow_dm',false,'allow_friend_req',false,'gift_off',true,
     'invite_pref',case when l.room_key is null and ctl.mode='running' then 'open' else 'closed' end,
     'avatar_url',case when c.avatar_key in ('arzu-v1','mithat-v1') then 'population:'||c.avatar_key else '' end,
