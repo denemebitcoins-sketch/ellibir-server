@@ -46,6 +46,8 @@ export class PopulationRoomSession {
   get size() { return this.occupants.size; }
   get activeMatch() { return this.current?.state === 'active'; }
   get hasMatch() { return this.current !== null; }
+  /** Son maç kaydı (finish sonrası settled/refunded) — 6.9 haftalık puan / Kahve Saati için. */
+  get lastMatch(): PopulationMatch | null { return this.current; }
   get isDisposed() { return this.disposed; }
   get canPlay() {
     return !this.disposed && !this.fenced && !this.authorityFenced && this.size > 0

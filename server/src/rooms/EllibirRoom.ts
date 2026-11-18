@@ -1,6 +1,7 @@
 import { sendView, wantsCompressedViews } from '../viewWire';
 import { Room, Client } from '@colyseus/core';
 import { ReadyGate, READY_START_MS } from '../readyGate';
+import { populationMatchExtras } from '../populationExtras';
 import { reconnectWindowSec } from '../reconnectWindow';
 import { TABLE_BETS } from '../tableBets';
 import { SeatPresenceLeases, hasOpenTransport, pendingReconnection } from '../seatPresenceLease';
@@ -1111,7 +1112,14 @@ export class EllibirRoom extends Room {
         const noContest = this.gameKey !== 'ihale' && isOneRoundNoContest({ totalRounds: r.totalHands,
           handWinnerSeat: this.game.lastHandResult?.winnerSeat, scores: scoreValues });
         this.settlePromise = this.population.finish(noContest ? null : Number(this.game.matchWinnerSeat))
-          .then(() => this.pushViews())
+          .then(() => {
+            this.pushViews();
+            // 6.9: canlı botlu masada da gerçek oyuncu haftalık puan + Kahve Saati alır (botlar hariç)
+            const pHands = Number((this.game?.rules as any)?.totalHands) || 1;
+            void populationMatchExtras(this.population?.lastMatch ?? null, pHands)
+              .then((extras) => { if (extras.length) this.broadcast('matchExtras', { extras }); })
+              .catch((e: any) => console.warn('[population] extras:', e?.message));
+          })
           .catch((e: any) => { this.settled = false; console.error('[population] settlement pending:', e?.message); });
         return;
       }
