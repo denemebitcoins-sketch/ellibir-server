@@ -1,3 +1,4 @@
+process.env.READY_GATE = process.env.READY_GATE || 'on'; // testler Hazır sistemini açık çalıştırır (canlıda varsayılan kapalı)
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -106,5 +107,17 @@ describe('odalar hazır sistemine bağlı', () => {
     expect(src).toMatch(/if \(this\.seats\.size === 0\) this\.readyGate\.clearBans\(\)/);
     expect(src).toMatch(/scheduleBots\(botSeats/);
     expect(src).toMatch(/if \(this\.seats\.size === 0\) this\.readyGate\.clearBans\(\)/);
+  });
+});
+
+import { readyGateEnabled } from './readyGate';
+describe('READY_GATE varsayılanı', () => {
+  it('ayar yoksa kapalı; off/on çalışır', () => {
+    const prev = process.env.READY_GATE;
+    try {
+      delete process.env.READY_GATE; expect(readyGateEnabled()).toBe(false);
+      process.env.READY_GATE = 'off'; const g = new ReadyGate(() => {}); g.observe('a', { readyGate: true }); expect(g.active(['a'])).toBe(false);
+      process.env.READY_GATE = 'on'; g.observe('b', { readyGate: true }); expect(g.active(['b'])).toBe(true); g.dispose();
+    } finally { if (prev === undefined) delete process.env.READY_GATE; else process.env.READY_GATE = prev; }
   });
 });

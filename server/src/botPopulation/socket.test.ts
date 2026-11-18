@@ -1,3 +1,4 @@
+process.env.READY_GATE = process.env.READY_GATE || 'on'; // testler Hazır sistemini açık çalıştırır (canlıda varsayılan kapalı)
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';

@@ -1,3 +1,4 @@
+process.env.READY_GATE = process.env.READY_GATE || 'on'; // testler Hazır sistemini açık çalıştırır (canlıda varsayılan kapalı)
 /**
  * 6.9 HAZIR SİSTEMİ — gerçek websocket + Colyseus SDK ile uçtan uca:
  *  - yeni istemciler (readyGate) masa dolunca BEKLER, herkes HAZIR deyince 3 sn'de başlar

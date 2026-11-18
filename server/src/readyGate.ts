@@ -14,6 +14,13 @@ export const READY_TIMEOUT_MS = 20_000;
 export const READY_START_MS = 3_000;
 export const KICK_BAN_MS = 60_000; // kullanıcı kararı 18.11: 10 dk yerine 1 dk
 
+/** Kapatma anahtarı (18.11): 6.8 istemcisinde HAZIR paneli çizilmiyor → sistem VARSAYILAN KAPALI.
+ *  İstemci düzeltilince Render ortamına READY_GATE=on eklenir (build gerekmez). */
+export function readyGateEnabled(): boolean {
+  const v = String(process.env.READY_GATE ?? 'off').trim().toLowerCase();
+  return v === 'on' || v === '1' || v === 'true' || v === 'yes';
+}
+
 export class ReadyGate {
   readonly ready = new Set<number>();
   private readonly capable = new Set<string>();
@@ -28,6 +35,7 @@ export class ReadyGate {
     private readonly timeoutMs = Number(process.env.READY_TIMEOUT_MS) > 0 ? Number(process.env.READY_TIMEOUT_MS) : READY_TIMEOUT_MS) {}
 
   observe(sessionId: string, options: any) {
+    if (!readyGateEnabled()) return;                      // kapatma anahtarı: kapalıyken herkes eski 7 sn akışında
     const v = options?.readyGate;
     if (v === true || v === 'true' || v === 1 || v === '1') this.capable.add(sessionId);
   }
