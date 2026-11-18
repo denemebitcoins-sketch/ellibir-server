@@ -724,6 +724,7 @@ export async function settleMatch(opts: {
   hands?: number;                 // 6.9: el sayısı (tavla: hedef puan) → Haftanın Kahvecisi puanı
   onExtras?: (extras: MatchExtras[]) => void; // 6.9: haftalık puan + Kahve Saati iade/bonus (sonuç ekranı satırı)
   presentUserIds?: string[];      // 18.11: maç bitince masada OTURAN oyuncular; yarıda çıkan puan/Kahve Saati almaz
+  startedAt?: string;             // 18.11: maç başlangıcı (ISO) → Kahve Saati 20-23 penceresi başlangıca göre
 }): Promise<MatchProgressionAward[]> {
   const { seatUsers, winnerSeat, bet, teamMode } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat)) return [];
@@ -785,6 +786,7 @@ export async function settleMatch(opts: {
         const r = await rpcService('match_extras', {
           p_user: uid, p_game: opts.gameVariant || opts.game || '', p_hands: Math.max(1, Math.floor(opts.hands ?? 1)),
           p_won: won, p_bet: economyBet, p_net: won ? net : 0, p_key: opts.progressionKey,
+          ...(opts.startedAt ? { p_started_at: opts.startedAt } : {}),
         }, 8000);
         if (r && r.ok) extras.push({ seat, userId: uid, points: Number(r.points ?? 0), double: !!r.double, capped: !!r.capped,
           coffeeKind: r.coffee_kind ?? null, coffeeAmount: Number(r.coffee_amount ?? 0) });

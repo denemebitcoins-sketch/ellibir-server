@@ -68,6 +68,7 @@ export class TavlaRoom extends Room {
   private entryCanakCharged = false;
   private matchRewardsEligible = false;
   private settlePromise: Promise<void> | null = null;
+  private matchStartedAt = '';                 // 18.11: maç başlangıcı (Kahve Saati penceresi buna göre)
   private matchProgressionKey = '';            // XP idempotency key (per authoritative match)
   private cfg: any = null;
   private rematchVotes = new Set<number>(); // maç sonu TEKRAR OYNA oyları (koltuk)
@@ -514,6 +515,7 @@ export class TavlaRoom extends Room {
       this.refreshCanak();
       this.cfg.botSeats = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
       this.game = createTavlaGame(this.cfg);
+      this.matchStartedAt = new Date().toISOString(); // 18.11 Kahve Saati: maçın BAŞLADIĞI an belirler
       this.matchProgressionKey = `tavla:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
       for (const [seat, name] of this.seatNames) {
         const p = this.game.players[seat];
@@ -1053,7 +1055,7 @@ export class TavlaRoom extends Room {
           this.pushViews();
           // 6.9: canlı botlu masada da gerçek oyuncu haftalık puan + Kahve Saati alır (botlar hariç)
           const pHands = Number(this.game?.rules?.targetScore) || 1;
-          void populationMatchExtras(this.population?.lastMatch ?? null, pHands, undefined, this.presentUserIds())
+          void populationMatchExtras(this.population?.lastMatch ?? null, pHands, undefined, this.presentUserIds(), this.matchStartedAt || undefined)
             .then((extras) => { if (extras.length) this.broadcast('matchExtras', { extras }); })
             .catch((e: any) => console.warn('[population] extras:', e?.message));
         })
@@ -1071,6 +1073,7 @@ export class TavlaRoom extends Room {
       matchRewardsEligible: this.matchRewardsEligible,
       progressionKey: this.matchProgressionKey,
       presentUserIds: this.presentUserIds(),
+      startedAt: this.matchStartedAt || undefined,
       hands: this.game.rules.targetScore,
       onExtras: (extras) => this.broadcast('matchExtras', { extras }),
     }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin

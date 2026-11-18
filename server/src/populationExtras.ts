@@ -10,7 +10,7 @@ import type { PopulationMatch } from './botPopulation/storage';
  */
 export async function populationMatchExtras(match: PopulationMatch | null, hands: number,
   rpc: (fn: string, args: Record<string, unknown>, timeoutMs?: number) => Promise<any> = rpcService,
-  presentUserIds?: Iterable<string>): Promise<MatchExtras[]> {
+  presentUserIds?: Iterable<string>, startedAt?: string): Promise<MatchExtras[]> {
   const present = presentUserIds ? new Set(presentUserIds) : null; // 18.11: yarıda çıkan puan almaz
   if (!match || match.state !== 'settled' || match.winner_seat == null || !(match.bet > 0)) return [];
   const count = match.roster.length;
@@ -26,6 +26,7 @@ export async function populationMatchExtras(match: PopulationMatch | null, hands
       const r = await rpc('match_extras', {
         p_user: p.id, p_game: match.game, p_hands: Math.max(1, Math.floor(hands || 1)),
         p_won: won, p_bet: match.bet, p_net: net, p_key: match.match_key,
+        ...(startedAt ? { p_started_at: startedAt } : {}),
       }, 8000);
       if (r && r.ok) out.push({ seat: p.seat, userId: p.id, points: Number(r.points ?? 0), double: !!r.double, capped: !!r.capped,
         coffeeKind: r.coffee_kind ?? null, coffeeAmount: Number(r.coffee_amount ?? 0) });
