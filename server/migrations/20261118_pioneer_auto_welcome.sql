@@ -1,5 +1,5 @@
 -- 6.8 Öncü Üye: ilk 1000 üyeye otomatik rozet + bir kez gösterilen karşılama penceresi.
--- Üye numarası = profiles.created_at sırası (botlar profiles'ta yok). Tavan fonksiyonda (sonradan büyütülebilir).
+-- Üye numarası = auth.users.created_at sırası (canlı profiles'ta created_at yok; botlar profiles'ta yok). Tavan fonksiyonda (sonradan büyütülebilir).
 -- Elle verilmiş rozetler korunur; onlar da karşılamayı bir kez görür.
 -- Mevcut admin bildirim akışına (my_member_award_notice / ack_member_award_notice) DOKUNMAZ.
 
@@ -27,11 +27,15 @@ declare
   v_created timestamptz; v_title text; v_welcomed timestamptz; v_no bigint; v_granted boolean := false;
 begin
   if v_uid is null then return jsonb_build_object('ok', false, 'error', 'auth_required'); end if;
-  select created_at, coalesce(honorary_title, ''), pioneer_welcomed_at into v_created, v_title, v_welcomed
+  select coalesce(honorary_title, ''), pioneer_welcomed_at into v_title, v_welcomed
     from public.profiles where id::text = v_uid;
   if not found then return jsonb_build_object('ok', false, 'error', 'no_profile'); end if;
-  select count(*) into v_no from public.profiles
-    where created_at < v_created or (created_at = v_created and id::text <= v_uid);
+  -- canlı profiles'ta created_at YOK → kayıt sırası auth.users.created_at'ten
+  select u.created_at into v_created from auth.users u where u.id::text = v_uid;
+  v_created := coalesce(v_created, now());
+  select count(*) into v_no from public.profiles p left join auth.users u on u.id::text = p.id::text
+    where coalesce(u.created_at, now()) < v_created
+       or (coalesce(u.created_at, now()) = v_created and p.id::text <= v_uid);
   if v_title = '' and v_no <= c_cap then
     perform set_config('app.pioneer_auto_grant', '1', true);
     update public.profiles set honorary_title = 'pioneer' where id::text = v_uid;
