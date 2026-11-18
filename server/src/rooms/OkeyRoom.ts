@@ -1039,6 +1039,8 @@ export class OkeyRoom extends Room {
       entryHousePaid: this.entryCanakCharged,
       matchRewardsEligible: this.matchRewardsEligible,
       progressionKey: this.matchProgressionKey,
+      hands: this.game.rules.totalEls,
+      onExtras: (extras) => this.broadcast('matchExtras', { extras }),
     }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[OkeyRoom.settle] hata:', e?.message));
   }

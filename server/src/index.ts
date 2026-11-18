@@ -300,4 +300,11 @@ setInterval(() => {
     .catch((e: any) => console.error('[daily-reminder]', e?.message || e));
 }, 10 * 60 * 1000).unref?.();
 
+// 6.9 HAFTANIN KAHVECİSİ: biten haftaları kapat + ödülleri dağıt (Pazartesi 00:00 TR sonrası ilk turda; idempotent).
+setInterval(() => {
+  rpcService('weekly_close_due', {})
+    .then((n) => { if (Number(n) > 0) console.log('[weekly] ödül dağıtıldı:', n); })
+    .catch((e: any) => console.warn('[weekly]', e?.message || e));
+}, 10 * 60 * 1000).unref?.();
+
 console.log(`[Elli Bir] Colyseus dinleniyor: ws://localhost:${port} (seatRes=60s)`);

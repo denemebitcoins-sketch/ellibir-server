@@ -1036,6 +1036,8 @@ export class EllibirRoom extends Room {
         entryHousePaid: this.entryCanakCharged,
         matchRewardsEligible: this.matchRewardsEligible,
         progressionKey: this.matchProgressionKey,
+        hands: r.totalHands,
+        onExtras: (extras) => this.broadcast('matchExtras', { extras }),
       }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
         .catch((e) => console.error('[settle] hata:', e?.message));
     }

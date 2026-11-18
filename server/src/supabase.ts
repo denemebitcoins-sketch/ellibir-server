@@ -703,6 +703,11 @@ async function grantMatchProgression(uid: string, won: boolean, opts: {
   }
 }
 
+export interface MatchExtras {
+  seat: number; userId: string; points: number; double: boolean; capped: boolean;
+  coffeeKind: 'refund' | 'bonus' | null; coffeeAmount: number;
+}
+
 export async function settleMatch(opts: {
   seatUsers: Map<number, string>;
   winnerSeat: number;
@@ -716,6 +721,8 @@ export async function settleMatch(opts: {
   entryHousePaid?: boolean;       // komisyon/çanak payı maç başında işlendi; settle tekrar eklemesin
   matchRewardsEligible: boolean; // immutable all-human starting roster; takeover keeps eligibility
   progressionKey?: string;        // XP idempotency key for this authoritative match
+  hands?: number;                 // 6.9: el sayısı (tavla: hedef puan) → Haftanın Kahvecisi puanı
+  onExtras?: (extras: MatchExtras[]) => void; // 6.9: haftalık puan + Kahve Saati iade/bonus (sonuç ekranı satırı)
 }): Promise<MatchProgressionAward[]> {
   const { seatUsers, winnerSeat, bet, teamMode } = opts;
   if (!supabaseConfigured() || !Number.isFinite(winnerSeat)) return [];
@@ -764,6 +771,23 @@ export async function settleMatch(opts: {
       for (const { uid } of winners)
         void rpcService('lobby_win_event', { p_user: uid, p_game: opts.gameVariant || opts.game || '', p_amount: net }, 8000)
           .catch((e: any) => console.warn('[settle] lobby_win_event:', e?.message));
+  }
+  // 6.9 HAFTANIN KAHVECİSİ + KAYIPSIZ KAHVE SAATİ (DB: match_extras, idempotent match_key+user).
+  if (economyBet > 0 && opts.progressionKey) {
+    const extras: MatchExtras[] = [];
+    const net = perWinner - economyBet;
+    const all = [...winners.map((w) => ({ ...w, won: true })), ...losers.map((l) => ({ ...l, won: false }))];
+    for (const { seat, uid, won } of all) {
+      try {
+        const r = await rpcService('match_extras', {
+          p_user: uid, p_game: opts.gameVariant || opts.game || '', p_hands: Math.max(1, Math.floor(opts.hands ?? 1)),
+          p_won: won, p_bet: economyBet, p_net: won ? net : 0, p_key: opts.progressionKey,
+        }, 8000);
+        if (r && r.ok) extras.push({ seat, userId: uid, points: Number(r.points ?? 0), double: !!r.double, capped: !!r.capped,
+          coffeeKind: r.coffee_kind ?? null, coffeeAmount: Number(r.coffee_amount ?? 0) });
+      } catch (e: any) { console.warn('[settle] match_extras:', e?.message); }
+    }
+    if (extras.length > 0) { try { opts.onExtras?.(extras); } catch { /* yayın hatası maçı bozmaz */ } }
   }
   if (opts.matchRewardsEligible === true) {
     for (const { uid } of winners) questMatchEvent(uid, true, opts.game);

@@ -955,6 +955,8 @@ export class TavlaRoom extends Room {
       entryHousePaid: this.entryCanakCharged,
       matchRewardsEligible: this.matchRewardsEligible,
       progressionKey: this.matchProgressionKey,
+      hands: this.game.rules.targetScore,
+      onExtras: (extras) => this.broadcast('matchExtras', { extras }),
     }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
       .catch((e) => console.error('[TavlaRoom.settle] hata:', e?.message));
   }
