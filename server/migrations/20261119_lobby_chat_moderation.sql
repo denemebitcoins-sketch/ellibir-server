@@ -15,9 +15,7 @@ as $$
 declare v_5s int; v_60s int;
 begin
   if new.kind is distinct from 'msg' then return new; end if;                 -- sistem satırları serbest
-  if exists (select 1 from public.profiles p where p.id::text = new.user_id::text and p.role in ('admin', 'admin_hidden')) then
-    return new;
-  end if;
+  if public.is_current_user_admin() then return new; end if;             -- yönetici serbest
   select count(*) filter (where created_at > now() - interval '5 seconds'),
          count(*) filter (where created_at > now() - interval '60 seconds')
     into v_5s, v_60s
