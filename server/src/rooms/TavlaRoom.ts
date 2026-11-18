@@ -22,7 +22,7 @@ import { canUseReaction } from '../cosmetics';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
 import { PopulationStorage } from '../botPopulation/storage';
-import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan } from '../botPopulation/roomBinding';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan, handsInfo } from '../botPopulation/roomBinding';
 
 /**
  * TAVLA masası (2 kişilik) — OkeyRoom/EllibirRoom ile AYNI sosyal/reconnect altyapısı
@@ -62,7 +62,7 @@ export class TavlaRoom extends Room {
   private readonly readyGate = new ReadyGate(() => this.onReadyTimeout());
   private readonly STEP_MS = 900;              // bot adım temposu (zar → hamle → hamle)
   private readonly GAME_END_MS = 3500;         // el sonu gosterimi -> yeni oyun
-  private readonly TURN_GRACE_MS = 6000;
+  private readonly TURN_GRACE_MS = 2000; // 19.11: gizli tolerans 6→2 sn; ekrandaki sayaç toleranssız (101 ile aynı)
   private bet = 0;
   private settled = false;
   private entryCanakCharged = false;
@@ -145,7 +145,7 @@ export class TavlaRoom extends Room {
       || this.adminBots.size || !this.populationClients.ready(this.clients)) return null;
     if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))
       || [...this.seats.values()].some(s => !this.seatUsers.get(s)) || this.occupiedSeats().size >= this.humanSeats.length) return null;
-    return populationAdoptionPlan('tavla', false, Number((this.metadata as any)?.table), this.bet);
+    return populationAdoptionPlan('tavla', false, Number((this.metadata as any)?.table), this.bet, handsInfo(this.cfg.rules?.targetScore, 'puan'));
   }
   private occupiedSeats(): Set<number> {
     return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
@@ -1191,7 +1191,7 @@ export class TavlaRoom extends Room {
       v.starting = starting;
       v.seated = seated;
       v.startMs = starting ? Math.max(0, this.startDelay - (Date.now() - this.startAt)) : 0;
-      v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
+      v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now() - this.TURN_GRACE_MS) : 0; // görünen sayaç: tolerans hariç
       v.preLog = waiting ? this.preLog.slice(-30) : [];
       v.rematchVotes = [...this.rematchVotes]; // maç sonu TEKRAR OYNA oy listesi
       v.readyGate = this.readyGateActive();

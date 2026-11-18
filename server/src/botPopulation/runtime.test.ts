@@ -137,3 +137,28 @@ it('kapali iken acilinca ayni turda tam bakima ve hizli araliga doner',async()=>
   expect(rpc.mock.calls.some(c=>c[0]==='bot_population_process_progression')).toBe(true);
   await runtime.stop();
 });
+it('19.11 bekçi: bot açıkken ~1 dk hiç bot yoksa yöneticiyi kendisi yeniden kurar; dolu iken dokunmaz',async()=>{
+  const rpc=vi.fn(async(name:string)=>{
+    if(name==='bot_population_snapshot')return {control:{mode:'running',max_active:16},characters:[],leases:[]};
+    if(name==='bot_population_process_progression')return {processed:0,failed:0,pending:0};
+    return true;
+  });
+  const provider={open:vi.fn(async()=>null),close:vi.fn(async()=>{})};
+  const factory=vi.fn(()=>provider);
+  const runtime=new PopulationRuntime(new PopulationStorage(rpc),undefined,factory);
+  let lobby:string[]=[];
+  const tick=vi.spyOn(PopulationDirector.prototype,'tick').mockResolvedValue();
+  const status=vi.spyOn(PopulationDirector.prototype,'status').mockImplementation(()=>({stopping:false,lobby,target_active:16,
+    active_limit:16,capacity_limited:false,tables:[],errors:[]}) as any);
+  const drain=vi.spyOn(PopulationDirector.prototype,'requestDrain').mockResolvedValue();
+  try {
+    for(let i=0;i<5;i++) await runtime.tick();
+    expect(factory).toHaveBeenCalledTimes(1);
+    await runtime.tick();                                   // 6. boş tur → yeniden kur
+    expect(drain).toHaveBeenCalledTimes(1);
+    expect(factory).toHaveBeenCalledTimes(2);
+    lobby=['x'];
+    for(let i=0;i<10;i++) await runtime.tick();
+    expect(factory).toHaveBeenCalledTimes(2);               // bot varken asla
+  } finally {tick.mockRestore();status.mockRestore();drain.mockRestore();await runtime.stop();}
+});

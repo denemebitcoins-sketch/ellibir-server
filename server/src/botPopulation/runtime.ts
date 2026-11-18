@@ -18,10 +18,14 @@ export const POPULATION_ACTIVE_TICK_MS = 10_000;
 /** Botlar KAPALI (off) iken: sadece mod kontrolü + sağlık kaydı, 10 dakikada bir.
  *  Admin panelinden açma komutu ve rapor isteği döngüyü anında tetikler (gecikme yok). */
 export const POPULATION_IDLE_TICK_MS = 600_000;
+/** Bot açıkken bu kadar tur (≈1 dk) hiç bot çıkmazsa yönetici yeniden kurulur. */
+export const POPULATION_STUCK_TICKS = 6;
 
 export class PopulationRuntime {
   private idle = false;
   private idleMaintained = false;
+  /** 19.11 BEKÇİ: bot açık ama hiç masa/lobi botu yoksa art arda kaç tur geçti (deploy sonrası takılma). */
+  private stuckTicks = 0;
   private lastProgressionPending = 0;
   private director: PopulationDirector | null = null;
   private provider: PopulationRoomProvider | null = null;
@@ -95,6 +99,21 @@ export class PopulationRuntime {
         this.director = new PopulationDirector(this.storage, this.owner, defaultPopulationPlans(), this.provider, 3);
       }
       if (this.director) await this.director.tick();
+      // 19.11 BEKÇİ: deploy sonrası eski sürecin kiraları yüzünden yönetici boş kalabiliyordu; elle
+      // kapat-aç gerekiyordu. Mod açık + hedef > 0 iken ~1 dk boyunca hiç bot yoksa aynısını kendisi yapar.
+      if (this.director && snapshot.control.mode === 'running') {
+        const st = this.director.status();
+        const empty = st.target_active > 0 && st.active_limit > 0 && !st.tables.length && !st.lobby.length;
+        this.stuckTicks = empty ? this.stuckTicks + 1 : 0;
+        if (this.stuckTicks >= POPULATION_STUCK_TICKS) {
+          console.warn('[population] bot yöneticisi boş kaldı → yeniden kuruluyor');
+          this.stuckTicks = 0;
+          try { await this.director.requestDrain(); } catch { /* kira kurtarma toparlar */ }
+          this.director = null; this.provider = null;
+          await this.storage.recoverExpired();
+          return this.update();
+        }
+      } else this.stuckTicks = 0;
       let socialError = false;
       try { await this.storage.processSocial(); } catch { socialError = true; }
       const state = this.director?.status();

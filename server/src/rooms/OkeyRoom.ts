@@ -22,7 +22,7 @@ import { canUseReaction } from '../cosmetics';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
 import { PopulationStorage } from '../botPopulation/storage';
-import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan } from '../botPopulation/roomBinding';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan, handsInfo } from '../botPopulation/roomBinding';
 
 type OkeyVariant = OkeyRuleConfig['variant'];
 
@@ -174,7 +174,7 @@ export class OkeyRoom extends Room {
     if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))
       || [...this.seats.values()].some(s => !this.seatUsers.get(s)) || this.occupiedSeats().size >= this.humanSeats.length) return null;
     return populationAdoptionPlan(normalizeOkeyVariant(this.cfg.rules?.variant), !!this.cfg.rules?.teamMode,
-      Number((this.metadata as any)?.table), this.bet);
+      Number((this.metadata as any)?.table), this.bet, handsInfo(this.cfg.rules?.totalEls, 'el'));
   }
   private occupiedSeats(): Set<number> {
     return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);

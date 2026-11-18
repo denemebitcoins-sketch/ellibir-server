@@ -45,7 +45,12 @@ export class PopulationClientSupport {
   }
 }
 
-export function populationAdoptionPlan(game: PopulationGame, team: boolean, table: number, bet: number): PopulationTablePlan | null {
+/** Salon etiketi: geçerli el/puan sayısı → "7 el" / "3 puan"; geçersizse boş. */
+export function handsInfo(n: unknown, unit: 'el' | 'puan'): string | undefined {
+  const v = Number(n);
+  return Number.isInteger(v) && v >= 1 && v <= 21 ? `${v} ${unit}` : undefined;
+}
+export function populationAdoptionPlan(game: PopulationGame, team: boolean, table: number, bet: number, info?: string): PopulationTablePlan | null {
   if (!Number.isInteger(table) || table < 1 || !isTableBet(bet)) return null; // devralınan insan masası: yalnız masa bahisleri
-  return {key: `${game}:${team ? 'team' : 'solo'}:${table}`, game, team, table, bet, kind: 'waiting', waitingBots: 1};
+  return {key: `${game}:${team ? 'team' : 'solo'}:${table}`, game, team, table, bet, kind: 'waiting', waitingBots: 1, ...(info ? {info} : {})};
 }

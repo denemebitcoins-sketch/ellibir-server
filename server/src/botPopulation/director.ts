@@ -13,6 +13,8 @@ export interface PopulationTablePlan {
   tablePool?: readonly number[];
   kind: 'showcase' | 'waiting';
   waitingBots?: number;
+  /** Devralınan insan masasının salon etiketi ("7 el", "3 puan"). */
+  info?: string;
 }
 export interface PopulationRoomProvider {
   inviteTarget?(uid: string): Promise<{ key: string; seat: number } | null>;

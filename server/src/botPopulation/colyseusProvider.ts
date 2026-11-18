@@ -75,6 +75,7 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
           if (!recorded || recorded.owner_id !== owner || recorded.token !== token || recorded.room_id !== room.roomId) throw error;
           held.lease = recorded;
         }
+        await storage.setRoomInfo?.(plan.key, owner, token, plan.info ?? null);
         // The player may leave, another client may join, or entry may start during either RPC.
         // Bind only after the final synchronous eligibility check; never replace the room/game.
         if (!valid()) return null;

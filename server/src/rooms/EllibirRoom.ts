@@ -21,7 +21,7 @@ import { ellibirRuntime } from '../cardRoomRuntime';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
 import { PopulationStorage } from '../botPopulation/storage';
-import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan } from '../botPopulation/roomBinding';
+import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan, handsInfo } from '../botPopulation/roomBinding';
 
 /**
  * Bir MASA = bir oda. Engine state odada bellekte. Client protokolü (openSelected,
@@ -60,6 +60,11 @@ export class EllibirRoom extends Room {
   // server bu kadar EKSTRA bekleyip (client bağlıysa o oynasın) sonra zorla bot oynatır. Böylece
   // bağlı-ama-AFK insanda client autopilot devreye girer; KOPMUŞ insanda server kurtarır (oyun donmaz).
   private readonly TURN_GRACE_MS = 6000;
+  // 19.11: sıra başına TEK süre (istemci de sayacı yalnız sıra el değiştirince sıfırlar).
+  // Taş çekmek (draw→action) süreyi yeniden BAŞLATMAZ; sorgu bitince istemci gibi yeniden başlar.
+  private turnArmedSeat = -1;
+  private turnArmedHand = '';
+  private turnDeadlineAt = 0;
   private readonly TURN_MIN_MS = 8000;                // rules süresi >0 ama çok küçükse taban
   private readonly TURN_NOLIMIT_SAFETY_MS = 90000;    // tur süresi KAPALI (0) iken yalnız anti-freeze tabanı
   private startAt = 0;                          // başlangıç geri sayımının başladığı an
@@ -164,7 +169,7 @@ export class EllibirRoom extends Room {
     if (!this.clients.some(c => authUserIdFromClient(c) === uid && this.seats.has(c.sessionId))
       || [...this.seats.values()].some(s => !this.seatUsers.get(s)) || this.occupiedSeats().size >= this.humanSeats.length) return null;
     return populationAdoptionPlan(this.gameKey === 'ihale' ? 'ihale' : '51', !!this.cfg.rules?.teamMode,
-      Number((this.metadata as any)?.table), this.bet);
+      Number((this.metadata as any)?.table), this.bet, handsInfo(this.cfg.rules?.totalHands, 'el'));
   }
   private occupiedSeats(): Set<number> {
     return new Set([...this.seats.values(), ...this.adminBots.keys(), ...(this.population?.blockedSeats() ?? [])]);
@@ -1303,13 +1308,25 @@ export class EllibirRoom extends Room {
   private armTurnTimeoutIfNeeded() {
     this.clearTurnTimer();
     if (!this.populationCanPlay()) return;
-    if (!this.game || this.game.sorgu) return;                 // sorgu → ayrı timer
+    if (!this.game || this.game.sorgu) { this.turnArmedSeat = -1; return; } // sorgu → ayrı timer
     const phase = this.game.phase;
-    if (phase !== 'draw' && phase !== 'action') return;        // yalnız oynanabilir fazlar
+    if (phase !== 'draw' && phase !== 'action') { this.turnArmedSeat = -1; return; } // yalnız oynanabilir fazlar
     const seat = this.runtime.controller(this.game);
-    if (!this.isHumanTurn(seat)) return;                        // bot/terk → runEngine zaten oynatır
+    if (!this.isHumanTurn(seat)) { this.turnArmedSeat = -1; return; } // bot/terk → runEngine zaten oynatır
+    const now = Date.now();
+    let delay: number;
+    if (this.gameKey === 'ihale') delay = Math.max(1, this.ihaleDeadline - now);
+    else {
+      const hand = `${this.game.handNumber ?? 0}`;
+      if (this.turnArmedSeat !== seat || this.turnArmedHand !== hand || this.turnDeadlineAt <= now) {
+        this.turnArmedSeat = seat; this.turnArmedHand = hand;
+        this.turnDeadlineAt = now + this.turnMs();
+      }
+      delay = Math.max(1, this.turnDeadlineAt - now);
+    }
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
+      this.turnArmedSeat = -1;
       // Bu arada insan oynadıysa / faz değiştiyse / sorgu açıldıysa boşver.
       if (!this.game || this.game.sorgu || !this.populationCanPlay()) return;
       const ph = this.game.phase;
@@ -1330,7 +1347,7 @@ export class EllibirRoom extends Room {
       this.forceBotSeat = seat;                                 // TEK tur bot (isHumanTurn false döner)
       // runEngine bot hamle(ler)ini oynatır ve bittiğinde forceBotSeat'i temizler (finally).
       this.runEngine();
-    }, this.gameKey === 'ihale' ? Math.max(1, this.ihaleDeadline - Date.now()) : this.turnMs());
+    }, delay);
   }
 
   /// Aynı masada yeni maç: önce bekleme/geri sayım durumuna döner. Giriş ücreti,

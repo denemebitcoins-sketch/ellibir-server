@@ -39,7 +39,7 @@ describe('Tavla authoritative turn deadline', () => {
     room.afterChange();
     room.afterChange();
     expect(room.turnDeadlineAt).toBe(deadline);
-    expect(room.turnDeadlineAt - Date.now()).toBe(30000);
+    expect(room.turnDeadlineAt - Date.now()).toBe(26000);
   });
 
   it('does not reset the deadline when rolling', () => {
@@ -61,7 +61,7 @@ describe('Tavla authoritative turn deadline', () => {
       if (i < 3) expect(room.turnDeadlineAt).toBe(deadline);
     }
     expect(room.game.turn).toBe(1);
-    expect(room.turnDeadlineAt).toBe(Date.now() + 51000);
+    expect(room.turnDeadlineAt).toBe(Date.now() + 47000);
   });
 
   it('auto-plays at the original deadline after a partial move', () => {
@@ -71,7 +71,7 @@ describe('Tavla authoritative turn deadline', () => {
     room.afterChange();
     vi.advanceTimersByTime(deadline - Date.now());
     expect(room.game.turn).toBe(1);
-    expect(room.turnDeadlineAt).toBe(Date.now() + 51000);
+    expect(room.turnDeadlineAt).toBe(Date.now() + 47000);
   });
 
   it('keeps response windows separate and stable across repeated updates', () => {
@@ -80,13 +80,13 @@ describe('Tavla authoritative turn deadline', () => {
     expect(applyTavlaMove(room.game, 0, { t: 'double' }).ok).toBe(true);
     room.afterChange();
     const responseDeadline = room.turnDeadlineAt;
-    expect(responseDeadline).toBe(Date.now() + 16000);
+    expect(responseDeadline).toBe(Date.now() + 12000);
     vi.advanceTimersByTime(2000);
     room.afterChange();
     expect(room.turnDeadlineAt).toBe(responseDeadline);
     expect(applyTavlaMove(room.game, 1, { t: 'takeDouble' }).ok).toBe(true);
     room.afterChange();
-    expect(room.turnDeadlineAt).toBe(Date.now() + 51000);
+    expect(room.turnDeadlineAt).toBe(Date.now() + 47000);
   });
 
   it('changes timers for bot takeover and returning human', () => {
@@ -99,7 +99,7 @@ describe('Tavla authoritative turn deadline', () => {
     room.afterChange();
     expect(room.botTimer).toBeNull();
     expect(room.humanTimer).not.toBeNull();
-    expect(room.turnDeadlineAt).toBe(Date.now() + 51000);
+    expect(room.turnDeadlineAt).toBe(Date.now() + 47000);
   });
 
   it('renews for a new game even with the same starting seat', () => {

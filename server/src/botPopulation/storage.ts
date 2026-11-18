@@ -93,6 +93,11 @@ export class PopulationStorage {
   publishRoom(room: string, owner: string, token: string, roomId: string): Promise<PopulationRoomLease> {
     return this.call('bot_population_publish_room', { p_room: room, p_owner: owner, p_token: token, p_room_id: roomId });
   }
+  /** Devralınan masanın gerçek el/puan etiketi (salon). Eski veritabanında fonksiyon yoksa sessizce geçilir. */
+  async setRoomInfo(room: string, owner: string, token: string, info: string | null): Promise<boolean> {
+    try { return !!(await this.call('bot_population_set_room_info', { p_room: room, p_owner: owner, p_token: token, p_info: info })); }
+    catch { return false; }
+  }
   heartbeatRoom(room: string, owner: string, token: string): Promise<PopulationRoomLease> {
     return this.call('bot_population_heartbeat_room', { p_room: room, p_owner: owner, p_token: token });
   }
