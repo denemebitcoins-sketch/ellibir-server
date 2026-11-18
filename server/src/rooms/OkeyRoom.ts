@@ -86,7 +86,8 @@ export class OkeyRoom extends Room {
   private bankoTimer: NodeJS.Timeout | null = null;
   private bankoTick: NodeJS.Timeout | null = null;
   private bankoDeadlineAt = 0;
-  private readonly TURN_GRACE_MS = 6000;
+  private readonly TURN_GRACE_MS = 2000;       // 18.11: gizli tolerans 6→2 sn (ekrandaki sayaç gerçek süreyle başlar)
+  private turnArmedSeat = -1;                    // 18.11: sıra başına TEK sayaç (taş çekmek sıfırlamaz)
   private bet = 0;
   private settled = false;
   private entryCanakCharged = false;
@@ -972,11 +973,11 @@ export class OkeyRoom extends Room {
     // push önceki insanın kalıntı süresini taşır (sayaç yanlış koltukta görünür bug'ı).
     if (!this.game) { this.pushViews(); return; }
     if (this.game.matchEnded) {
-      this.settleOnce(); this.clearTurnTimers(); this.turnDeadlineAt = 0;
+      this.settleOnce(); this.clearTurnTimers(); this.turnDeadlineAt = 0; this.turnArmedSeat = -1;
       this.pushViews(); return;
     }
     if (this.game.elEnded) {
-      this.clearTurnTimers(); this.turnDeadlineAt = 0;
+      this.clearTurnTimers(); this.turnDeadlineAt = 0; this.turnArmedSeat = -1;
       if ((this.game as any).bankoPhase) { this.pushViews(); return; } // faz sürüyor (kendi timer'ı var)
       if (!this.elTimer) {
         this.elTimer = setTimeout(() => {
@@ -1007,6 +1008,7 @@ export class OkeyRoom extends Room {
     const botLike = p.isBot || this.abandoned.has(turn);
     if (botLike) {
       this.turnDeadlineAt = 0;
+      this.turnArmedSeat = -1;
       this.botTimer = setTimeout(() => {
         this.botTimer = null;
         if (!this.populationCanPlay()) return;
@@ -1015,12 +1017,18 @@ export class OkeyRoom extends Room {
         this.afterChange();
       }, this.STEP_MS);
     } else {
-      const ms = Math.max(8000, this.game.rules.turnTimerSeconds * 1000) + this.TURN_GRACE_MS;
-      this.turnDeadlineAt = Date.now() + ms;
+      // Aynı oyuncunun sırası sürüyorsa (ör. taş çekti, şimdi atacak) sayaç SIFIRLANMAZ: kalan süreyle devam.
+      const now = Date.now();
+      if (this.turnArmedSeat !== turn || this.turnDeadlineAt <= now) {
+        this.turnDeadlineAt = now + Math.max(8000, this.game.rules.turnTimerSeconds * 1000) + this.TURN_GRACE_MS;
+        this.turnArmedSeat = turn;
+      }
+      const ms = Math.max(1, this.turnDeadlineAt - now);
       this.humanTimer = setTimeout(() => {
         this.humanTimer = null;
         if (!this.populationCanPlay()) return;
         if (!this.game || this.game.elEnded || this.game.turn !== turn) { this.afterChange(); return; }
+        this.turnArmedSeat = -1;
         autoOkeyMove(this.game, turn);
         this.logEvent(`${this.nameOfSeat(turn)} süresi doldu — otomatik oynandı`);
         this.afterChange();
@@ -1298,7 +1306,7 @@ export class OkeyRoom extends Room {
       v.starting = starting;
       v.seated = seated;
       v.startMs = starting ? Math.max(0, this.startDelay - (Date.now() - this.startAt)) : 0;
-      v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
+      v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now() - this.TURN_GRACE_MS) : 0; // görünen sayaç: tolerans hariç
       v.bankoMs = this.bankoDeadlineAt > 0 ? Math.max(0, this.bankoDeadlineAt - Date.now()) : 0;
       v.canak = this.canakAmount; // 🏺 çanak göstergesi (bellek kopyası)
       v.canakSeq = this.canakSeq;
