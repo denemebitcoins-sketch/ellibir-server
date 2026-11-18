@@ -106,7 +106,7 @@ create or replace function bot_population.on_lobby_clear()
 returns trigger language plpgsql security definer set search_path=pg_catalog,bot_population as $$
 begin
   perform 1 from bot_population.social_control where singleton for update;
-  delete from bot_population.social_events;
+  delete from bot_population.social_events where true; -- 19.11: PostgREST safeupdate WHERE ister (yoksa sohbet temizleme geri aliniyordu)
   update bot_population.social_control set next_event_at=clock_timestamp()+interval '30 seconds',
     next_chat_at=clock_timestamp()+interval '8 minutes' where singleton;
   return new;
