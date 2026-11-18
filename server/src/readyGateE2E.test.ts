@@ -33,7 +33,7 @@ let open: ClientRoom[] = [];
 
 beforeAll(async () => {
   process.env.READY_TIMEOUT_MS = '2500';
-  const app = express();
+  const app = express(); app.get('/health', (_q, r) => r.json({ ok: true }));
   const http = createServer(app);
   server = new Server({ transport: new WebSocketTransport({ server: http }), greet: false });
   server.define('ellibir', EllibirRoom).filterBy(['mode', 'table']);
