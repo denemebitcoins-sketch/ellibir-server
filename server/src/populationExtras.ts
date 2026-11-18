@@ -9,7 +9,9 @@ import type { PopulationMatch } from './botPopulation/storage';
  * Yalnız gerçek sonuçlanan (settled) maç; iade/sonuçsuz maç puan vermez. match_key+kullanıcı ile idempotent.
  */
 export async function populationMatchExtras(match: PopulationMatch | null, hands: number,
-  rpc: (fn: string, args: Record<string, unknown>, timeoutMs?: number) => Promise<any> = rpcService): Promise<MatchExtras[]> {
+  rpc: (fn: string, args: Record<string, unknown>, timeoutMs?: number) => Promise<any> = rpcService,
+  presentUserIds?: Iterable<string>): Promise<MatchExtras[]> {
+  const present = presentUserIds ? new Set(presentUserIds) : null; // 18.11: yarıda çıkan puan almaz
   if (!match || match.state !== 'settled' || match.winner_seat == null || !(match.bet > 0)) return [];
   const count = match.roster.length;
   const winner = match.winner_seat;
@@ -17,6 +19,7 @@ export async function populationMatchExtras(match: PopulationMatch | null, hands
   const out: MatchExtras[] = [];
   for (const p of match.roster) {
     if (p.kind !== 'human' || !p.id) continue;
+    if (present && !present.has(p.id)) continue;
     const won = p.seat === winner || (match.team_mode && p.seat % 2 === winner % 2);
     const net = won ? Math.max(0, prize - match.bet) : 0;
     try {

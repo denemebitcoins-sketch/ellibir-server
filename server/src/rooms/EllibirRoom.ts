@@ -866,6 +866,12 @@ export class EllibirRoom extends Room {
   }
 
   /* ── 6.9 HAZIR SİSTEMİ + MASADAN ATMA (readyGate.ts) ── */
+  /** 18.11: maç bittiğinde masada oturan gerçek oyuncular (yarıda çıkan haftalık puan / Kahve Saati almaz). */
+  private presentUserIds(): string[] {
+    const out: string[] = [];
+    for (const seat of this.seats.values()) { const uid = this.seatUsers.get(seat); if (uid) out.push(uid); }
+    return out;
+  }
   private readyGateActive(): boolean { return this.readyGate.active(this.seats.keys()); }
   private seatedHumanSeats(): number[] { return [...new Set(this.seats.values())]; }
   private tableIsFull(): boolean { return this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length; }
@@ -1116,7 +1122,7 @@ export class EllibirRoom extends Room {
             this.pushViews();
             // 6.9: canlı botlu masada da gerçek oyuncu haftalık puan + Kahve Saati alır (botlar hariç)
             const pHands = Number((this.game?.rules as any)?.totalHands) || 1;
-            void populationMatchExtras(this.population?.lastMatch ?? null, pHands)
+            void populationMatchExtras(this.population?.lastMatch ?? null, pHands, undefined, this.presentUserIds())
               .then((extras) => { if (extras.length) this.broadcast('matchExtras', { extras }); })
               .catch((e: any) => console.warn('[population] extras:', e?.message));
           })
@@ -1146,6 +1152,7 @@ export class EllibirRoom extends Room {
         entryHousePaid: this.entryCanakCharged,
         matchRewardsEligible: this.matchRewardsEligible,
         progressionKey: this.matchProgressionKey,
+        presentUserIds: this.presentUserIds(),
         hands: r.totalHands,
         onExtras: (extras) => this.broadcast('matchExtras', { extras }),
       }).then((awards) => { this.broadcastProgression(awards); return this.refreshCanak(); }) // maç sonu sonrası masa içi çanak göstergesi tazelensin
@@ -1350,7 +1357,8 @@ export class EllibirRoom extends Room {
     }
     // Oyun henüz başlamadıysa overlay + boş masa (emptyView).
     const waiting = !this.game;
-    const starting = waiting && this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length;
+    // 18.11: 'starting' yalnız geri sayım GERÇEKTEN sürerken (Hazır fazında masa dolu ama sayaç yok → istemci HAZIR panelini çizer)
+    const starting = waiting && this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length && !!this.startTimer;
     const filled = new Set(this.seats.values());
     // Beklerken masada oturanları göster: insan koltukları (dolu=oturdu, boş=bekleniyor) + botlar.
     const seated = [0, 1, 2, 3].map((s) => ({
@@ -1427,6 +1435,12 @@ export class EllibirRoom extends Room {
       view.canakWinName = this.canakWin?.name ?? '';
       view.canakWinAmount = this.canakWin?.amount ?? 0;
       view.rematchVotes = [...this.rematchVotes];
+      // 18.11: Hazır alanları oturan oyuncuya da (önceden yalnız izleyiciye gidiyordu → 51'de panel çıkmıyordu)
+      view.readyGate = this.readyGateActive();
+      view.readySeats = [...this.readyGate.ready];
+      view.readyMs = this.readyGate.msLeft();
+      view.ownerSeat = this.readyGate.ownerSeat(this.seats.values());
+      view.startTotalMs = this.startDelay;
       sendView(c, JSON.stringify(view), this.zvSessions.has(c.sessionId));
     });
   }

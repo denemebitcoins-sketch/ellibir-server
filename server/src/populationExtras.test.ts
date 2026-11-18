@@ -32,4 +32,19 @@ describe('canlı botlu masada gerçek oyuncu haftalık puan + Kahve Saati alır'
     expect(n).toBe(0); expect(out).toEqual([]);
     expect(await populationMatchExtras(null, 3, async () => { n++; return {}; })).toEqual([]);
   });
+
+  it('maç bitmeden masadan çıkan gerçek oyuncu puan / Kahve Saati almaz (18.11)', async () => {
+    const calls: any[] = [];
+    await populationMatchExtras({
+      match_key: 'pm4', owner_id: 'o', room_key: 'r', game: 'yuzbir', bet: 5000, team_mode: false, state: 'settled', winner_seat: 0, house_amount: 0,
+      roster: [{ seat: 0, kind: 'human', id: 'kalan' }, { seat: 1, kind: 'human', id: 'cikan' }, { seat: 2, kind: 'bot', id: 'b2', token: 't' }, { seat: 3, kind: 'bot', id: 'b3', token: 't' }],
+    }, 9, async (fn, args) => { calls.push(args); return ok(args); }, ['kalan']);
+    expect(calls.map(a => a.p_user)).toEqual(['kalan']);
+    const none: any[] = [];
+    await populationMatchExtras({
+      match_key: 'pm5', owner_id: 'o', room_key: 'r', game: 'tavla', bet: 1000, team_mode: false, state: 'settled', winner_seat: 1, house_amount: 0,
+      roster: [{ seat: 0, kind: 'human', id: 'cikan' }, { seat: 1, kind: 'bot', id: 'b', token: 't' }],
+    }, 5, async (fn, args) => { none.push(args); return ok(args); }, []);
+    expect(none).toEqual([]);
+  });
 });

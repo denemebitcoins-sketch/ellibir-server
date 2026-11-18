@@ -59,7 +59,7 @@ async function until(test: () => boolean, timeout = 15000, label = 'condition') 
 type Game = 'ellibir' | 'okey' | 'tavla';
 let tableSeq = 300;
 
-interface P { conn: ClientRoom; msgs: string[]; seat: number; token: string }
+interface P { conn: ClientRoom; msgs: string[]; seat: number; token: string; view?: any }
 async function fullTable(game: Game, readyFlags: boolean[]) {
   const opts: any = { mode: 'solo', table: ++tableSeq };
   if (game === 'okey') opts.variant = 'duz';
@@ -71,10 +71,14 @@ async function fullTable(game: Game, readyFlags: boolean[]) {
     const client = new Client(endpoint);
     const conn = await client.joinById(listing.roomId, { ...opts, token, populationVersion: 1, ihalePilotVersion: 1, readyGate: readyFlags[i] });
     const msgs: string[] = [];
-    conn.onMessage('*', (type: any) => { msgs.push(String(type)); });
+    const p: P = { conn, msgs, seat: -1, token };
+    conn.onMessage('*', (type: any, m: any) => {
+      msgs.push(String(type));
+      if (type === 'view') try { p.view = typeof m === 'string' ? JSON.parse(m) : m; } catch { /* yoksay */ }
+    });
     open.push(conn);
     await until(() => room.seats.get(conn.sessionId) != null, 5000, 'seat');
-    players.push({ conn, msgs, seat: room.seats.get(conn.sessionId), token });
+    p.seat = room.seats.get(conn.sessionId); players.push(p);
   }
   return { room, players, opts, roomId: listing.roomId };
 }
@@ -94,6 +98,19 @@ describe.each(['tavla', 'okey', 'ellibir'] as Game[])('%s hazır sistemi', game 
     await until(() => !!t.room.startTimer, 3000, 'countdown');
     expect(t.room.startDelay).toBe(3000);
     await until(() => !!t.room.game, 6000, 'game start');
+  }, 30000);
+
+  it('hazır fazında istemciye starting=false + readyMs gider (panel çizilsin), sayaç başlayınca starting=true', async () => {
+    const t = await fullTable(game, Array(n).fill(true));
+    await until(() => t.players.every(p => p.msgs.includes('tableFull')), 3000, 'tableFull');
+    await delay(400);
+    for (const p of t.players) {
+      expect(p.view?.starting).toBe(false);
+      expect(p.view?.readyGate).toBe(true);
+      expect(p.view?.readyMs).toBeGreaterThan(0);
+    }
+    for (const p of t.players) p.conn.send('preReady', {});
+    await until(() => t.players.every(p => p.view?.starting === true && p.view?.startMs > 0), 3000, 'starting view');
   }, 30000);
 
   it('süre dolunca HAZIR demeyen izleyiciye düşer', async () => {
