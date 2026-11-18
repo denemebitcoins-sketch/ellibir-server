@@ -47,4 +47,19 @@ describe('canlı botlu masada gerçek oyuncu haftalık puan + Kahve Saati alır'
     }, 5, async (fn, args) => { none.push(args); return ok(args); }, []);
     expect(none).toEqual([]);
   });
+
+  it('DB eski sürümdeyse (p_started_at yok → 404) parametresiz tekrar dener', async () => {
+    const seen: any[] = [];
+    const out = await populationMatchExtras({
+      match_key: 'pm6', owner_id: 'o', room_key: 'r', game: 'tavla', bet: 1000, team_mode: false, state: 'settled', winner_seat: 0, house_amount: 0,
+      roster: [{ seat: 0, kind: 'human', id: 'h' }, { seat: 1, kind: 'bot', id: 'b', token: 't' }],
+    }, 5, async (fn, args) => {
+      seen.push({ ...args });
+      if ('p_started_at' in args) throw new Error('match_extras_http_404:{"code":"PGRST202"}');
+      return ok(args);
+    }, ['h'], '2026-11-18T20:10:00+03:00');
+    expect(seen.length).toBe(2);
+    expect('p_started_at' in seen[1]).toBe(false);
+    expect(out.length).toBe(1);
+  });
 });

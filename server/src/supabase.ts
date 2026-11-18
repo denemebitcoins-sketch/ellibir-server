@@ -373,6 +373,18 @@ export async function rpcService(fn: string, args: Record<string, unknown>, time
   try { return JSON.parse(text); } catch { return { ok: true }; }
 }
 
+/** 18.11: match_extras çağrısı — DB henüz p_started_at'li sürüme güncellenmediyse (404 fonksiyon yok)
+ *  parametresiz tekrar dener (eski davranış). Böylece sunucu/SQL güncelleme sırası önemli değil. */
+export async function callMatchExtras(args: Record<string, unknown>,
+  rpc: (fn: string, args: Record<string, unknown>, timeoutMs?: number) => Promise<any> = rpcService): Promise<any> {
+  try { return await rpc('match_extras', args, 8000); }
+  catch (e: any) {
+    if (args.p_started_at === undefined || !/_http_404/.test(String(e?.message ?? ''))) throw e;
+    const { p_started_at: _drop, ...rest } = args;
+    return rpc('match_extras', rest, 8000);
+  }
+}
+
 /** PEŞİN BAHİS GİRİŞİ: maç fiilen BAŞLARKEN her gerçek oturandan bahsi kes (odalar çağırır).
  *  Kaçan/düşen zaten ödemiş olur; settle yalnız ödeme yapar. */
 export type EntryDeductResult = { ok: true; failedSeats: [] } | { ok: false; failedSeats: number[] };
@@ -783,11 +795,11 @@ export async function settleMatch(opts: {
     for (const { seat, uid, won } of all) {
       if (present && !present.has(uid)) continue; // maçı bitirmeden çıktı
       try {
-        const r = await rpcService('match_extras', {
+        const r = await callMatchExtras({
           p_user: uid, p_game: opts.gameVariant || opts.game || '', p_hands: Math.max(1, Math.floor(opts.hands ?? 1)),
           p_won: won, p_bet: economyBet, p_net: won ? net : 0, p_key: opts.progressionKey,
           ...(opts.startedAt ? { p_started_at: opts.startedAt } : {}),
-        }, 8000);
+        });
         if (r && r.ok) extras.push({ seat, userId: uid, points: Number(r.points ?? 0), double: !!r.double, capped: !!r.capped,
           coffeeKind: r.coffee_kind ?? null, coffeeAmount: Number(r.coffee_amount ?? 0) });
       } catch (e: any) { console.warn('[settle] match_extras:', e?.message); }

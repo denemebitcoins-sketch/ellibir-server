@@ -1,4 +1,4 @@
-import { rpcService, MatchExtras } from './supabase';
+import { rpcService, MatchExtras, callMatchExtras } from './supabase';
 import type { PopulationMatch } from './botPopulation/storage';
 
 /**
@@ -23,11 +23,11 @@ export async function populationMatchExtras(match: PopulationMatch | null, hands
     const won = p.seat === winner || (match.team_mode && p.seat % 2 === winner % 2);
     const net = won ? Math.max(0, prize - match.bet) : 0;
     try {
-      const r = await rpc('match_extras', {
+      const r = await callMatchExtras({
         p_user: p.id, p_game: match.game, p_hands: Math.max(1, Math.floor(hands || 1)),
         p_won: won, p_bet: match.bet, p_net: net, p_key: match.match_key,
         ...(startedAt ? { p_started_at: startedAt } : {}),
-      }, 8000);
+      }, rpc);
       if (r && r.ok) out.push({ seat: p.seat, userId: p.id, points: Number(r.points ?? 0), double: !!r.double, capped: !!r.capped,
         coffeeKind: r.coffee_kind ?? null, coffeeAmount: Number(r.coffee_amount ?? 0) });
     } catch (e: any) { console.warn('[population] match_extras:', e?.message); }
