@@ -1,5 +1,6 @@
 import { sendView, wantsCompressedViews } from '../viewWire';
 import { Room, Client } from '@colyseus/core';
+import { ReadyGate, READY_START_MS } from '../readyGate';
 import { reconnectWindowSec } from '../reconnectWindow';
 import { TABLE_BETS } from '../tableBets';
 import { SeatPresenceLeases, hasOpenTransport, pendingReconnection } from '../seatPresenceLease';
@@ -76,6 +77,8 @@ export class OkeyRoom extends Room {
   private startAt = 0;
   private turnDeadlineAt = 0;
   private readonly START_MS = 7000;
+  private startDelay = 7000;                    // bu geri sayımın toplam süresi (hazır sisteminde 3 sn)
+  private readonly readyGate = new ReadyGate(() => this.onReadyTimeout());
   private readonly STEP_MS = 1100;             // bot tur temposu (client uçuş animasyonuna yer)
   private readonly EL_END_MS = 3500;           // el sonu gosterimi -> yeni el
   private readonly BANKO_PHASE_MS = 10000;      // banko SEÇİM listesi süresi
@@ -436,6 +439,9 @@ export class OkeyRoom extends Room {
         this.pushViews();
       }
     });
+    // 6.9 HAZIR sistemi: maç öncesi hazır + masa sahibinin atması
+    this.onMessage('preReady', (client) => { if (this.messageGuard.allow(client.sessionId, 'preReady', 3, 5000)) this.handlePreReady(client); });
+    this.onMessage('kick', (client, raw) => { if (payloadWithinLimit(raw, 256) && this.messageGuard.allow(client.sessionId, 'kick', 3, 5000)) this.handleKick(client, raw); });
     this.onMessage('sit', (client, raw) => {
       if (!payloadWithinLimit(raw, 2048) || !this.messageGuard.allow(client.sessionId, 'sit', 4, 5000)) return;
       let msg: any = raw;
@@ -447,6 +453,7 @@ export class OkeyRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    this.readyGate.observe(client.sessionId, options);
     if (wantsCompressedViews(options)) this.zvSessions.add(client.sessionId); // sıkıştırılmış view isteyen istemci
     requirePopulationClient(this.population, options);
     this.populationClients.observe(client, options, this.clients, this.seats.keys());
@@ -468,7 +475,8 @@ export class OkeyRoom extends Room {
     const taken = this.occupiedSeats();
     const spectate = this.entryStarting || !!(this.population && (this.game || !uid))
       || options?.spectate === true || options?.spectate === 'true';
-    const decision = selectJoinSeat(this.humanSeats, taken, spectate, options?.requestedSeat);
+    const joinBan = this.kickBanReason(uid);
+    const decision = selectJoinSeat(this.humanSeats, taken, spectate || !!joinBan, options?.requestedSeat);
     const seat = decision.seat;
     if (seat == null) {
       this.spectators.add(client.sessionId);
@@ -477,6 +485,7 @@ export class OkeyRoom extends Room {
       this.spectatorMeta.set(client.sessionId, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
       this.logEvent(`${meta.name} izleyici olarak masaya katıldı`);
       client.send('seat', { seat: -1 });
+      if (joinBan) client.send('sitError', { reason: joinBan });
       if (decision.error) {
         client.send('sitError', {
           reason: decision.error === 'seat_unavailable' ? 'seçilen koltuk dolu' : 'geçersiz koltuk',
@@ -486,6 +495,7 @@ export class OkeyRoom extends Room {
       return;
     }
     this.seats.set(client.sessionId, seat);
+    this.readyGate.noteSeated(seat);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -503,6 +513,7 @@ export class OkeyRoom extends Room {
     }
     if (this.seats.has(client.sessionId)) return;
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
+    { const ban = this.kickBanReason(authUserIdFromClient(client)); if (ban) { client.send('sitError', { reason: ban }); return; } }
     const uid = authUserIdFromClient(client);
     const existing = findExistingUserSeat(this.seats, this.seatUsers, uid);
     if (existing) {
@@ -523,6 +534,7 @@ export class OkeyRoom extends Room {
     this.spectatorNames.delete(client.sessionId);
     this.spectatorMeta.delete(client.sessionId);
     this.seats.set(client.sessionId, seat);
+    this.readyGate.noteSeated(seat);
     if (uid) this.seatUsers.set(seat, uid);
     else console.warn('[join] koltuk UIDSIZ — token dogrulanamadi; bahis/elmas/hediye kaliciligi bu koltukta devre disi. seat=', seat);
     const meta = await resolveClientProfileMeta(uid, options, `Oyuncu ${seat + 1}`);
@@ -536,6 +548,8 @@ export class OkeyRoom extends Room {
   private startGameIfReady() {
     if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game || this.startTimer
       || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) return;
+    if (!this.readyGateOpen()) { this.pushViews(); return; }
+    this.startDelay = this.readyGateActive() ? READY_START_MS : this.START_MS;
     this.startAt = Date.now();
     this.pushViews();
     if (this.startTick) clearInterval(this.startTick);
@@ -546,6 +560,7 @@ export class OkeyRoom extends Room {
       if (!this.populationAccepting || this.disposed || this.entryStarting || !this.populationCanPlay() || this.game
         || this.seats.size + this.adminBots.size + (this.population?.size ?? 0) < this.humanSeats.length) { this.pushViews(); return; }
       this.entryStarting = true;
+      this.readyGate.reset(); // oyun kuruluyor: hazır fazı biter
       try {
       const entryUsers = new Map(this.seatUsers);
       const rewardsEligible = allHumanStartingRoster(4, entryUsers, [...this.adminBots.keys(), ...(this.population?.seats() ?? [])]);
@@ -587,7 +602,7 @@ export class OkeyRoom extends Room {
         }
         if (!this.disposed) this.abortEntryStart([]);
       } finally { this.entryStarting = false; }
-    }, this.START_MS);
+    }, this.startDelay);
   }
 
   private async beginPopulationEntry(humans: Map<number, string>): Promise<{ ok: boolean; failedSeats: number[] }> {
@@ -733,6 +748,8 @@ export class OkeyRoom extends Room {
     this.seatMeta.delete(seat);
     this.spectatorMeta.delete(sessionId);
     this.rematchVotes.delete(seat);
+    this.readyGate.noteLeft(seat);
+    if (!this.game) this.readyGate.reset();
     this.cancelShortStartCountdown();
     if (this.game?.matchEnded) {
       this.abandoned.delete(seat);
@@ -789,6 +806,83 @@ export class OkeyRoom extends Room {
       if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} masada değil — bot devraldı`);
       this.abandoned.add(seat);
     }
+  }
+
+  /* ── 6.9 HAZIR SİSTEMİ + MASADAN ATMA (readyGate.ts) ── */
+  private readyGateActive(): boolean { return this.readyGate.active(this.seats.keys()); }
+  private seatedHumanSeats(): number[] { return [...new Set(this.seats.values())]; }
+  private tableIsFull(): boolean { return this.seats.size + this.adminBots.size + (this.population?.size ?? 0) >= this.humanSeats.length; }
+
+  /** Geri sayım başlayabilir mi? Eski istemci varsa her zaman evet (otomatik başlangıç). */
+  private readyGateOpen(): boolean {
+    if (!this.readyGateActive()) { if (this.readyGate.inPhase) this.readyGate.reset(); return true; }
+    const allReady = this.readyGate.allReady(this.seatedHumanSeats());
+    if (this.readyGate.enter() && !allReady) {
+      this.broadcast('tableFull', { timeoutMs: this.readyGate.msLeft() });
+      this.logEvent('Masa doldu — oyun için herkes HAZIR demeli');
+    }
+    return allReady;
+  }
+
+  private handlePreReady(client: Client) {
+    const seat = this.seats.get(client.sessionId);
+    if (seat == null || this.game || this.entryStarting || this.startTimer) return;
+    if (!this.readyGateActive() || !this.tableIsFull() || !this.readyGate.inPhase) {
+      client.send('sitError', { reason: 'Masa dolmadan HAZIR denemez.' }); return;
+    }
+    if (this.readyGate.ready.has(seat)) return;
+    this.readyGate.ready.add(seat);
+    this.startGameIfReady();
+    this.pushViews();
+  }
+
+  /** 20 sn doldu: HAZIR demeyenler izleyiciye düşer, hazırlar sıfırlanır. */
+  private onReadyTimeout() {
+    if (this.game || this.entryStarting || this.startTimer || this.disposed) return;
+    if (!this.readyGateActive() || !this.tableIsFull()) { this.readyGate.reset(); this.pushViews(); return; }
+    const lazy = [...this.seats.entries()].filter(([, s]) => !this.readyGate.ready.has(s));
+    for (const [sid, s] of lazy) this.standToSpectator(sid, s, 'readyTimeout', 'Süresinde HAZIR demediğin için masadan kaldırıldın.');
+    this.readyGate.reset();
+    this.pushViews();
+  }
+
+  private standToSpectator(sessionId: string, seat: number, kind: string, reason: string) {
+    const client = this.clients.find((c) => c.sessionId === sessionId);
+    const name = this.seatNames.get(seat) ?? `Oyuncu ${seat + 1}`;
+    const meta = this.seatMeta.get(seat);
+    this.logEvent(`${name} masadan kaldırıldı`);
+    this.cleanupSeat(sessionId, seat);
+    if (!client) return;
+    this.spectators.add(sessionId);
+    this.spectatorNames.set(sessionId, name);
+    if (meta) this.spectatorMeta.set(sessionId, { gender: meta.gender, role: meta.role, adminBadgeHidden: meta.adminBadgeHidden });
+    client.send('seat', { seat: -1 });
+    client.send(kind, { reason });
+  }
+
+  /** Masa sahibi, oyun başlamadan (bekleme/hazır fazı) bir oyuncuyu atar; atılan 10 dk oturamaz. */
+  private handleKick(client: Client, raw: any) {
+    const seat = this.seats.get(client.sessionId);
+    if (seat == null) return;
+    if (this.game || this.entryStarting || this.startTimer) { client.send('sitError', { reason: 'Oyun başlarken masadan çıkarılamaz.' }); return; }
+    if (!this.readyGateActive()) return;
+    if (this.readyGate.ownerSeat(this.seats.values()) !== seat) { client.send('sitError', { reason: 'Yalnız masa sahibi oyuncu çıkarabilir.' }); return; }
+    let msg: any = raw;
+    if (typeof raw === 'string') { try { msg = JSON.parse(raw); } catch { msg = {}; } }
+    const target = Number(msg?.seat);
+    if (!Number.isInteger(target) || target === seat) return;
+    const entry = [...this.seats.entries()].find(([, s]) => s === target);
+    if (!entry) return;
+    const uid = this.seatUsers.get(target);
+    if (uid) this.readyGate.ban(uid);
+    this.standToSpectator(entry[0], target, 'kicked', 'Masa sahibi seni masadan çıkardı. 10 dakika bu masaya oturamazsın.');
+    this.readyGate.reset();
+    this.pushViews();
+  }
+
+  private kickBanReason(uid: string | null | undefined): string | null {
+    const ms = this.readyGate.banLeftMs(uid);
+    return ms > 0 ? `Bu masadan çıkarıldın; ${Math.ceil(ms / 60000)} dk sonra tekrar oturabilirsin.` : null;
   }
 
   /** Geri sayım sürerken koltuk boşalırsa sayacı iptal et: sonra oturan oyuncu tam geri sayımla başlasın. */
@@ -1108,6 +1202,7 @@ export class OkeyRoom extends Room {
   }
 
   private prepareRematchCountdown() {
+    this.readyGate.seed(this.rematchVotes); // 6.9: maç sonu HAZIR oyu yeni maçın hazırıdır
     this.population?.resetMatch();
     this.rematchVotes.clear();
     this.clearTurnTimers();
@@ -1176,7 +1271,7 @@ export class OkeyRoom extends Room {
       }
       v.starting = starting;
       v.seated = seated;
-      v.startMs = starting ? Math.max(0, this.START_MS - (Date.now() - this.startAt)) : 0;
+      v.startMs = starting ? Math.max(0, this.startDelay - (Date.now() - this.startAt)) : 0;
       v.turnMs = this.turnDeadlineAt > 0 ? Math.max(0, this.turnDeadlineAt - Date.now()) : 0;
       v.bankoMs = this.bankoDeadlineAt > 0 ? Math.max(0, this.bankoDeadlineAt - Date.now()) : 0;
       v.canak = this.canakAmount; // 🏺 çanak göstergesi (bellek kopyası)
@@ -1186,6 +1281,11 @@ export class OkeyRoom extends Room {
       v.canakWinAmount = this.canakWin?.amount ?? 0;
       v.preLog = waiting ? this.preLog.slice(-30) : [];
       v.rematchVotes = [...this.rematchVotes];
+      v.readyGate = this.readyGateActive();
+      v.readySeats = [...this.readyGate.ready];
+      v.readyMs = this.readyGate.msLeft();
+      v.ownerSeat = this.readyGate.ownerSeat(this.seats.values());
+      v.startTotalMs = this.startDelay;
     };
     this.clients.forEach((c) => {
       const seat = this.seats.get(c.sessionId);
@@ -1196,6 +1296,7 @@ export class OkeyRoom extends Room {
   }
 
   onDispose() {
+    this.readyGate.dispose();
     this.disposed = true;
     if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }
     this.pausePopulationTimers();
