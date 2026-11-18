@@ -286,25 +286,9 @@ void gameServer.listen(port).then(() => populationRuntime.start()).catch(() => {
 startPushWorker();
 startAdminWebPush();
 
-// GÜNLÜK ÖDÜL HATIRLATMASI: her gün 19:00'da (yerel) ödülünü almamış + push cihazı açık
-// kullanıcılara bildirim kuyrukla. SQL: migrations/20260726_game_interest_and_daily_reminders.sql
-import { rpcService } from './supabase';
-let lastDailyReminderDay = '';
-setInterval(() => {
-  const now = new Date();
-  const day = now.toISOString().slice(0, 10);
-  if (now.getHours() !== 19 || day === lastDailyReminderDay) return;
-  lastDailyReminderDay = day;
-  rpcService('enqueue_daily_reminders', {})
-    .then((n) => console.log('[daily-reminder] kuyruklandı:', n))
-    .catch((e: any) => console.error('[daily-reminder]', e?.message || e));
-}, 10 * 60 * 1000).unref?.();
-
-// 6.9 HAFTANIN KAHVECİSİ: biten haftaları kapat + ödülleri dağıt (Pazartesi 00:00 TR sonrası ilk turda; idempotent).
-setInterval(() => {
-  rpcService('weekly_close_due', {})
-    .then((n) => { if (Number(n) > 0) console.log('[weekly] ödül dağıtıldı:', n); })
-    .catch((e: any) => console.warn('[weekly]', e?.message || e));
-}, 10 * 60 * 1000).unref?.();
+// 18.11 ZAMANLANMIŞ BİLDİRİMLER (TR saati): 19:00 günlük ödül, 19:50 Kahve Saati, hafta kapanışı + Haftanın Kahvecisi.
+// (Eskiden getHours() sunucu UTC'si kullanıyordu → 19:00 hatırlatması TR 22:00'de gidiyordu.)
+import { startEventPushes } from './eventPushes';
+startEventPushes();
 
 console.log(`[Elli Bir] Colyseus dinleniyor: ws://localhost:${port} (seatRes=60s)`);
