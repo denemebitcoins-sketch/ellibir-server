@@ -212,7 +212,7 @@ begin
     select coalesce(jsonb_agg(x order by x->>'amount' desc), '[]'::jsonb), coalesce(sum((x->>'amount')::bigint), 0)
       into v_win, v_tot
       from (
-        select jsonb_build_object('name', p.name, 'avatar_url', case when coalesce(p.avatar_status, 'visible') in ('visible', 'approved') then p.avatar_url end, 'role', p.role, 'gender', p.gender,
+        select jsonb_build_object('user_id', p.id, 'name', p.name, 'avatar_url', case when coalesce(p.avatar_status, 'visible') in ('visible', 'approved') then p.avatar_url end, 'role', p.role, 'gender', p.gender,
                                   'amount', sum(l.coffee_amount), 'matches', count(*)) as x
           from public.match_extras_log l join public.profiles p on p.id = l.user_id
          where l.coffee_kind = 'bonus' and (l.created_at at time zone 'Europe/Istanbul')::date = v_last
