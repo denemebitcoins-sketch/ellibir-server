@@ -154,7 +154,7 @@ begin
            'playing', coalesce(pr.status = 'masada' and pr.last_seen > now() - interval '3 minutes', false)) order by r.rank), '[]'::jsonb)
     into v_rows
     from ranked r
-    join public.profiles p on p.id = r.user_id
+    join public.profiles p on p.id::text = r.user_id
     left join public.presence pr on pr.user_id::text = r.user_id
    where r.rank <= greatest(3, least(coalesce(p_limit, 50), 100));
 
@@ -209,12 +209,12 @@ begin
   select max((created_at at time zone 'Europe/Istanbul')::date) into v_last
     from public.match_extras_log where coffee_kind is not null and created_at > now() - interval '8 days';
   if v_last is not null then
-    select coalesce(jsonb_agg(x order by x->>'amount' desc), '[]'::jsonb), coalesce(sum((x->>'amount')::bigint), 0)
+    select coalesce(jsonb_agg(x order by (x->>'amount')::bigint desc), '[]'::jsonb), coalesce(sum((x->>'amount')::bigint), 0)
       into v_win, v_tot
       from (
-        select jsonb_build_object('user_id', p.id, 'name', p.name, 'avatar_url', case when coalesce(p.avatar_status, 'visible') in ('visible', 'approved') then p.avatar_url end, 'role', p.role, 'gender', p.gender,
+        select jsonb_build_object('name', p.name, 'avatar_url', case when coalesce(p.avatar_status, 'visible') in ('visible', 'approved') then p.avatar_url end, 'role', p.role, 'gender', p.gender,
                                   'amount', sum(l.coffee_amount), 'matches', count(*)) as x
-          from public.match_extras_log l join public.profiles p on p.id = l.user_id
+          from public.match_extras_log l join public.profiles p on p.id::text = l.user_id
          where l.coffee_kind = 'bonus' and (l.created_at at time zone 'Europe/Istanbul')::date = v_last
          group by p.id, p.name, p.avatar_url, p.avatar_status, p.role, p.gender
          order by sum(l.coffee_amount) desc

@@ -12,7 +12,10 @@ beforeEach(() => {
     const args = JSON.parse(String(init.body));
     calls.push({ fn, args });
     const result = fn === 'grant_account_xp' ? { ok: true, xp_awarded: 25, level_before: 1, level_after: 1 }
-      : fn === 'canak_add' ? 1000 : true;
+      : fn === 'canak_add' ? 1000
+      : fn === 'match_extras' ? (args.p_won ? { ok: true, points: 35, double: true, capped: false, coffee_kind: 'bonus', coffee_amount: 810 }
+                                            : { ok: true, points: 35, double: true, capped: false, coffee_kind: 'refund', coffee_amount: 500 })
+      : true;
     return { ok: true, status: 200, text: async () => JSON.stringify(result), json: async () => result };
   }));
 });
@@ -70,5 +73,24 @@ describe('actual settlement RPC reward isolation', () => {
     const result = await deductEntry(new Map([[0, 'human']]), 1000, undefined, 400);
     expect(result.ok).toBe(true);
     expect(calls).toEqual([{ fn: 'deduct_chips', args: { p_user_id: 'human', p_amount: 1000 } }]);
+  });
+
+  it('6.9: maç sonu her insan için match_extras çağrılır (el sayısı, kazanç) ve sonuç yayına verilir', async () => {
+    const { settleMatch } = await import('./supabase');
+    let got: any[] = [];
+    await settleMatch({
+      seatUsers: new Map([[0, 'winner'], [2, 'loser']]), winnerSeat: 0, bet: 1000, teamMode: false,
+      totalSeats: 4, game: 'okey', gameVariant: 'yuzbir', entryHousePaid: false, matchRewardsEligible: true,
+      progressionKey: 'extras-match', hands: 3, onExtras: (x: any[]) => { got = x; },
+    } as any);
+    const ex = calls.filter(c => c.fn === 'match_extras').map(c => c.args);
+    expect(ex).toEqual([
+      { p_user: 'winner', p_game: 'yuzbir', p_hands: 3, p_won: true, p_bet: 1000, p_net: 2600, p_key: 'extras-match' },
+      { p_user: 'loser', p_game: 'yuzbir', p_hands: 3, p_won: false, p_bet: 1000, p_net: 0, p_key: 'extras-match' },
+    ]);
+    expect(got).toEqual([
+      { seat: 0, userId: 'winner', points: 35, double: true, capped: false, coffeeKind: 'bonus', coffeeAmount: 810 },
+      { seat: 2, userId: 'loser', points: 35, double: true, capped: false, coffeeKind: 'refund', coffeeAmount: 500 },
+    ]);
   });
 });

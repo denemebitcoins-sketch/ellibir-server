@@ -750,6 +750,7 @@ export class OkeyRoom extends Room {
     this.rematchVotes.delete(seat);
     this.readyGate.noteLeft(seat);
     if (!this.game) this.readyGate.reset();
+    if (this.seats.size === 0) this.readyGate.clearBans(); // masa boşaldı → atma yasakları düşer
     this.cancelShortStartCountdown();
     if (this.game?.matchEnded) {
       this.abandoned.delete(seat);
@@ -817,10 +818,16 @@ export class OkeyRoom extends Room {
   private readyGateOpen(): boolean {
     if (!this.readyGateActive()) { if (this.readyGate.inPhase) this.readyGate.reset(); return true; }
     const allReady = this.readyGate.allReady(this.seatedHumanSeats());
-    if (this.readyGate.enter() && !allReady) {
-      this.broadcast('tableFull', { timeoutMs: this.readyGate.msLeft() });
-      this.logEvent('Masa doldu — oyun için herkes HAZIR demeli');
+    const botSeats = [...(this.population?.seats() ?? []), ...this.adminBots.keys()];
+    if (this.readyGate.enter()) {
+      if (!allReady) {
+        this.broadcast('tableFull', { timeoutMs: this.readyGate.msLeft() });
+        this.logEvent('Masa doldu — oyun için herkes HAZIR demeli');
+      }
+      // Canlı botlar insan gibi birkaç saniyede HAZIR der (ekranda gri kalmasınlar).
+      this.readyGate.scheduleBots(botSeats, () => this.pushViews());
     }
+    if (allReady) for (const s of botSeats) this.readyGate.ready.add(s); // insanlar hazırsa botlar beklemez
     return allReady;
   }
 
@@ -875,14 +882,14 @@ export class OkeyRoom extends Room {
     if (!entry) return;
     const uid = this.seatUsers.get(target);
     if (uid) this.readyGate.ban(uid);
-    this.standToSpectator(entry[0], target, 'kicked', 'Masa sahibi seni masadan çıkardı. 10 dakika bu masaya oturamazsın.');
+    this.standToSpectator(entry[0], target, 'kicked', 'Masa sahibi seni masadan çıkardı. 1 dakika bu masaya oturamazsın.');
     this.readyGate.reset();
     this.pushViews();
   }
 
   private kickBanReason(uid: string | null | undefined): string | null {
     const ms = this.readyGate.banLeftMs(uid);
-    return ms > 0 ? `Bu masadan çıkarıldın; ${Math.ceil(ms / 60000)} dk sonra tekrar oturabilirsin.` : null;
+    return ms > 0 ? `Bu masadan çıkarıldın; ${Math.ceil(ms / 1000)} sn sonra tekrar oturabilirsin.` : null;
   }
 
   /** Geri sayım sürerken koltuk boşalırsa sayacı iptal et: sonra oturan oyuncu tam geri sayımla başlasın. */

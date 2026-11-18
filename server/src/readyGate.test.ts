@@ -55,6 +55,34 @@ describe('ReadyGate (6.9 hazır sistemi)', () => {
     expect(g.banLeftMs('u2', 0)).toBe(0);
   });
 
+  it('canlı botlar birkaç saniyede HAZIR der; faz biterse demez', () => {
+    vi.useFakeTimers();
+    const g = new ReadyGate(() => {}, 20_000);
+    const seen: number[] = [];
+    g.enter();
+    g.scheduleBots([1, 3], (s) => seen.push(s), 1000, 1001);
+    vi.advanceTimersByTime(999);
+    expect(g.ready.size).toBe(0);
+    vi.advanceTimersByTime(5);
+    expect([...g.ready].sort()).toEqual([1, 3]);
+    expect(seen.sort()).toEqual([1, 3]);
+    g.reset();
+    g.enter();
+    g.scheduleBots([2], () => {}, 1000, 1001);
+    g.reset();
+    vi.advanceTimersByTime(2000);
+    expect(g.ready.has(2)).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it('masa boşalınca atma yasakları düşer', () => {
+    const g = new ReadyGate(() => {});
+    g.ban('u1');
+    expect(g.banLeftMs('u1')).toBeGreaterThan(0);
+    g.clearBans();
+    expect(g.banLeftMs('u1')).toBe(0);
+  });
+
   it('maç sonu oyları yeni maçın hazırı olur', () => {
     const g = new ReadyGate(() => {});
     g.seed([1, 3]);
@@ -74,5 +102,9 @@ describe('odalar hazır sistemine bağlı', () => {
     expect(src).toMatch(/this\.readyGate\.seed\(/);
     expect(src).toMatch(/readySeats = \[\.\.\.this\.readyGate\.ready\]/);
     expect(src).toMatch(/kickBanReason\(uid\)/);
+    expect(src).toMatch(/scheduleBots\(botSeats/);
+    expect(src).toMatch(/if \(this\.seats\.size === 0\) this\.readyGate\.clearBans\(\)/);
+    expect(src).toMatch(/scheduleBots\(botSeats/);
+    expect(src).toMatch(/if \(this\.seats\.size === 0\) this\.readyGate\.clearBans\(\)/);
   });
 });

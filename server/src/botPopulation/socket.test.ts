@@ -112,6 +112,28 @@ describe('real SDK + websocket population tables (isolated auth and SQL)',()=>{
     expect(room.population.activeMatch).toBe(true);expect(connection.connection.isOpen).toBe(true);
   },20000);
 
+  it.each(['duz','tavla'] as const)('6.9 hazır sistemi: %s canlı botları insan gibi HAZIR der, insan HAZIR demeden başlamaz',async game=>{
+    const {room,connection}=await humanTable(game,{readyGate:true});
+    const got:string[]=[];connection.onMessage('*',(t:any)=>got.push(String(t)));
+    const provider=new ColyseusPopulationProvider();
+    const director=new PopulationDirector(storage,ids.owner,[],provider,game==='tavla'?1:3);
+    await director.tick();
+    const invited=[...director.status().lobby];
+    await Promise.all(invited.map(id=>director.inviteHuman(ids.human,id)));
+    expect(room.population.size).toBe(invited.length);
+    await until(()=>got.includes('tableFull'),5000);
+    const botSeats=room.population.seats();
+    await until(()=>botSeats.every((s:number)=>room.readyGate.ready.has(s)),7000);
+    await delay(300);
+    expect(room.game).toBeFalsy();
+    const views:any[]=[];connection.onMessage('view',v=>views.push(typeof v==='string'?JSON.parse(v):v));room.pushViews();
+    await until(()=>views.some(v=>v.readyGate===true&&botSeats.every((s:number)=>(v.readySeats??[]).includes(s))));
+    connection.send('preReady',{});
+    await until(()=>!!room.startTimer,3000);
+    expect(room.startDelay).toBe(3000);
+    await until(()=>!!room.game,8000);
+  },30000);
+
   it('refuses adoption for an old client, an unsupported bet, an admin test bot or an unseated inviter',async()=>{
     const {room,connection}=await humanTable('ihale',{populationVersion:0});
     const provider=new ColyseusPopulationProvider();const director=new PopulationDirector(storage,ids.owner,[],provider,1);

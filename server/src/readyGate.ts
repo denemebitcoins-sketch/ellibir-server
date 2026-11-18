@@ -4,13 +4,15 @@
  *  - Herkes HAZIR → 3 sn geri sayım → oyun başlar. Biri kalkarsa koltuk boşalır, hazırlar sıfırlanır.
  *  - 20 sn içinde HAZIR demeyen masadan kaldırılır (izleyiciye düşer).
  *  - Maç sonu "Devam/HAZIR" oyu bir sonraki maçın hazırı sayılır (rematch oyları taşınır).
- *  - Masa sahibi (masaya ilk oturan; ayrılırsa sıradaki) yalnız BEKLERKEN atabilir; atılan 10 dk o masaya oturamaz.
+ *  - Masa sahibi (masaya ilk oturan; ayrılırsa sıradaki) yalnız BEKLERKEN atabilir; atılan 1 dk o masaya oturamaz
+ *    (masada hiç insan kalmazsa yasaklar düşer).
+ *  - Canlı botlar (population) insan gibi 1-4 sn içinde HAZIR der; tüm insanlar hazırsa botlar da hemen hazır sayılır.
  * Geriye uyum: sistem YALNIZ masadaki tüm insan oturumlar katılırken `readyGate:true` bildirdiyse açılır
  * (6.7 istemcileri hazır düğmesini bilmez → eski 7 sn otomatik başlangıç sürer).
  */
 export const READY_TIMEOUT_MS = 20_000;
 export const READY_START_MS = 3_000;
-export const KICK_BAN_MS = 10 * 60_000;
+export const KICK_BAN_MS = 60_000; // kullanıcı kararı 18.11: 10 dk yerine 1 dk
 
 export class ReadyGate {
   readonly ready = new Set<number>();
@@ -20,6 +22,7 @@ export class ReadyGate {
   private orderSeq = 0;
   private phaseAt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private botTimers: ReturnType<typeof setTimeout>[] = [];
 
   constructor(private readonly onTimeout: () => void,
     private readonly timeoutMs = Number(process.env.READY_TIMEOUT_MS) > 0 ? Number(process.env.READY_TIMEOUT_MS) : READY_TIMEOUT_MS) {}
@@ -61,6 +64,20 @@ export class ReadyGate {
   /** Faz biter, hazırlar silinir (biri kalktı / oyun başladı / süre doldu). */
   reset() { this.ready.clear(); this.phaseAt = 0; this.clearTimer(); }
 
+  /** Canlı bot koltukları insan gibi biraz bekleyip HAZIR der (görünüm için). */
+  scheduleBots(seats: Iterable<number>, onReady: (seat: number) => void, minMs = 1200, maxMs = 4200) {
+    for (const seat of seats) {
+      const t = setTimeout(() => {
+        this.botTimers = this.botTimers.filter((x) => x !== t);
+        if (this.phaseAt > 0 && !this.ready.has(seat)) { this.ready.add(seat); onReady(seat); }
+      }, minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs)));
+      (t as any)?.unref?.();
+      this.botTimers.push(t);
+    }
+  }
+
+  clearBans() { this.bans.clear(); }
+
   /** Maç sonu oyları bir sonraki maçın hazırı olur. */
   seed(seats: Iterable<number>) { this.reset(); for (const s of seats) this.ready.add(s); }
 
@@ -87,5 +104,9 @@ export class ReadyGate {
   }
 
   dispose() { this.clearTimer(); }
-  private clearTimer() { if (this.timer) { clearTimeout(this.timer); this.timer = null; } }
+  private clearTimer() {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    for (const t of this.botTimers) clearTimeout(t);
+    this.botTimers = [];
+  }
 }
