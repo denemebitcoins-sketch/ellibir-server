@@ -158,6 +158,11 @@ export class TavlaRoom extends Room {
   }
   private preLog: string[] = [];               // oyun kurulmadan önceki olaylar
 
+  /** 19.11 masa sohbeti flood koruması: kişi başı 2,5 sn'de 1, dakikada en fazla 8 mesaj. */
+  private chatRateOk(sessionId: string): boolean {
+    return this.messageGuard.allow(sessionId, 'chat', 1, 2500) && this.messageGuard.allow(sessionId, 'chatMin', 8, 60_000);
+  }
+
   onCreate(options: any) {
     // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
     // CANLI client'a eşlenip clients listesinden düşürüyor, oda boşalınca DISPOSE oluyordu
@@ -256,8 +261,8 @@ export class TavlaRoom extends Room {
     this.onMessage('chat', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
       if (seat == null) return;
-      if (!payloadWithinLimit(raw, 1024) || !this.messageGuard.allow(client.sessionId, 'chat', 4, 5000)) {
-        client.send('chatBlocked', { reason: 'Çok hızlı mesaj gönderiyorsun.' });
+      if (!payloadWithinLimit(raw, 1024) || !this.chatRateOk(client.sessionId)) {
+        client.send('chatBlocked', { reason: 'Çok hızlı yazıyorsun, birkaç saniye bekle.' });
         return;
       }
       let text = typeof raw === 'string' ? raw : (raw?.text ?? '');

@@ -46,7 +46,8 @@ describe('room message abuse guard', () => {
     expect(src).toContain('payloadWithinLimit(raw, 2048)');
     if (name !== 'TavlaRoom.ts') expect(src).toContain('payloadWithinLimit(raw, 512)');
     expect(src).toContain("this.messageGuard.allow(client.sessionId, 'cmd'");
-    expect(src).toContain("this.messageGuard.allow(client.sessionId, 'chat'");
+    expect(src).toContain('this.chatRateOk(client.sessionId)'); // 19.11: 2,5 sn'de 1 + dakikada 8
+    expect(src).toContain("this.messageGuard.allow(sessionId, 'chat', 1, 2500)");
     expect(src).toContain("this.messageGuard.allow(client.sessionId, 'gift'");
     expect(src).toContain('this.giftBusy.has(client.sessionId)');
     expect(src).toContain('this.messageGuard.forget(sessionId)');
