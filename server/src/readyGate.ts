@@ -14,11 +14,11 @@ export const READY_TIMEOUT_MS = 20_000;
 export const READY_START_MS = 3_000;
 export const KICK_BAN_MS = 60_000; // kullanıcı kararı 18.11: 10 dk yerine 1 dk
 
-/** Kapatma anahtarı (18.11): 6.8 istemcisinde HAZIR paneli çizilmiyor → sistem VARSAYILAN KAPALI.
- *  İstemci düzeltilince Render ortamına READY_GATE=on eklenir (build gerekmez). */
+/** Kapatma anahtarı (18.11): varsayılan AÇIK (panel düzeltmesi sunucuda: 'starting' yalnız sayaç sürerken).
+ *  Sorun olursa Render ortamına READY_GATE=off eklenir → herkes eski 7 sn otomatik başlangıca döner (build gerekmez). */
 export function readyGateEnabled(): boolean {
-  const v = String(process.env.READY_GATE ?? 'off').trim().toLowerCase();
-  return v === 'on' || v === '1' || v === 'true' || v === 'yes';
+  const v = String(process.env.READY_GATE ?? 'on').trim().toLowerCase();
+  return !(v === 'off' || v === '0' || v === 'false' || v === 'no');
 }
 
 export class ReadyGate {

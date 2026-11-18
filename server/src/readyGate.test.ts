@@ -112,10 +112,10 @@ describe('odalar hazır sistemine bağlı', () => {
 
 import { readyGateEnabled } from './readyGate';
 describe('READY_GATE varsayılanı', () => {
-  it('ayar yoksa kapalı; off/on çalışır', () => {
+  it('ayar yoksa açık; off/on çalışır', () => {
     const prev = process.env.READY_GATE;
     try {
-      delete process.env.READY_GATE; expect(readyGateEnabled()).toBe(false);
+      delete process.env.READY_GATE; expect(readyGateEnabled()).toBe(true);
       process.env.READY_GATE = 'off'; const g = new ReadyGate(() => {}); g.observe('a', { readyGate: true }); expect(g.active(['a'])).toBe(false);
       process.env.READY_GATE = 'on'; g.observe('b', { readyGate: true }); expect(g.active(['b'])).toBe(true); g.dispose();
     } finally { if (prev === undefined) delete process.env.READY_GATE; else process.env.READY_GATE = prev; }
