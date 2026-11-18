@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _test } from './recoveryAuth';
 
 const root = join(__dirname, '..');
@@ -115,7 +115,7 @@ describe('mail + pin account recovery', () => {
   it('repairs auth credentials when a valid recovery pin cannot open a session', () => {
     const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
     expect(recovery).toMatch(/async\s+function\s+passwordSessionForRecovery/i);
-    expect(recovery).toMatch(/catch\s*{\s*await\s+updateAuthCredentials\(userId,\s*email,\s*password\)/i);
+    expect(recovery).toMatch(/catch\s*{[\s\S]*adminSession\(email\)[\s\S]*await\s+updateAuthCredentials\(userId,\s*email,\s*password\)/i);
     expect(recovery).toMatch(/const\s+session\s*=\s*await\s+passwordSessionForRecovery\(userId,\s*email,\s*pin\)/i);
   });
 
@@ -128,5 +128,35 @@ describe('mail + pin account recovery', () => {
     expect(recovery).toMatch(/async\s+function\s+ensureProfilePlayableForRecovery/i);
     expect(recovery).toMatch(/patch\.gender\s*=\s*'x'/i);
     expect(recovery).toMatch(/await\s+ensureProfilePlayableForRecovery\(userId\)/i);
+  });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('opens a session WITHOUT touching the password (other devices stay signed in)', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      calls.push(String(url).replace(/^https?:\/\/[^/]+/, '') + ' ' + (init?.method ?? 'GET'));
+      if (String(url).includes('/admin/generate_link')) return new Response(JSON.stringify({ hashed_token: 'h1' }), { status: 200 });
+      if (String(url).includes('/auth/v1/verify')) {
+        expect(JSON.parse(init.body)).toEqual({ type: 'magiclink', token_hash: 'h1' });
+        return new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r', expires_in: 3600 }), { status: 200 });
+      }
+      return new Response('{}', { status: 500 });
+    }));
+    const s = await _test.adminSession('x@example.com');
+    expect(s?.access_token).toBe('a');
+    expect(calls.some(c => c.includes('/admin/users/'))).toBe(false);   // şifre güncellemesi YOK
+  });
+
+  it('falls back (null) when magic link cannot be minted', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 422 })));
+    expect(await _test.adminSession('x@example.com')).toBeNull();
+  });
+
+  it('device login tries the password-free session before rotating the password', () => {
+    const recovery = readFileSync(join(root, 'src', 'recoveryAuth.ts'), 'utf8');
+    const deviceLogin = recovery.slice(recovery.indexOf('export async function loginLegacyDeviceAccount'), recovery.indexOf('export async function pinRecoveryStatus'));
+    expect(deviceLogin.indexOf('adminSession(email)')).toBeGreaterThan(-1);
+    expect(deviceLogin.indexOf('adminSession(email)')).toBeLessThan(deviceLogin.indexOf('updateAuthPassword'));
   });
 });

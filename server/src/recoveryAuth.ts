@@ -102,11 +102,42 @@ async function passwordSession(email: string, password: string): Promise<any> {
   return json;
 }
 
+/**
+ * 18.11: ŞİFREYE DOKUNMADAN oturum aç (admin magiclink → verify). Şifre değiştirmek Supabase'te o hesabın
+ * DİĞER TÜM oturumlarını kapatıyordu: yönetici sitesi (PIN) ↔ oyun (cihaz girişi) birbirini atıyordu
+ * ("Session not found", bot paneli/davet 401, sitenin kendiliğinden çıkışı). Olmazsa null → eski yol.
+ */
+async function adminSession(email: string): Promise<any | null> {
+  try {
+    const link = await serviceFetch('/auth/v1/admin/generate_link', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'magiclink', email }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!link.ok) return null;
+    const j: any = await link.json().catch(() => ({}));
+    const tokenHash = j?.hashed_token ?? j?.properties?.hashed_token;
+    if (!tokenHash) return null;
+    const verify = await anonFetch('/auth/v1/verify', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'magiclink', token_hash: tokenHash }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const session: any = await verify.json().catch(() => ({}));
+    if (!verify.ok || !session?.access_token || !session?.refresh_token) return null;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
 async function passwordSessionForRecovery(userId: string, email: string, pin: string): Promise<any> {
   const password = derivedPassword(email, pin);
   try {
     return await passwordSession(email, password);
   } catch {
+    const minted = await adminSession(email);       // diğer cihazın oturumunu düşürmeden
+    if (minted) return minted;
     await updateAuthCredentials(userId, email, password);
     return await passwordSession(email, password);
   }
@@ -521,12 +552,16 @@ export async function loginLegacyDeviceAccount(req: Request): Promise<Record<str
   const recovery = await recoveryByUserId(userId);
   const email = recovery?.email ? normalizeEmail(recovery.email) : legacyDeviceEmail(userId);
   const password = legacyDevicePassword(userId, deviceHash);
-  if (recovery?.email) await updateAuthPassword(userId, password);
-  else await updateAuthCredentials(userId, email, password);
+  // 18.11: önce şifreye dokunmadan oturum (yönetici sitesi/diğer cihaz açık kalır); olmazsa eski yol.
+  let session: any = await adminSession(email);
+  if (!session) {
+    if (recovery?.email) await updateAuthPassword(userId, password);
+    else await updateAuthCredentials(userId, email, password);
+  }
   await bindDevice(userId, deviceHash, true);
   await ensureProfilePlayableForRecovery(userId);
   if (recovery?.email) await recordRecovery(userId);
-  const session = await passwordSession(email, password);
+  if (!session) session = await passwordSession(email, password);
   return {
     ok: true,
     user_id: userId,
@@ -600,4 +635,5 @@ export async function adminSecureDeviceRecovery(req: Request): Promise<Record<st
   return { ok: true, email, user_id: userId, message: 'Cihazdaki hesap e-posta ve PIN ile guvene alindi.' };
 }
 
-export const _test = { normalizeEmail, validEmail, cleanPin, validPin, normalizeName, validName, normalizeGender, derivedPassword, pinHash, sameHash, profileWriteErrorToCode, isPlayableProfileName };
+export const _test = {
+  adminSession, normalizeEmail, validEmail, cleanPin, validPin, normalizeName, validName, normalizeGender, derivedPassword, pinHash, sameHash, profileWriteErrorToCode, isPlayableProfileName };
