@@ -638,6 +638,31 @@ export class OkeyRoom extends Room {
   private presenceLeases = new SeatPresenceLeases();
   private presenceMode(): string { return 'okey-' + ((this.metadata as any)?.mode ?? 'solo'); }
 
+
+  /* 19.11 KISA KOPMA TOLERANSI: düşen oyuncunun yerini bot HEMEN almaz. 12 sn içinde dönerse kimse fark etmez
+     (masaya "koptu/döndü" yazılmaz, bot hamle yapmaz; sırası gelirse normal süre sayacı işler). 12 sn'yi geçerse
+     eskisi gibi bot devralır. Oyun başlamadıysa (bekleme) davranış değişmez. */
+  private dropGrace = new Map<number, ReturnType<typeof setTimeout>>();
+  private static readonly DROP_GRACE_MS = 12_000;
+  private startDropGrace(seat: number, sessionId: string, apply: () => void) {
+    this.cancelDropGrace(seat);
+    const t = setTimeout(() => {
+      this.dropGrace.delete(seat);
+      if (this.seats.get(sessionId) !== seat) return; // bu arada koltuk el değiştirdi / çıktı
+      apply();
+    }, OkeyRoom.DROP_GRACE_MS);
+    (t as any).unref?.();
+    this.dropGrace.set(seat, t);
+  }
+  /** true → bot henüz devralmamıştı (sessiz dönüş). */
+  private cancelDropGrace(seat: number): boolean {
+    const t = this.dropGrace.get(seat);
+    if (!t) return false;
+    clearTimeout(t);
+    this.dropGrace.delete(seat);
+    return true;
+  }
+
   async onDrop(client: Client) {
     const isTakeover = this.takeoverPending.delete(client.sessionId); // takeover dususu KALKAN-1'i atlar
     // KALKAN: wifi->mobil geciste SDK yeni baglantiyla COKTAN donduktan sonra eski
@@ -660,9 +685,13 @@ export class OkeyRoom extends Room {
       this.takeoverPending.delete(client.sessionId);
       return;
     }
-    this.abandoned.add(seat);
-    this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
-    this.afterChange();
+    const dropSid = client.sessionId;
+    const takeOver = () => {
+      this.abandoned.add(seat);
+      this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
+      this.afterChange();
+    };
+    if (this.game) this.startDropGrace(seat, dropSid, takeOver); else takeOver();
     const uid = this.seatUsers.get(seat);
     const mode = (this.metadata as any)?.mode ?? 'solo';
     const tableNo = Number((this.metadata as any)?.table) || 1;
@@ -672,13 +701,15 @@ export class OkeyRoom extends Room {
       console.log(`[OkeyRoom.onDrop-SUCCESS] seat=${seat} geri döndü`);
       if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
       this.presenceLeases.restore(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
+      const quietBack = this.cancelDropGrace(seat);
       this.abandoned.delete(seat);
       try { back.send('seat', { seat }); } catch { /* yoksay */ }
-      this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
+      if (!quietBack) this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
       this.afterChange();
     } catch (e: any) {
       console.log(`[OkeyRoom.onDrop-EXPIRED] seat=${seat}: ${e?.message ?? e}`);
       if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
+      if (this.cancelDropGrace(seat)) takeOver();
       this.presenceLeases.stop(client.sessionId);
       // KALKAN-2: pencere doldu dese de bu sessionId hala BAGLIYSA (yaris) koltuga dokunma.
       const live = this.clients.find(c => c.sessionId === client.sessionId && hasOpenTransport(c));
@@ -698,7 +729,8 @@ export class OkeyRoom extends Room {
     if (wasReserved) {
       const returningSeat = this.seats.get(client.sessionId)!;
       this.presenceLeases.restore(client.sessionId, this.seatUsers.get(returningSeat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !!this.game);
-      this.logEvent(`${this.nameOfSeat(returningSeat)} masaya geri dondu - kontrol oyuncuya gecti`);
+      const quiet = this.cancelDropGrace(returningSeat);
+      if (!quiet) this.logEvent(`${this.nameOfSeat(returningSeat)} masaya geri dondu - kontrol oyuncuya gecti`);
     }
     this.lastReconnectAt.set(client.sessionId, Date.now());
     const seat = this.seats.get(client.sessionId);
@@ -720,6 +752,7 @@ export class OkeyRoom extends Room {
 
     console.log(`[OkeyRoom.onLeave] sessionId=${client.sessionId} code=${_code}`);
     const seat = this.seats.get(client.sessionId);
+    if (seat != null) this.cancelDropGrace(seat);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) this.pushViews();
       this.spectatorNames.delete(client.sessionId);
@@ -813,6 +846,7 @@ export class OkeyRoom extends Room {
     const connected = new Set(this.clients.map((c) => c.sessionId));
     const bots = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
     for (const seat of seatsWithoutLivePlayer(this.humanSeats, this.seats, connected, bots)) {
+      this.cancelDropGrace(seat); // 19.11: tolerans sürüyorsa burada hemen bot devralır (çift kayıt yok)
       if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} masada değil — bot devraldı`);
       this.abandoned.add(seat);
     }

@@ -96,6 +96,7 @@ describe.each(rooms)('%s match start fairness', (_label, name, options) => {
     const last = room.humanSeats[room.humanSeats.length - 1];
     room.clients.delete(clients[clients.length - 1]);
     void room.onDrop(clients[clients.length - 1]);
+    await vi.advanceTimersByTimeAsync(12_001); // 19.11: kısa kopma toleransı dolunca bot devralır
     expect(isBotControlled(last)).toBe(true);
     room.prepareRematchCountdown();          // all seated players voted; new match countdown
     await vi.advanceTimersByTimeAsync(room.START_MS + 10);

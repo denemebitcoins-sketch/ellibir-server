@@ -54,4 +54,19 @@ describe('gameCommands processAllIslek', () => {
     expect(next.players[0]!.hand.some((card: Card) => card.id === jk.id)).toBe(true);
     expect(next.players[0]!.hand.some((card: Card) => card.id === replacement.id)).toBe(false);
   });
+
+  it('19.11: elde boşta duran jokeri toplu işlemde İŞLEMEZ, diğer işlekleri işler', () => {
+    const jk = joker(2);
+    const seven = c('H', 7);
+    const state = rig(createGame({ seed: 5, dealerSeat: 3 }), {
+      currentSeat: 0,
+      phase: 'action',
+      opened: [0],
+      melds: [meld('run', 'run', [c('H', 4), c('H', 5), c('H', 6)])],
+      hands: { 0: [jk, seven, c('S', 2)] },
+    });
+    const next = applyClientCommand(state, { t: 'processAllIslek', cards: [jk.id, seven.id] }, 0).state;
+    expect(next.players[0]!.hand.some((card: Card) => card.id === jk.id)).toBe(true);   // joker elde
+    expect(next.melds[0]!.cards.some((card: Card) => card.id === seven.id)).toBe(true); // 7 işlendi
+  });
 });

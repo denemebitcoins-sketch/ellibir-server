@@ -34,7 +34,8 @@ describe.each(rooms)('%s seat recovery', (_name, Type, mode) => {
   it('does not ignore a real second drop immediately after reconnect', async () => {
     const f = fixture(Type); f.r.onReconnect(f.client);
     const drop = f.r.onDrop(f.client);
-    expect(f.r.allowReconnection).toHaveBeenCalledOnce(); expect(f.abandoned()).toBe(true);
+    expect(f.r.allowReconnection).toHaveBeenCalledOnce(); expect(f.abandoned()).toBe(false); // 19.11: 12 sn tolerans
+    await vi.advanceTimersByTimeAsync(12_001); expect(f.abandoned()).toBe(true);
     f.resolve(); await drop; expect(f.abandoned()).toBe(false); f.r.onDispose();
   });
   it('ignores an old socket close only while a different live socket owns the session', async () => {
@@ -44,8 +45,10 @@ describe.each(rooms)('%s seat recovery', (_name, Type, mode) => {
     expect(f.r.allowReconnection).not.toHaveBeenCalled(); expect(f.r.seats.get('a')).toBe(0);
     expect(clearSeatPresence).not.toHaveBeenCalled(); f.r.onDispose();
   });
-  it('marks takeover immediately, restores the same seat, and cancels presence keepalive', async () => {
+  it('19.11: short drop is silent for 12 s, then bot takes over; return restores the same seat and stops keepalive', async () => {
     const f = fixture(Type); const drop = f.r.onDrop(f.client);
+    expect(f.abandoned()).toBe(false);
+    await vi.advanceTimersByTimeAsync(12_001);
     expect(f.abandoned()).toBe(true);
     expect(f.r.allowReconnection).toHaveBeenCalledWith(f.client, 180);
     expect(keepSeatPresence).toHaveBeenLastCalledWith('user-a', 12, mode, false, true);
@@ -97,9 +100,24 @@ it('Ihale bot plays the bidder and dummy on disconnect, then yields both to the 
   for (let n = 0; n < 2; n++) s = applyIhaleCommand(s, ihaleBotCommand(s), ihaleController(s));
   f.r.game = s; expect(s.currentSeat).toBe(2);
   const drop = f.r.onDrop(f.client);
+  await vi.advanceTimersByTimeAsync(12_001); // 19.11: kısa kopma toleransı
   expect(ihaleClientView(f.r.game, 1).seats[0].abandoned).toBe(true);
   expect(ihaleRuntime.step(f.r.game, seat => f.r.isHumanTurn(seat)).moved).toBe(true);
   f.r.onReconnect(f.client); f.resolve(); await drop;
   expect(ihaleRuntime.step(f.r.game, seat => f.r.isHumanTurn(seat)).moved).toBe(false);
   expect(ihaleClientView(f.r.game, 0).yourTurn).toBe(true); f.r.onDispose();
+});
+
+describe.each(rooms)('19.11 %s kısa kopma', (_name, Type) => {
+  it('12 sn içinde dönen oyuncu için masaya koptu/döndü yazılmaz, bot devralmaz', async () => {
+    const f = fixture(Type); const log = vi.spyOn(f.r, 'logEvent').mockImplementation(() => {});
+    const drop = f.r.onDrop(f.client);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.abandoned()).toBe(false);
+    f.r.onReconnect(f.client); f.resolve(); await drop;
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(f.abandoned()).toBe(false);
+    expect(log.mock.calls.map(c => String(c[0])).some(t => /koptu|döndü|dondu/.test(t))).toBe(false);
+    f.r.onDispose();
+  });
 });

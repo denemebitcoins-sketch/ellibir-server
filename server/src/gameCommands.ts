@@ -112,7 +112,7 @@ export function applyClientCommand(state: any, cmd: any, seat: number): CmdResul
       try {
         const player = state.players?.find((p: any) => p.seat === seat);
         const card = player?.hand?.find((c: any) => c.id === cardId);
-        if (!card) continue;
+        if (!card || card.joker) continue; // 19.11: TÜMÜNÜ İŞLE jokeri işlemez — oyuncu isterse eliyle işler
         const jokerMeld = (state.melds ?? []).find((m: any) => canRetrieveJoker(m, card, state.rules) != null);
         if (jokerMeld) {
           state = applyMove(state, { type: 'retrieveJoker', meldId: jokerMeld.id, cardId });

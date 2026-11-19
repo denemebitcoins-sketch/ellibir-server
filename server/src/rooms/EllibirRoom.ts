@@ -658,6 +658,31 @@ export class EllibirRoom extends Room {
   private presenceLeases = new SeatPresenceLeases();
   private presenceMode(): string { return (this.gameKey === 'ihale' ? 'ihale-' : '') + ((this.metadata as any)?.mode ?? (this.humanSeats.length === 2 ? 'duo' : 'solo')); }
 
+
+  /* 19.11 KISA KOPMA TOLERANSI: düşen oyuncunun yerini bot HEMEN almaz. 12 sn içinde dönerse kimse fark etmez
+     (masaya "koptu/döndü" yazılmaz, bot hamle yapmaz; sırası gelirse normal süre sayacı işler). 12 sn'yi geçerse
+     eskisi gibi bot devralır. Oyun başlamadıysa (bekleme) davranış değişmez. */
+  private dropGrace = new Map<number, ReturnType<typeof setTimeout>>();
+  private static readonly DROP_GRACE_MS = 12_000;
+  private startDropGrace(seat: number, sessionId: string, apply: () => void) {
+    this.cancelDropGrace(seat);
+    const t = setTimeout(() => {
+      this.dropGrace.delete(seat);
+      if (this.seats.get(sessionId) !== seat) return; // bu arada koltuk el değiştirdi / çıktı
+      apply();
+    }, EllibirRoom.DROP_GRACE_MS);
+    (t as any).unref?.();
+    this.dropGrace.set(seat, t);
+  }
+  /** true → bot henüz devralmamıştı (sessiz dönüş). */
+  private cancelDropGrace(seat: number): boolean {
+    const t = this.dropGrace.get(seat);
+    if (!t) return false;
+    clearTimeout(t);
+    this.dropGrace.delete(seat);
+    return true;
+  }
+
   async onDrop(client: Client) {
     const isTakeover = this.takeoverPending.delete(client.sessionId); // takeover dususu KALKAN-1'i atlar
     // KALKAN: wifi→mobil geçişinde SDK yeni bağlantıyla ÇOKTAN döndükten sonra eski
@@ -680,10 +705,14 @@ export class EllibirRoom extends Room {
       this.takeoverPending.delete(client.sessionId);
       return;
     }
-    this.setAbandoned(seat, true);   // bot devralır (oyun DURMAZ)
-    this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
-    this.runEngine();
-    this.pushViews();
+    const dropSid = client.sessionId;
+    const takeOver = () => {
+      this.setAbandoned(seat, true);   // bot devralır (oyun DURMAZ)
+      this.logEvent(`${this.nameOfSeat(seat)} bağlantısı koptu — bot devraldı (3 dk içinde dönebilir)`);
+      this.runEngine();
+      this.pushViews();
+    };
+    if (this.game) this.startDropGrace(seat, dropSid, takeOver); else takeOver();
     // P2 SALON GÖRÜNÜRLÜĞÜ: koltuk REZERVE iken (180s) düşen oyuncunun presence satırını TAZE tut.
     const uid = this.seatUsers.get(seat);
     const mode = (this.metadata as any)?.mode ?? (this.humanSeats.length === 2 ? 'duo' : 'solo');
@@ -695,15 +724,17 @@ export class EllibirRoom extends Room {
       console.log(`[onDrop-SUCCESS] seat=${seat} oyuncu GERİ DÖNDÜ (allowReconnection çözüldü)`);
       if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
       this.presenceLeases.restore(client.sessionId, uid, tableNo, this.presenceMode(), !!this.game);
+      const quietBack = this.cancelDropGrace(seat);
       this.setAbandoned(seat, false);   // KONTROL İADESİ → sıra/karar tekrar insana
       if (this.forceBotSeat === seat) this.forceBotSeat = null;
       try { back.send('seat', { seat }); } catch { /* yoksay */ }
-      this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
+      if (!quietBack) this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü — kontrol oyuncuya geçti`);
       this.runEngine();
       this.pushViews();
     } catch (e: any) {
       console.log(`[onDrop-EXPIRED] seat=${seat} reconnect penceresi DOLDU/iptal: ${e?.message ?? e}`);
       if (!this.presenceLeases.owns(client.sessionId, reservation)) return;
+      if (this.cancelDropGrace(seat)) takeOver();
       this.presenceLeases.stop(client.sessionId);
       // KALKAN-2: pencere 'doldu' dese de bu sessionId hâlâ BAĞLIYSA (yarış) koltuğa dokunma.
       const live = this.clients.find(c => c.sessionId === client.sessionId && hasOpenTransport(c));
@@ -722,7 +753,8 @@ export class EllibirRoom extends Room {
     if (wasReserved) {
       const returningSeat = this.seats.get(client.sessionId)!;
       this.presenceLeases.restore(client.sessionId, this.seatUsers.get(returningSeat), Number((this.metadata as any)?.table) || 1, this.presenceMode(), !!this.game);
-      this.logEvent(`${this.nameOfSeat(returningSeat)} masaya geri dondu - kontrol oyuncuya gecti`);
+      const quiet = this.cancelDropGrace(returningSeat);
+      if (!quiet) this.logEvent(`${this.nameOfSeat(returningSeat)} masaya geri dondu - kontrol oyuncuya gecti`);
     }
     this.lastReconnectAt.set(client.sessionId, Date.now());
     console.log(`[onReconnect] TETİKLENDİ sessionId=${client.sessionId} seat=${this.seats.get(client.sessionId)}`);
@@ -749,6 +781,7 @@ export class EllibirRoom extends Room {
     console.log(`[onLeave] TETİKLENDİ sessionId=${client.sessionId} code=${_code} seat=${this.seats.get(client.sessionId)}`);
     this.ihalePilotClients.delete(client.sessionId);
     const seat = this.seats.get(client.sessionId);
+    if (seat != null) this.cancelDropGrace(seat);
     if (seat == null) {
       if (this.spectators.delete(client.sessionId)) { this.pushViews(); }
       this.spectatorNames.delete(client.sessionId);
@@ -872,6 +905,7 @@ export class EllibirRoom extends Room {
     for (const seat of this.preStartAway) if (occupied.has(seat)) unattended.add(seat);
     this.preStartAway.clear();
     for (const seat of unattended) {
+      this.cancelDropGrace(seat); // 19.11: tolerans sürüyorsa burada hemen bot devralır
       this.setAbandoned(seat, true);
       this.logEvent(`${this.nameOfSeat(seat)} masada değil — bot devraldı`);
     }
