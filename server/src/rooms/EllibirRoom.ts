@@ -1,4 +1,5 @@
 import { sendView, wantsCompressedViews } from '../viewWire';
+import { busyHumanFromEntryError, BUSY_ELSEWHERE_REASON, maintenanceBlock } from '../gameMaintenance';
 import { Room, Client } from '@colyseus/core';
 import { ReadyGate, READY_START_MS } from '../readyGate';
 import { populationMatchExtras } from '../populationExtras';
@@ -474,6 +475,14 @@ export class EllibirRoom extends Room {
   }
 
   async onJoin(client: Client, options: any) {
+    // 19.11 BAKIM MODU: oyun başlamamış masaya yeni oturuş reddedilir (koltuğuna dönen + yönetici hariç).
+    if (!this.game) {
+      const mUid = authUserIdFromClient(client);
+      if (!findExistingUserSeat(this.seats, this.seatUsers, mUid)) {
+        const why = await maintenanceBlock(this.gameKey === 'ihale' ? 'ihale' : '51', mUid);
+        if (why) throw new Error('maintenance:' + why);
+      }
+    }
     this.readyGate.observe(client.sessionId, options);
     if (wantsCompressedViews(options)) this.zvSessions.add(client.sessionId); // sıkıştırılmış view isteyen istemci
     requirePopulationClient(this.population, options);
@@ -535,6 +544,7 @@ export class EllibirRoom extends Room {
 
   /** İzleyiciyi/koltuksuzu boş bir koltuğa oturt ('sit' mesajı). Oyun başlamadan (game==null) izinli. */
   private async trySit(client: Client, rawSeat: any, options: any) {
+    { const why = this.game ? null : await maintenanceBlock(this.gameKey === 'ihale' ? 'ihale' : '51', authUserIdFromClient(client)); if (why) { client.send('sitError', { reason: why }); return; } } // 19.11 bakım
     if (this.seats.has(client.sessionId)) return; // zaten oturuyor
     if (this.entryStarting) { client.send('sitError', { reason: 'Oyun hazirlaniyor.' }); return; }
     if (this.game != null) { client.send('sitError', { reason: 'oyun başladı' }); return; }
@@ -618,6 +628,9 @@ export class EllibirRoom extends Room {
         this.runEngine();
       } catch (e: any) {
         console.error('[EllibirRoom] entry failed:', e?.message);
+        // 19.11: oyuncunun önceki maçı başka masada sürüyor → onu izleyiciye al (aksi halde HAZIR→geri sayım→bekleme döngüsü)
+        { const busy = busyHumanFromEntryError(e?.message);
+          if (busy) for (const [sid, st] of [...this.seats.entries()]) if (this.seatUsers.get(st) === busy) this.standToSpectator(sid, st, 'readyTimeout', BUSY_ELSEWHERE_REASON); }
         if (this.population?.activeMatch && !this.game) await this.population.finish(null).catch((error: any) => console.error('[population] refund pending:', error?.message));
         this.abortEntryStart([]);
       } finally { this.entryStarting = false; }
