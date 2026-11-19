@@ -838,6 +838,9 @@ export class EllibirRoom extends Room {
   }
 
   private cleanupSeat(sessionId: string, seat: number) {
+    // 19.11: oyun sürerken koltuk KALICI bota geçiyor (çıkış / dönüş süresi doldu) → oyuncunun salon-botu maç
+    // kimliğini serbest bırak; yoksa bu maç bitene kadar başka masada (başka oyunda) oyun başlatamıyordu. Hesaplaşma aynı.
+    { const leaver = this.seatUsers.get(seat); if (this.game && leaver) void this.population?.releaseHuman(leaver).catch((e: any) => console.warn('[population] releaseHuman:', e?.message)); }
     if (this.seats.get(sessionId) !== seat) return;
     this.ihalePilotClients.delete(sessionId);
     this.presenceLeases.stop(sessionId);

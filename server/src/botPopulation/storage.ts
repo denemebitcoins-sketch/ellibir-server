@@ -83,6 +83,10 @@ export class PopulationStorage {
   finishMatch(match: string, owner: string, winner: number | null): Promise<PopulationMatch> {
     return this.call('bot_population_finish_match', { p_match: match, p_owner: owner, p_winner: winner });
   }
+  /** 19.11: maçtan kalıcı ayrılan insanın aktif-kimlik kilidini kaldırır (hesaplaşmaya dokunmaz). */
+  releaseHuman(match: string, owner: string, user: string): Promise<boolean> {
+    return this.call('bot_population_release_human', { p_match: match, p_owner: owner, p_user: user });
+  }
   match(match: string): Promise<PopulationMatch | null> {
     return this.call('bot_population_get_match', { p_match: match });
   }

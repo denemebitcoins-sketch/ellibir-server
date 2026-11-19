@@ -163,6 +163,12 @@ export class PopulationRoomSession {
     return this.current;
   }
 
+  /** 19.11: kalıcı ayrılan insan başka masada yeni maça girebilsin (koltuğu bot oynamaya devam eder). */
+  async releaseHuman(uid: string): Promise<void> {
+    if (!this.current || this.current.state !== 'active') return;
+    await this.storage.releaseHuman(this.current.match_key, this.owner, uid);
+  }
+
   async finish(winner: number | null): Promise<void> {
     if (!this.current) throw new Error('population_match_missing');
     const key = this.current.match_key;
