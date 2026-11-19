@@ -200,6 +200,10 @@ export class TavlaRoom extends Room {
               console.log(`[TavlaRoom.takeover] ayni oturum icin YENI baglanti -> zombi kapatiliyor sid=${client.sessionId}`);
               this.takeoverPending.add(client.sessionId);
               try { zombie.leave(4444); } catch { /* yoksay */ }
+              // 19.11: zombi soketin karşı ucu yok (wifi kapandı) → kibar kapanış el sıkışması hiç tamamlanmaz,
+              // ws ~5 sn bekleyip öyle kapatıyordu (oyuncu bu sürede "zayıf bağlantı"da bekliyordu). Anında kes:
+              // 'close' 1006 ile gelir → onDrop → allowReconnection → yeni bağlantı hemen koltuğa oturur.
+              try { zombie.ref?.terminate?.(); } catch { /* yoksay */ }
             }
           }
         } catch { /* emniyet */ }
