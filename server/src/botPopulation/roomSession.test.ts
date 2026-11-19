@@ -3,7 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PopulationStorage, PopulationRpc } from './storage';
-import { PopulationDirector, PopulationTablePlan } from './director';
+import { PopulationDirector, PopulationTablePlan, ENDED_HOLD_MS } from './director';
 import { initialCharacters } from './characters';
 import { EllibirRoom } from '../rooms/EllibirRoom';
 import { IhaleRoom } from '../rooms/IhaleRoom';
@@ -616,6 +616,27 @@ describe('population director with real rooms and SQL leases', () => {
     expect((await matches())[0].state).toBe('settled');
     expect(r.seats.size).toBe(1); expect(r.population).toBeNull();
     expect(provider.close).not.toHaveBeenCalled();
+  });
+
+  it('19.11: maç bitince masada oyuncu varken botlar kalır (HAZIR/rövanş); bekleme süresi dolunca dağılır', async () => {
+    const { d, opened, later } = director();
+    await d.tick();
+    const { r, population } = opened[0];
+    await human(r, 2);
+    const invited = d.status().lobby[0];
+    await d.invite(invited, waiting.key, 3);
+    await vi.advanceTimersByTimeAsync(7100);
+    expect(r.game).toBeTruthy();
+    r.game.phase = 'matchEnded'; r.game.matchWinnerSeat = 2;
+    r.checkHandEnd(); await r.settlePromise;
+    await d.tick();
+    expect(d.status().tables).toHaveLength(1);
+    expect(population.size).toBe(3);
+    later(ENDED_HOLD_MS - 10000); await d.tick();
+    expect(population.size).toBe(3);
+    later(20000); await d.tick();
+    expect(r.population).toBeNull();           // bekleme bitti: botlar bu masadan kalktı
+    expect(r.seats.size).toBe(1);              // oyuncu masada kalır
   });
 
   it('rotates a three-bot waiting table, then starts with its first human and preserves that match during drain', async () => {

@@ -26,7 +26,9 @@ export interface PopulationRoomProvider {
   /** Only called after retirement and when no seated human remains. */
   close(room: PopulationRoomSession): Promise<void>;
 }
-interface Managed { room: PopulationRoomSession; rotateAt: number; invited?: boolean; }
+interface Managed { room: PopulationRoomSession; rotateAt: number; invited?: boolean; endedAt?: number; }
+/** 19.11: maç bitince masada gerçek oyuncu varsa botlar bu süre boyunca kalır (HAZIR → rövanş). Oyuncu çıkarsa hemen dağılır. */
+export const ENDED_HOLD_MS = 3 * 60 * 1000;
 interface Lobby { lease: CharacterLease; rotateAt: number; }
 
 /** No constructor/startup side effects. A trusted caller drives tick() explicitly.
@@ -160,8 +162,12 @@ export class PopulationDirector {
     for (const [key, item] of this.managed) {
       const state = item.room.status();
       try {
+        // Maç sonu: eskiden botlar hemen kalkıyordu; oyuncu HAZIR diyemeden masa dağılıyordu.
+        if (state.phase === 'ended') item.endedAt ??= this.now(); else item.endedAt = undefined;
+        const endedRetire = state.phase === 'ended'
+          && (!state.humanSeats.length || this.now() - (item.endedAt ?? 0) >= ENDED_HOLD_MS);
         if (!running || state.disposed || item.room.isDisposed
-          || state.phase === 'ended'
+          || endedRetire
           || (item.invited && item.room.size === 0 && state.phase === 'waiting')
           || (item.invited && !state.humanSeats.length && state.phase === 'waiting' && this.now() >= item.rotateAt)) {
           item.room.acceptNewMatches(false);
