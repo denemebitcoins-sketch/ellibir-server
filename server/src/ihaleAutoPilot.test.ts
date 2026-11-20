@@ -20,16 +20,17 @@ function room(dummy = false): any {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe('Ihale persistent automatic control', () => {
-  it('keeps legacy clients on recoverable one-move timeout handling', async () => {
+  it('legacy clients: one-move timeouts, then after three misses the AFK guard hands the seat to a bot', async () => {
     const r = room(); r.runEngine = vi.fn(); r.ihalePilotClients.clear();
-    for (let miss = 0; miss < 4; miss++) {
+    for (let miss = 0; miss < 3; miss++) {
       r.forceBotSeat = null; r.ihaleDeadline = Date.now() + 40000;
       r.armTurnTimeoutIfNeeded(); await vi.advanceTimersByTimeAsync(40000);
       expect(r.forceBotSeat).toBe(0);
       expect(r.ihaleAutoPilot.has(0)).toBe(false);
     }
     r.forceBotSeat = null;
-    expect(r.isHumanTurn(0)).toBe(true); r.onDispose();
+    expect(r.game.abandoned).toContain(0);        // 21.11 AFK: bot devraldı, 3 dk içinde dönmezse masadan çıkar
+    expect(r.isHumanTurn(0)).toBe(false); r.onDispose();
   });
 
   it.each([false, true])('switches after three misses on the controller, dummy=%s', async dummy => {

@@ -21,6 +21,7 @@ import { canUseReaction } from '../cosmetics';
 import { ellibirRuntime } from '../cardRoomRuntime';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
+import { AfkGuard } from '../afkGuard';
 import { PopulationStorage } from '../botPopulation/storage';
 import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan, handsInfo } from '../botPopulation/roomBinding';
 
@@ -60,6 +61,19 @@ export class EllibirRoom extends Room {
   // İnsan tur süresi (turnTimerSeconds) + GRACE: client kendi autopilot'ını süre dolunca oynatır;
   // server bu kadar EKSTRA bekleyip (client bağlıysa o oynasın) sonra zorla bot oynatır. Böylece
   // bağlı-ama-AFK insanda client autopilot devreye girer; KOPMUŞ insanda server kurtarır (oyun donmaz).
+  // 21.11 AFK: 3 sıra üst üste süresinde oynamayan / uzaklaşan oyuncu 3 dk içinde dönmezse masadan çıkar.
+  private afk = new AfkGuard({
+    takeOver: (seat, msLeft) => {
+      if (!this.game) return;
+      const ab: number[] = Array.isArray(this.game.abandoned) ? this.game.abandoned : [];
+      if (!ab.includes(seat)) this.logEvent(`${this.nameOfSeat(seat)} üst üste 3 sıra oynamadı — ${this.ihaleAutoPilot.has(seat) ? 'otomatik pilot' : 'bot devraldı'} (${Math.ceil(msLeft / 60000)} dk içinde dönmezse masadan çıkarılır)`);
+      // İhale yeni istemci: otomatik pilot zaten oynuyor (GERİ AL ile döner) → koltuğu ayrıca bota vermeye gerek yok.
+      if (!this.ihaleAutoPilot.has(seat)) this.setAbandoned(seat, true);
+      this.sendToSeat(seat, 'afk', { msLeft });
+      this.runEngine(); this.pushViews();
+    },
+    remove: (seat) => this.removeAfkSeat(seat),
+  });
   private readonly TURN_GRACE_MS = 6000;
   // 19.11: sıra başına TEK süre (istemci de sayacı yalnız sıra el değiştirince sıfırlar).
   // Taş çekmek (draw→action) süreyi yeniden BAŞLATMAZ; sorgu bitince istemci gibi yeniden başlar.
@@ -316,8 +330,15 @@ export class EllibirRoom extends Room {
           clearTimeout(this.handEndTimer);
           this.handEndTimer = null;
         }
+        const ph0 = this.game.phase;
+        const myTurn = !this.game.sorgu && (ph0 === 'draw' || ph0 === 'action') && this.runtime.controller(this.game) === seat && this.isHumanTurn(seat);
+        if (myTurn) this.afk.beforeCommand(seat, this.gameKey === 'ihale' ? this.ihaleDeadline : (this.turnDeadlineAt > 0 ? this.turnDeadlineAt - this.TURN_GRACE_MS : 0));
         const r = this.runtime.apply(this.game, cmd, seat);
         this.game = r.state;
+        if (myTurn) {
+          const ph1 = this.game?.phase;
+          this.afk.afterCommand(seat, !!this.game && (ph1 === 'draw' || ph1 === 'action') && this.runtime.controller(this.game) === seat);
+        }
         if (this.gameKey === 'ihale') this.ihaleTimeoutStreak.delete(seat);
         this.pushViews();                       // insan hamlesi anında yansır
         if (!r.skipBots) this.runEngine();      // botlar gecikmeli oynar
@@ -415,6 +436,7 @@ export class EllibirRoom extends Room {
         this.setAbandoned(seat, false);
         this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
       }
+      if (this.game && this.game.phase !== 'matchEnded') this.afk.away(seat, away);
       this.runEngine();
       this.pushViews();
     });
@@ -617,6 +639,7 @@ export class EllibirRoom extends Room {
         this.entryCanakCharged = !oneHandEntry;
         if (!oneHandEntry) this.refreshCanak();
         this.cfg.botSeats = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
+        this.afk.reset();
         this.game = this.runtime.create(this.cfg);
         this.matchStartedAt = new Date().toISOString(); // 18.11 Kahve Saati: maçın BAŞLADIĞI an belirler
         this.matchProgressionKey = `${this.gameKey}:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
@@ -831,6 +854,32 @@ export class EllibirRoom extends Room {
     for (const seat of this.humanSeats) {
       try { reconcileHandOrder(this.game, seat); } catch { /* yoksay */ }
     }
+  }
+
+  private sessionOfSeat(seat: number): string | null {
+    for (const [sid, st] of this.seats) if (st === seat) return sid;
+    return null;
+  }
+  private sendToSeat(seat: number, type: string, msg: any) {
+    const sid = this.sessionOfSeat(seat);
+    const c = sid ? this.clients.find(x => x.sessionId === sid) : null;
+    try { c?.send(type, msg); } catch { /* yoksay */ }
+  }
+  /** 21.11 AFK süresi doldu: masadan çıkar (kalıcı bot; katılım ödülleri verilmez). */
+  private removeAfkSeat(seat: number) {
+    if (!this.game || this.game.phase === 'matchEnded') return;
+    const sid = this.sessionOfSeat(seat);
+    this.logEvent(`${this.nameOfSeat(seat)} 3 dk içinde masaya dönmedi — masadan çıkarıldı`);
+    this.setAbandoned(seat, true);
+    if (sid) {
+      const c = this.clients.find(x => x.sessionId === sid);
+      if (c) {
+        try { c.send('afkRemoved', { reason: 'afk' }); } catch { /* yoksay */ }
+        try { c.leave(4000); return; } catch { /* düşerse aşağıda temizle */ }
+      }
+      this.cleanupSeat(sid, seat);
+    }
+    this.runEngine(); this.pushViews();
   }
 
   private nameOfSeat(seat: number): string {
@@ -1072,6 +1121,7 @@ export class EllibirRoom extends Room {
         if (this.game && this.runtime.controller(this.game) === seat)
           this.ihaleDeadline = Date.now() + Math.max(15, Number(this.game.rules.turnTimerSeconds) || 40) * 1000;
         this.logEvent(`${this.nameOfSeat(seat)} otomatik pilottan kontrolü geri aldı`);
+        this.afk.away(seat, false); // AFK süresi durur; süresinde oynanan ilk sıra tamamen temizler
         this.runEngine();
       }
       this.pushViews();
@@ -1177,6 +1227,7 @@ export class EllibirRoom extends Room {
     }
     if (this.game.phase === 'matchEnded' && !this.settled) {
       this.settled = true;
+      this.afk.reset();
       this.rematchVotes.clear();
       const r: any = this.game.rules ?? {};
       const scoreValues = this.game.players.map((p: any) => Number(p.totalScore));
@@ -1403,6 +1454,7 @@ export class EllibirRoom extends Room {
         }
         this.pushViews();
       }
+      this.afk.timedOut(seat);
       this.forceBotSeat = seat;                                 // TEK tur bot (isHumanTurn false döner)
       // runEngine bot hamle(ler)ini oynatır ve bittiğinde forceBotSeat'i temizler (finally).
       this.runEngine();
@@ -1525,6 +1577,7 @@ export class EllibirRoom extends Room {
   }
 
   onDispose() {
+    this.afk.reset();
     this.readyGate.dispose();
     this.disposed = true;
     if (this.populationHeartbeat) clearInterval(this.populationHeartbeat);

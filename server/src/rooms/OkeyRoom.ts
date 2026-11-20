@@ -22,6 +22,7 @@ import { hasLowestScoreTie, isOneRoundNoContest, shouldDeferEntryHouse } from '.
 import { canUseReaction } from '../cosmetics';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
+import { AfkGuard } from '../afkGuard';
 import { PopulationStorage } from '../botPopulation/storage';
 import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan, handsInfo } from '../botPopulation/roomBinding';
 
@@ -87,6 +88,17 @@ export class OkeyRoom extends Room {
   private bankoTimer: NodeJS.Timeout | null = null;
   private bankoTick: NodeJS.Timeout | null = null;
   private bankoDeadlineAt = 0;
+  // 21.11 AFK: 3 sıra üst üste süresinde oynamayan / uzaklaşan oyuncu 3 dk içinde dönmezse masadan çıkar.
+  private afk = new AfkGuard({
+    takeOver: (seat, msLeft) => {
+      if (!this.game) return;
+      if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} üst üste 3 sıra oynamadı — bot devraldı (${Math.ceil(msLeft / 60000)} dk içinde dönmezse masadan çıkarılır)`);
+      this.abandoned.add(seat);
+      this.sendToSeat(seat, 'afk', { msLeft });
+      this.afterChange();
+    },
+    remove: (seat) => this.removeAfkSeat(seat),
+  });
   private readonly TURN_GRACE_MS = 2000;       // 18.11: gizli tolerans 6→2 sn (ekrandaki sayaç gerçek süreyle başlar)
   private turnArmedSeat = -1;                    // 18.11: sıra başına TEK sayaç (taş çekmek sıfırlamaz)
   private bet = 0;
@@ -294,8 +306,11 @@ export class OkeyRoom extends Room {
         void this.handleReady(seat);
         return;
       }
+      const myTurn = !(this.game as any).bankoPhase && this.game.turn === seat && !this.abandoned.has(seat);
+      if (myTurn) this.afk.beforeCommand(seat, this.turnDeadlineAt > 0 ? this.turnDeadlineAt - this.TURN_GRACE_MS : 0);
       const r = applyOkeyMove(this.game, seat, cmd);
       if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
+      if (myTurn) this.afk.afterCommand(seat, !!this.game && !this.game.elEnded && !this.game.matchEnded && this.game.turn === seat);
       this.maybeAccelerateBanko(); // insan kararı sonrası erken kapanış kontrolü
       if ((this.game as any).bankoPhase) { this.pushViews(); return; }
       this.afterChange();
@@ -385,6 +400,7 @@ export class OkeyRoom extends Room {
       } else if (this.abandoned.delete(seat)) {
         this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
       }
+      if (this.game && !this.game.matchEnded) this.afk.away(seat, away);
       this.afterChange();
     });
 
@@ -602,6 +618,7 @@ export class OkeyRoom extends Room {
       if (!oneHandEntry) this.refreshCanak();
       const banko = this.cfg?.rules?.variant === 'banko';
       this.cfg.botSeats = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
+      this.afk.reset();
       this.game = createOkeyGame({ ...this.cfg, dealFirst: !banko });
       this.matchStartedAt = new Date().toISOString(); // 18.11 Kahve Saati: maçın BAŞLADIĞI an belirler
       this.matchProgressionKey = `okey:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
@@ -982,6 +999,31 @@ export class OkeyRoom extends Room {
     }, 0);
   }
 
+  private sessionOfSeat(seat: number): string | null {
+    for (const [sid, st] of this.seats) if (st === seat) return sid;
+    return null;
+  }
+  private sendToSeat(seat: number, type: string, msg: any) {
+    const sid = this.sessionOfSeat(seat);
+    const c = sid ? this.clients.find(x => x.sessionId === sid) : null;
+    try { c?.send(type, msg); } catch { /* yoksay */ }
+  }
+  /** 21.11 AFK süresi doldu: masadan çıkar (kalıcı bot; katılım ödülleri — haftalık puan/Kahve Saati — verilmez). */
+  private removeAfkSeat(seat: number) {
+    if (!this.game || this.game.matchEnded) return;
+    const sid = this.sessionOfSeat(seat);
+    this.logEvent(`${this.nameOfSeat(seat)} 3 dk içinde masaya dönmedi — masadan çıkarıldı`);
+    this.abandoned.add(seat);
+    if (!sid) { this.afterChange(); return; }
+    const c = this.clients.find(x => x.sessionId === sid);
+    if (c) {
+      try { c.send('afkRemoved', { reason: 'afk' }); } catch { /* yoksay */ }
+      try { c.leave(4000); return; } catch { /* düşerse aşağıda temizle */ }
+    }
+    this.cleanupSeat(sid, seat);
+    this.afterChange();
+  }
+
   private nameOfSeat(seat: number): string {
     return this.game?.players?.[seat]?.name ?? this.seatNames.get(seat) ?? 'Oyuncu';
   }
@@ -1032,6 +1074,7 @@ export class OkeyRoom extends Room {
     // push önceki insanın kalıntı süresini taşır (sayaç yanlış koltukta görünür bug'ı).
     if (!this.game) { this.pushViews(); return; }
     if (this.game.matchEnded) {
+      this.afk.reset();
       this.settleOnce(); this.clearTurnTimers(); this.turnDeadlineAt = 0; this.turnArmedSeat = -1;
       this.pushViews(); return;
     }
@@ -1090,6 +1133,7 @@ export class OkeyRoom extends Room {
         this.turnArmedSeat = -1;
         autoOkeyMove(this.game, turn);
         this.logEvent(`${this.nameOfSeat(turn)} süresi doldu — otomatik oynandı`);
+        this.afk.timedOut(turn);
         this.afterChange();
       }, ms);
     }
@@ -1389,6 +1433,7 @@ export class OkeyRoom extends Room {
   }
 
   onDispose() {
+    this.afk.reset();
     this.readyGate.dispose();
     this.disposed = true;
     if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }

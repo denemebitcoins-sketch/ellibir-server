@@ -22,6 +22,7 @@ import { TavlaPresentationGate } from '../tavlaPresentation';
 import { canUseReaction } from '../cosmetics';
 import { allHumanStartingRoster } from '../matchRewardEligibility';
 import { PopulationRoomSession } from '../botPopulation/roomSession';
+import { AfkGuard } from '../afkGuard';
 import { PopulationStorage } from '../botPopulation/storage';
 import { attachPopulationBinding, populationBetOption, requirePopulationClient, PopulationClientSupport, populationAdoptionPlan, handsInfo } from '../botPopulation/roomBinding';
 
@@ -63,6 +64,17 @@ export class TavlaRoom extends Room {
   private readonly readyGate = new ReadyGate(() => this.onReadyTimeout());
   private readonly STEP_MS = 900;              // bot adım temposu (zar → hamle → hamle)
   private readonly GAME_END_MS = 3500;         // el sonu gosterimi -> yeni oyun
+  // 21.11 AFK: 3 sıra üst üste süresinde oynamayan / uzaklaşan oyuncu 3 dk içinde dönmezse masadan çıkar.
+  private afk = new AfkGuard({
+    takeOver: (seat, msLeft) => {
+      if (!this.game) return;
+      if (!this.abandoned.has(seat)) this.logEvent(`${this.nameOfSeat(seat)} üst üste 3 sıra oynamadı — bot devraldı (${Math.ceil(msLeft / 60000)} dk içinde dönmezse masadan çıkarılır)`);
+      this.abandoned.add(seat);
+      this.sendToSeat(seat, 'afk', { msLeft });
+      this.afterChange();
+    },
+    remove: (seat) => this.removeAfkSeat(seat),
+  });
   private readonly TURN_GRACE_MS = 2000; // 19.11: gizli tolerans 6→2 sn; ekrandaki sayaç toleranssız (101 ile aynı)
   private bet = 0;
   private settled = false;
@@ -248,8 +260,12 @@ export class TavlaRoom extends Room {
       if (this.presentation.remaining(Date.now()) > 0) {
         client.send('moveError', { code: 'presentation_pending', message: 'Zarlar toplaniyor.' }); return;
       }
+      const myTurn = this.game.turn === seat && this.game.pendingDouble < 0 && this.game.pendingResign < 0
+        && !this.game.gameEnded && !this.abandoned.has(seat);
+      if (myTurn) this.afk.beforeCommand(seat, this.turnDeadlineAt > 0 ? this.turnDeadlineAt - this.TURN_GRACE_MS : 0);
       const r = applyTavlaMove(this.game, seat, cmd);
       if (!r.ok) { client.send('moveError', { code: 'rule', message: r.error ?? '' }); return; }
+      if (myTurn) this.afk.afterCommand(seat, !!this.game && !this.game.gameEnded && !this.game.matchEnded && this.game.turn === seat);
       this.afterChange();
     });
 
@@ -353,6 +369,7 @@ export class TavlaRoom extends Room {
       } else if (this.abandoned.delete(seat)) {
         this.logEvent(`${this.nameOfSeat(seat)} masaya geri döndü`);
       }
+      if (this.game && !this.game.matchEnded) this.afk.away(seat, away);
       this.afterChange();
     });
 
@@ -533,6 +550,7 @@ export class TavlaRoom extends Room {
       this.entryCanakCharged = true;
       this.refreshCanak();
       this.cfg.botSeats = [...this.adminBots.keys(), ...(this.population?.seats() ?? [])];
+      this.afk.reset();
       this.game = createTavlaGame(this.cfg);
       this.matchStartedAt = new Date().toISOString(); // 18.11 Kahve Saati: maçın BAŞLADIĞI an belirler
       this.matchProgressionKey = `tavla:${this.roomId}:${Date.now()}:${this.cfg?.seed ?? ''}`;
@@ -912,6 +930,31 @@ export class TavlaRoom extends Room {
     }, 0);
   }
 
+  private sessionOfSeat(seat: number): string | null {
+    for (const [sid, st] of this.seats) if (st === seat) return sid;
+    return null;
+  }
+  private sendToSeat(seat: number, type: string, msg: any) {
+    const sid = this.sessionOfSeat(seat);
+    const c = sid ? this.clients.find(x => x.sessionId === sid) : null;
+    try { c?.send(type, msg); } catch { /* yoksay */ }
+  }
+  /** 21.11 AFK süresi doldu: masadan çıkar (kalıcı bot; katılım ödülleri verilmez). */
+  private removeAfkSeat(seat: number) {
+    if (!this.game || this.game.matchEnded) return;
+    const sid = this.sessionOfSeat(seat);
+    this.logEvent(`${this.nameOfSeat(seat)} 3 dk içinde masaya dönmedi — masadan çıkarıldı`);
+    this.abandoned.add(seat);
+    if (!sid) { this.afterChange(); return; }
+    const c = this.clients.find(x => x.sessionId === sid);
+    if (c) {
+      try { c.send('afkRemoved', { reason: 'afk' }); } catch { /* yoksay */ }
+      try { c.leave(4000); return; } catch { /* düşerse aşağıda temizle */ }
+    }
+    this.cleanupSeat(sid, seat);
+    this.afterChange();
+  }
+
   private nameOfSeat(seat: number): string {
     return this.game?.players?.[seat]?.name ?? this.seatNames.get(seat) ?? 'Oyuncu';
   }
@@ -962,6 +1005,7 @@ export class TavlaRoom extends Room {
     if (!this.game) { this.pushViews(); return; }
     if (this.game.gameEnded || this.game.matchEnded) this.maybeCanak();
     if (this.game.matchEnded) {
+      this.afk.reset();
       this.settleOnce(); this.clearTurnTimers(); this.turnDeadlineAt = 0;
       this.pushViews(); return;
     }
@@ -1098,6 +1142,7 @@ export class TavlaRoom extends Room {
         if (!this.game || this.game.gameEnded || this.game.turn !== turn) { this.afterChange(); return; }
         autoTavlaMove(this.game, turn);
         this.logEvent(`${this.nameOfSeat(turn)} süresi doldu — otomatik oynandı`);
+        this.afk.timedOut(turn);
         this.afterChange();
       }, ms);
     }
@@ -1274,6 +1319,7 @@ export class TavlaRoom extends Room {
   }
 
   onDispose() {
+    this.afk.reset();
     this.readyGate.dispose();
     this.disposed = true;
     if (this.populationHeartbeat) { clearInterval(this.populationHeartbeat); this.populationHeartbeat = null; }
