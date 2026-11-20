@@ -59,6 +59,9 @@ beforeAll(async () => {
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_feed_pin.sql'), 'utf8'));
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_level_activity.sql'), 'utf8'));
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_profile_tabs.sql'), 'utf8'));
+  await db.exec(`create table if not exists public.push_devices(user_id uuid, enabled boolean default true);
+    create table if not exists public.push_outbox(id bigint generated always as identity primary key, user_id uuid, kind text, title text, body text, data jsonb, created_at timestamptz default now());`);
+  await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_push.sql'), 'utf8'));
   for (const [id, name, vis, role] of [[ME, 'Samet', 'open', 'normal'], [FRIEND, 'Zeynep', 'friends', 'normal'], [STRANGER, 'Ayşe', 'open', 'normal'],
     [BLOCKED, 'Kötü', 'open', 'normal'], [HIDDENP, 'Gizli', 'hidden', 'normal'], [ADMIN, 'Yonetici', 'open', 'admin']] as const) {
     await db.query('insert into auth.users values ($1)', [id]);
@@ -236,5 +239,21 @@ describe('kahvehane feed', () => {
     const liked = await rpc('kahvehane_feed', { p_scope: 'user_liked' });
     expect(liked.items.map((x: any) => Number(x.id))).toContain(st);
     expect((await rpc('kahvehane_feed', { p_scope: 'user_liked', p_user: FRIEND })).items).toEqual([]);
+  });
+  it('like/comment push is queued once per post window; kahvehane_post respects visibility', async () => {
+    await q('insert into public.push_devices(user_id) values ($1)', [FRIEND]);
+    const p = await post(FRIEND, 'Push denemesi');
+    const pushes = async () => (await q<any>(`select data->>'kv' kv from public.push_outbox where user_id = $1 order by id`, [FRIEND])).map((r: any) => r.kv);
+    await q(`insert into public.notifications(user_id, actor_id, type, post_id) values ($1,$2,'like',$3)`, [FRIEND, ME, p]);
+    await q(`insert into public.notifications(user_id, actor_id, type, post_id) values ($1,$2,'like',$3)`, [FRIEND, STRANGER, p]);
+    await q(`insert into public.notifications(user_id, actor_id, type, post_id, preview) values ($1,$2,'comment',$3,'selam')`, [FRIEND, ME, p]);
+    expect(await pushes()).toEqual(['like', 'comment']);
+    await q(`insert into public.notifications(user_id, actor_id, type, post_id) values ($1,$2,'like',$3)`, [STRANGER, ME, p]);
+    expect((await q<any>('select count(*)::int n from public.push_outbox where user_id = $1', [STRANGER]))[0].n).toBe(0);
+    await as(ME);
+    expect(Number((await rpc('kahvehane_post', { p_post: p })).id)).toBe(p);
+    const hidden = await post(HIDDENP, 'gizli');
+    await as(ME);
+    expect(await rpc('kahvehane_post', { p_post: hidden })).toBeNull();
   });
 });
