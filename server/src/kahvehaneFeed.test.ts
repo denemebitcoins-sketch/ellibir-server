@@ -57,6 +57,7 @@ beforeAll(async () => {
   `);
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_feed.sql'), 'utf8'));
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_feed_pin.sql'), 'utf8'));
+  await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_level_activity.sql'), 'utf8'));
   for (const [id, name, vis, role] of [[ME, 'Samet', 'open', 'normal'], [FRIEND, 'Zeynep', 'friends', 'normal'], [STRANGER, 'Ayşe', 'open', 'normal'],
     [BLOCKED, 'Kötü', 'open', 'normal'], [HIDDENP, 'Gizli', 'hidden', 'normal'], [ADMIN, 'Yonetici', 'open', 'admin']] as const) {
     await db.query('insert into auth.users values ($1)', [id]);
@@ -211,5 +212,13 @@ describe('kahvehane feed', () => {
     const f = await post(FRIEND, 'Özel', 'visibility=friends');
     await as(ADMIN);
     await expect(rpc('kahvehane_set_feed_pin', { p_post: f, p_pin: true })).rejects.toThrow(/not_public/);
+  });
+  it('every 5th level posts one activity card; other level-ups do not', async () => {
+    const lvl = async (n: number) => q('update public.profiles set account_level = $1 where id = $2', [n, STRANGER]);
+    const acts = async () => (await q<any>(`select text from public.posts where user_id = $1 and kind = 'activity' order by id`, [STRANGER])).map((r: any) => r.text);
+    await lvl(3); expect(await acts()).toEqual([]);
+    await lvl(5); expect(await acts()).toEqual(['5. seviyeye ulaştı']);
+    await lvl(7); await lvl(5); await lvl(9); expect(await acts()).toEqual(['5. seviyeye ulaştı']);
+    await lvl(21); expect(await acts()).toEqual(['5. seviyeye ulaştı', '20. seviyeye ulaştı']);
   });
 });
