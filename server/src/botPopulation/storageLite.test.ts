@@ -63,6 +63,14 @@ describe('population snapshot lite', () => {
     expect(calls).toEqual(['bot_population_snapshot_lite', 'bot_population_snapshot']);
   });
 
+  it('controlState also returns online real players from presence (last 90 s)', async () => {
+    await db.exec(`create table if not exists public.presence(user_id text primary key, last_seen timestamptz not null);
+      insert into public.presence values ('a', now()), ('b', now() - interval '30 seconds'), ('c', now() - interval '5 minutes');`);
+    await db.exec(sql('20261120_population_online_count.sql'));
+    const lite = new PopulationStorage(rpc, { lite: true });
+    expect(await lite.controlState()).toMatchObject({ mode: 'running', max_active: 16, online: 2 });
+  });
+
   it('controlState reads only mode/limit', async () => {
     const lite = new PopulationStorage(rpc, { lite: true });
     calls.length = 0;

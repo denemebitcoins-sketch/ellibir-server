@@ -3,7 +3,9 @@ import { initialCharacters, CharacterSeed } from './characters';
 
 export type PopulationMode = 'off' | 'running' | 'draining';
 export type PopulationGame = '51' | 'duz' | 'banko' | 'yuzbir' | 'ihale' | 'tavla';
-export interface PopulationControl { mode: PopulationMode; max_active: number; revision: number; }
+export interface PopulationControl { mode: PopulationMode; max_active: number; revision: number;
+  /** Yalnız control_state: son 90 sn'de görülen gerçek oyuncu sayısı. */
+  online?: number; }
 export interface CharacterRecord extends CharacterSeed { chips: number; enabled: boolean; last_refill_day: string | null; }
 export interface CharacterLease {
   character_id: string;

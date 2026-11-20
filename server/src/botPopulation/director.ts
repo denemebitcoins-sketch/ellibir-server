@@ -30,6 +30,12 @@ interface Managed { room: PopulationRoomSession; rotateAt: number; invited?: boo
 /** 19.11: maç bitince masada gerçek oyuncu varsa botlar bu süre boyunca kalır (HAZIR → rövanş). Oyuncu çıkarsa hemen dağılır. */
 export const ENDED_HOLD_MS = 3 * 60 * 1000;
 interface Lobby { lease: CharacterLease; rotateAt: number; }
+/** 20.11 ESNEK NÜFUS: bir oyunun tüm bot masaları doluysa (oyuncu oturmuş/maçta) o oyun için
+ *  en fazla bu kadar EK bekleyen bot masası açılır; gelen her yeni oyuncu hazır masa bulur. */
+export const MAX_EXTRA_TABLES_PER_GAME = 3;
+/** Lobi (davet bekleyen) botları: taban + her bu kadar online oyuncu için +1. */
+export const ONLINE_PER_LOBBY_BOT = 3;
+export const MAX_LOBBY_BOTS = 20;
 
 /** No constructor/startup side effects. A trusted caller drives tick() explicitly.
  * SQL remains authoritative for capacity, seat ownership, bankroll and daily refill.
@@ -45,6 +51,9 @@ export class PopulationDirector {
   private readonly plans: PopulationTablePlan[];
   private errors: string[] = [];
   private activeLimit = 0;
+  /** Oyuncu yoğunluğuna göre geçici açılan ek bekleyen masalar (anahtar: `<taban>:<n>`). */
+  private readonly extra = new Map<string, PopulationTablePlan>();
+  private online = 0;
 
   constructor(readonly storage: PopulationStorage, readonly owner: string, plans: readonly PopulationTablePlan[],
     private readonly provider: PopulationRoomProvider, private readonly lobbyTarget = 3,
@@ -75,12 +84,48 @@ export class PopulationDirector {
   }
 
   status() {
-    const target = this.plans.reduce((n, p) => n + (p.kind === 'showcase' ? (p.game === 'tavla' ? 2 : 4) : p.waitingBots!), this.lobbyTarget)
+    const target = this.allPlans().reduce((n, p) => n + (p.kind === 'showcase' ? (p.game === 'tavla' ? 2 : 4) : p.waitingBots!), this.lobbyGoal())
       + [...this.managed.values()].filter(m => m.invited).reduce((n, m) => n + m.room.size, 0);
-    return { stopping: this.stopping, lobby: [...this.lobby.keys()],
+    return { stopping: this.stopping, lobby: [...this.lobby.keys()], online: this.online, extra_tables: [...this.extra.keys()],
       target_active: target, active_limit: this.activeLimit, capacity_limited: target > this.activeLimit,
       tables: [...this.managed].map(([key, m]) => ({ key, ...m.room.status(), bots: m.room.size, rotateAt: m.rotateAt })),
       errors: [...this.errors] };
+  }
+  /** Online gerçek oyuncu sayısı (son 90 sn). Lobi hedefini büyütür. */
+  setOnline(n: number) { this.online = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; }
+  private lobbyGoal() {
+    return Math.min(Math.max(MAX_LOBBY_BOTS, this.lobbyTarget), this.lobbyTarget + Math.ceil(this.online / ONLINE_PER_LOBBY_BOT));
+  }
+  private allPlans(): PopulationTablePlan[] { return [...this.plans, ...this.extra.values()]; }
+  /** Bu bekleyen masaya yeni bir oyuncu hemen oturabilir mi (ya da birazdan açılacak mı)? */
+  private isFree(p: PopulationTablePlan): boolean {
+    const m = this.managed.get(p.key);
+    if (!m) return true;
+    if (m.invited) return false;
+    const s = m.room.status();
+    return s.phase === 'waiting' && !s.starting && !s.disposed && !m.room.isDisposed && !s.humanSeats.length;
+  }
+  /** Her oyunda daima en az bir boş bot masası: hepsi doluysa ek masa ekle; boşta fazladan ek kalınca kaldır. */
+  private elastic() {
+    for (const base of this.plans) {
+      if (base.kind !== 'waiting' || !base.tablePool) continue;
+      const mine = this.allPlans().filter(p => p.kind === 'waiting' && p.game === base.game && p.team === base.team
+        && (p.key === base.key || p.key.startsWith(base.key + ':')));
+      const free = mine.filter(p => this.isFree(p));
+      if (!free.length) {
+        if (mine.length - 1 >= MAX_EXTRA_TABLES_PER_GAME) continue;
+        let i = 2; while (this.extra.has(`${base.key}:${i}`)) i++;
+        const key = `${base.key}:${i}`;
+        this.extra.set(key, { ...base, key, tablePool: [...base.tablePool] });
+        continue;
+      }
+      // Boşta (yönetilmeyen) ek masaları, başka boş masa varken bırak.
+      let spare = free.length;
+      for (const p of free) {
+        if (spare <= 1) break;
+        if (this.extra.has(p.key) && !this.managed.has(p.key)) { this.extra.delete(p.key); this.resumeAt.delete(p.key); spare--; }
+      }
+    }
   }
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const result = this.tail.then(work);
@@ -122,14 +167,14 @@ export class PopulationDirector {
     await this.provider.retired?.(managed.room);
     if (!managed.room.status().humanSeats.length) await this.provider.close(managed.room);
     this.managed.delete(key);
-    if (this.plans.find(p => p.key === key)?.tablePool)
+    if (this.allPlans().find(p => p.key === key)?.tablePool)
       this.resumeAt.set(key, this.now() + 20000 + Math.floor(this.random() * 40001));
     return true;
   }
 
   private async fillLobby(snapshot: PopulationSnapshot, used: Set<string>) {
     for (const character of this.candidates(snapshot, used, 0)) {
-      if (this.stopping || this.lobby.size >= this.lobbyTarget || used.size >= snapshot.control.max_active) break;
+      if (this.stopping || this.lobby.size >= this.lobbyGoal() || used.size >= snapshot.control.max_active) break;
       try {
         await this.funded(character, 0);
         if (this.stopping) break;
@@ -177,10 +222,11 @@ export class PopulationDirector {
     }
     if (!running) return;
 
+    this.elastic();
     await this.fillLobby(snapshot, used);
 
     // Existing tables with waiting humans take precedence over empty showcase quotas.
-    const plans = [...this.plans].sort((a, b) => Number(!!this.managed.get(b.key)?.room.status().humanSeats.length)
+    const plans = this.allPlans().sort((a, b) => Number(!!this.managed.get(b.key)?.room.status().humanSeats.length)
       - Number(!!this.managed.get(a.key)?.room.status().humanSeats.length));
     for (const plan of plans) {
       try {

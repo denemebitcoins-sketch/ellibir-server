@@ -13,6 +13,9 @@ export function defaultPopulationPlans(): PopulationTablePlan[] {
   ];
 }
 
+/** 20.11: lobide davet bekleyen taban bot sayısı. 6 bekleyen masa (13 bot) + 7 = taban 20.
+ *  Online arttıkça lobi büyür ve dolu oyunlara ek masa açılır (director: elastic/lobbyGoal). */
+export const POPULATION_LOBBY_BASE = 7;
 /** Botlar aktifken (running/draining) yönetici döngü sıklığı. */
 export const POPULATION_ACTIVE_TICK_MS = 10_000;
 /** Botlar KAPALI (off) iken: sadece mod kontrolü + sağlık kaydı, 10 dakikada bir.
@@ -96,9 +99,9 @@ export class PopulationRuntime {
       await this.storage.recoverExpired();
       if (snapshot.control.mode === 'running' && !this.director) {
         this.provider = this.providerFactory();
-        this.director = new PopulationDirector(this.storage, this.owner, defaultPopulationPlans(), this.provider, 3);
+        this.director = new PopulationDirector(this.storage, this.owner, defaultPopulationPlans(), this.provider, POPULATION_LOBBY_BASE);
       }
-      if (this.director) await this.director.tick();
+      if (this.director) { this.director.setOnline(snapshot.control.online ?? 0); await this.director.tick(); }
       // 19.11 BEKÇİ: deploy sonrası eski sürecin kiraları yüzünden yönetici boş kalabiliyordu; elle
       // kapat-aç gerekiyordu. Mod açık + hedef > 0 iken ~1 dk boyunca hiç bot yoksa aynısını kendisi yapar.
       if (this.director && snapshot.control.mode === 'running') {
