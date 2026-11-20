@@ -82,17 +82,17 @@ export class PopulationRuntime {
       // KAPALI + bakım zaten yapıldıysa: yalnız modu oku ve sağlık yaz (2 istek). İlerleme/sosyal/kurtarma
       // işleri botlar kapalıyken yapılacak bir şey üretmez; açılınca tam tura geçilir.
       if (this.idle && this.idleMaintained && !this.director) {
-        const light = await this.storage.snapshot();
-        if (light.control.mode === 'off') {
+        const control = await this.storage.controlState();
+        if (control.mode === 'off') {
           this.lastTick = new Date().toISOString(); this.error = '';
           await this.storage.health(this.owner, true, '', { tables: 0, lobby: 0,
             progression_pending: this.lastProgressionPending, target_active: 0,
-            active_limit: light.control.max_active, capacity_limited: false, idle: true, errors: [] });
+            active_limit: control.max_active, capacity_limited: false, idle: true, errors: [] });
           return;
         }
       }
       const progression = await this.storage.processProgression();
-      const snapshot = await this.storage.snapshot();
+      const snapshot = { control: await this.storage.controlState() };
       await this.storage.recoverExpired();
       if (snapshot.control.mode === 'running' && !this.director) {
         this.provider = this.providerFactory();

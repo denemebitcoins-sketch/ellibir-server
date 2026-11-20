@@ -49,13 +49,72 @@ export type PopulationRpc = (name: string, args: Record<string, unknown>, timeou
 /** No startup side effects: seed/control/claims require explicit orchestration.
  * The same RPC contract runs against local SQL in tests, never a fake human account.
  */
+export interface PopulationStorageOptions {
+  /** Hafif okumalar (snapshot_lite/control_state). Varsayılan: yalnız gerçek Supabase çağrısında açık. */
+  lite?: boolean;
+  /** Karakterlerin sabit alanlarının (isim/cinsiyet/avatar/VIP) tam listeden tazelenme aralığı. */
+  fullRefreshMs?: number;
+  now?: () => number;
+}
+type LiteSnapshot = { control: PopulationControl; chips: [string, number, boolean, string | null][]; leases: CharacterLease[] };
+const isLite = (v: any): v is LiteSnapshot => !!v && typeof v === 'object' && !!v.control && Array.isArray(v.chips) && Array.isArray(v.leases);
+
 export class PopulationStorage {
-  constructor(private readonly call: PopulationRpc = rpcService) {}
+  private lite: boolean;
+  private readonly fullRefreshMs: number;
+  private readonly now: () => number;
+  private roster: Map<string, CharacterRecord> | null = null;
+  private rosterAt = 0;
+
+  constructor(private readonly call: PopulationRpc = rpcService, options: PopulationStorageOptions = {}) {
+    this.lite = options.lite ?? call === rpcService;
+    this.fullRefreshMs = options.fullRefreshMs ?? 10 * 60_000;
+    this.now = options.now ?? Date.now;
+  }
+
+  /** 20.11 EGRESS: her turda 100 karakterin tüm alanlarını çekmek günde ~275 MB dışarı veri yapıyordu.
+   *  Artık turda yalnız [id, chips, enabled, last_refill_day] + kiralar gelir; sabit alanlar 10 dk'da bir
+   *  (ya da bilinmeyen karakter görülünce) tam listeden tazelenir. Dönen nesneler her çağrıda YENİ
+   *  kopyalardır (çağıranlar chips'i yerinde değiştiriyor). Hafif fonksiyon yoksa eski tam okumaya düşer. */
+  async snapshot(): Promise<PopulationSnapshot> {
+    if (!this.lite) return this.call('bot_population_snapshot', {});
+    let lite: unknown;
+    try { lite = await this.call('bot_population_snapshot_lite', {}); }
+    catch (e: any) {
+      if (!/_http_404|PGRST202|does not exist|could not find/i.test(String(e?.message ?? e))) throw e;
+      lite = null;
+    }
+    if (!isLite(lite)) { this.lite = false; return this.call('bot_population_snapshot', {}); }
+    const stale = !this.roster || this.now() - this.rosterAt >= this.fullRefreshMs
+      || lite.chips.some(([id]) => !this.roster!.has(id));
+    if (stale) {
+      const full: PopulationSnapshot = await this.call('bot_population_snapshot', {});
+      this.roster = new Map(full.characters.map(c => [c.id, { ...c }]));
+      this.rosterAt = this.now();
+      // Tam okuma zaten en taze veri: doğrudan onu (kopya olarak) döndür.
+      return { control: full.control, characters: full.characters.map(c => ({ ...c })), leases: full.leases };
+    }
+    const characters = lite.chips.map(([id, chips, enabled, last_refill_day]) =>
+      ({ ...this.roster!.get(id)!, chips: Number(chips), enabled, last_refill_day }));
+    return { control: lite.control, characters, leases: lite.leases };
+  }
+
+  /** Yalnız mod/limit (runtime turu). Hafif fonksiyon yoksa snapshot'tan okunur. */
+  async controlState(): Promise<PopulationControl> {
+    if (this.lite) {
+      try {
+        const c = await this.call('bot_population_control_state', {});
+        if (c && typeof c === 'object' && typeof c.mode === 'string') return c;
+      } catch (e: any) {
+        if (!/_http_404|PGRST202|does not exist|could not find/i.test(String(e?.message ?? e))) throw e;
+      }
+    }
+    return (await this.snapshot()).control;
+  }
 
   seed(): Promise<{ ok: boolean; added: number }> {
     return this.call('bot_population_seed', { p_characters: initialCharacters() });
   }
-  snapshot(): Promise<PopulationSnapshot> { return this.call('bot_population_snapshot', {}); }
   control(expectedRevision: number, mode: PopulationMode, maxActive: number, actor: string): Promise<PopulationControl> {
     return this.call('bot_population_control', {
       p_expected_revision: expectedRevision, p_mode: mode, p_max_active: maxActive, p_actor: actor,
