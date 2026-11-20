@@ -58,6 +58,7 @@ beforeAll(async () => {
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_feed.sql'), 'utf8'));
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_feed_pin.sql'), 'utf8'));
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_level_activity.sql'), 'utf8'));
+  await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_profile_tabs.sql'), 'utf8'));
   for (const [id, name, vis, role] of [[ME, 'Samet', 'open', 'normal'], [FRIEND, 'Zeynep', 'friends', 'normal'], [STRANGER, 'Ayşe', 'open', 'normal'],
     [BLOCKED, 'Kötü', 'open', 'normal'], [HIDDENP, 'Gizli', 'hidden', 'normal'], [ADMIN, 'Yonetici', 'open', 'admin']] as const) {
     await db.query('insert into auth.users values ($1)', [id]);
@@ -180,7 +181,7 @@ describe('kahvehane feed', () => {
     expect(pages).toBeGreaterThan(2);
     const acts = (await rpc('kahvehane_feed', { p_scope: 'mixed', p_limit: 40 })).items.filter((x: any) => x.kind === 'activity');
     expect(acts).toHaveLength(1);
-    const wallActs = (await rpc('kahvehane_feed', { p_scope: 'user', p_user: FRIEND, p_limit: 40 })).items.filter((x: any) => x.kind === 'activity');
+    const wallActs = (await rpc('kahvehane_feed', { p_scope: 'user_activity', p_user: FRIEND, p_limit: 40 })).items.filter((x: any) => x.kind === 'activity');
     expect(wallActs).toHaveLength(4);
   });
   it('admin pins one public post on top of the mixed feed; players cannot', async () => {
@@ -220,5 +221,20 @@ describe('kahvehane feed', () => {
     await lvl(5); expect(await acts()).toEqual(['5. seviyeye ulaştı']);
     await lvl(7); await lvl(5); await lvl(9); expect(await acts()).toEqual(['5. seviyeye ulaştı']);
     await lvl(21); expect(await acts()).toEqual(['5. seviyeye ulaştı', '20. seviyeye ulaştı']);
+  });
+  it('profile tabs: wall = statuses, activities apart, liked only on own profile', async () => {
+    const st = await post(FRIEND, 'Zeynep durum');
+    await q(`insert into public.posts(user_id, kind, text) values ($1, 'activity', '10. seviyeye ulaştı')`, [FRIEND]);
+    await as(ME);
+    const wall = await rpc('kahvehane_feed', { p_scope: 'user', p_user: FRIEND });
+    expect(wall.items.every((x: any) => x.kind === 'status')).toBe(true);
+    expect(wall.items.map((x: any) => Number(x.id))).toContain(st);
+    const acts = await rpc('kahvehane_feed', { p_scope: 'user_activity', p_user: FRIEND });
+    expect(acts.items.length).toBeGreaterThan(0);
+    expect(acts.items.every((x: any) => x.kind === 'activity')).toBe(true);
+    await q('insert into public.post_likes(post_id, user_id) values ($1, $2)', [st, ME]);
+    const liked = await rpc('kahvehane_feed', { p_scope: 'user_liked' });
+    expect(liked.items.map((x: any) => Number(x.id))).toContain(st);
+    expect((await rpc('kahvehane_feed', { p_scope: 'user_liked', p_user: FRIEND })).items).toEqual([]);
   });
 });
