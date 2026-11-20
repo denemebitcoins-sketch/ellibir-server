@@ -413,6 +413,10 @@ export function clientViewForSpectator(state: GameState): Record<string, unknown
     currentSeat: state.currentSeat ?? 0,
     handNumber: state.handNumber ?? 1,
     totalHands: rules?.totalHands ?? 5,
+    // 21.11: izleyicide "Seri açar / Çift açar" 1 görünüyordu — masanın güncel açış eşikleri (açık bilgi)
+    openingMin: v?.currentOpeningMin ?? rules?.openingMinPoints ?? 0,
+    pairsMin: v?.currentPairsMin ?? rules?.pairs?.pairsToOpen ?? 0,
+    turnTimerSeconds: typeof rules?.turnTimerSeconds === 'number' ? rules.turnTimerSeconds : 0,
     teamMode: rules?.teamMode ?? false,
     melds: v && Array.isArray(v.melds) ? v.melds.map(mapMeld) : [],
     seats: Array.isArray((state as any).players) ? (state as any).players.map(mapSeat) : [],
