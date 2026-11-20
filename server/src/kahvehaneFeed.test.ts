@@ -56,6 +56,7 @@ beforeAll(async () => {
     create trigger notify_comment_trg after insert on public.post_comments for each row execute function public.notify_on_comment();
   `);
   await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_feed.sql'), 'utf8'));
+  await db.exec(readFileSync(resolve(__dirname, '../migrations/20261120_kahvehane_feed_pin.sql'), 'utf8'));
   for (const [id, name, vis, role] of [[ME, 'Samet', 'open', 'normal'], [FRIEND, 'Zeynep', 'friends', 'normal'], [STRANGER, 'Ayşe', 'open', 'normal'],
     [BLOCKED, 'Kötü', 'open', 'normal'], [HIDDENP, 'Gizli', 'hidden', 'normal'], [ADMIN, 'Yonetici', 'open', 'admin']] as const) {
     await db.query('insert into auth.users values ($1)', [id]);
@@ -180,5 +181,35 @@ describe('kahvehane feed', () => {
     expect(acts).toHaveLength(1);
     const wallActs = (await rpc('kahvehane_feed', { p_scope: 'user', p_user: FRIEND, p_limit: 40 })).items.filter((x: any) => x.kind === 'activity');
     expect(wallActs).toHaveLength(4);
+  });
+  it('admin pins one public post on top of the mixed feed; players cannot', async () => {
+    const a = await post(STRANGER, 'Yönetici sabitleyecek');
+    const b = await post(FRIEND, 'İkinci sabit');
+    await as(ME);
+    await expect(rpc('kahvehane_set_feed_pin', { p_post: a, p_pin: true })).rejects.toThrow(/admin_only/);
+    await expect(q('update public.posts set feed_pinned_at = now() where id = $1', [a])).rejects.toThrow(/feed_pin_admin_only/);
+    await as(ADMIN);
+    expect(await rpc('kahvehane_set_feed_pin', { p_post: a, p_pin: true })).toBe(true);
+    await as(ME);
+    let feed = await rpc('kahvehane_feed', { p_scope: 'mixed' });
+    expect(Number(feed.pinned.id)).toBe(a);
+    expect(feed.pinned.feed_pinned).toBe(true);
+    expect(feed.items.map((x: any) => Number(x.id))).not.toContain(a);
+    // yeni sabit eskisinin yerini alır; geri alınca akışa döner
+    await as(ADMIN);
+    expect(await rpc('kahvehane_set_feed_pin', { p_post: b, p_pin: true })).toBe(true);
+    await as(ME);
+    feed = await rpc('kahvehane_feed', { p_scope: 'mixed' });
+    expect(Number(feed.pinned.id)).toBe(b);
+    expect(feed.items.map((x: any) => Number(x.id))).toContain(a);
+    await as(ADMIN);
+    expect(await rpc('kahvehane_set_feed_pin', { p_post: b, p_pin: false })).toBe(true);
+    await as(ME);
+    feed = await rpc('kahvehane_feed', { p_scope: 'mixed' });
+    expect(feed.pinned).toBeNull();
+    // arkadaşlara özel gönderi akışa sabitlenemez
+    const f = await post(FRIEND, 'Özel', 'visibility=friends');
+    await as(ADMIN);
+    await expect(rpc('kahvehane_set_feed_pin', { p_post: f, p_pin: true })).rejects.toThrow(/not_public/);
   });
 });
