@@ -6,6 +6,8 @@
 //   SUPABASE_ANON_KEY             (auth token doğrulama için)
 //   SUPABASE_SERVICE_ROLE_KEY     (çip RPC + rooms yazma için; GİZLİ)
 
+import { canakBus, fmtChips, type CanakNews } from './canakBus';
+
 const URL = process.env.SUPABASE_URL ?? '';
 const ANON = process.env.SUPABASE_ANON_KEY ?? '';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -520,7 +522,7 @@ export async function fetchCanak(game: string): Promise<number> {
 
 /** ÇANAK PATLAT: tutarı atomik sıfırla + bitiren İNSANA çip yaz + GEÇMİŞE kaydet (BÖLÜM 34)
  *  + TOPLULUK sohbetine sistem duyurusu düşür. Patlayan tutarı döner (0 = boş/başarısız). */
-export async function canakBurst(game: string, uid: string, name = ''): Promise<number> {
+export async function canakBurst(game: string, uid: string, name = '', label = ''): Promise<number> {
   if (!uid) return 0;
   // 24 SAAT KURALI (kullanıcı): aynı kişi 24 saat içinde İKİNCİ kez patlatamaz.
   try {
@@ -545,21 +547,29 @@ export async function canakBurst(game: string, uid: string, name = ''): Promise<
     return 0;
   }
   console.log(`[canak] PATLADI game=${game} uid=${uid} tutar=${amt}`);
-  const gameLbl = game === '51' ? '51' : game.toUpperCase();
+  const gameLbl = label || (game === '51' ? '51' : game === 'tavla' ? 'Tavla' : 'Okey');
   const svc = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' };
+  const who = name || 'Bir oyuncu';
   // Geçmiş kaydı (canak_events) — ekrandaki GEÇMİŞ sekmesi + "son patlatma" bilgisi.
   fetch(`${URL}/rest/v1/canak_events`, {
     method: 'POST', headers: svc,
     body: JSON.stringify({ game, user_id: uid, name, amount: amt }),
   }).catch((e) => console.error('[canak] event kaydı:', e?.message));
-  // Topluluk (lobby_chat) sistem duyurusu — herkes görsün (FOMO motoru).
+  // 21.11: Topluluk (lobby_chat) duyurusu — emojisiz (fontta yok), tutar binlik ayraçlı.
   fetch(`${URL}/rest/v1/lobby_chat`, {
     method: 'POST', headers: svc,
     body: JSON.stringify({
-      user_id: uid, name: '🏺 ÇANAK', role: 'normal',
-      text: `${name || 'Bir oyuncu'}, ${gameLbl} çanağını patlattı: +${amt} çip! 🎉`,
+      user_id: uid, name: 'ÇANAK', role: 'normal',
+      text: `${who} ${gameLbl} çanağını patlattı: +${fmtChips(amt)} çip!`,
     }),
   }).catch((e) => console.error('[canak] lobi duyurusu:', e?.message));
+  // 21.11: Kahvehane'ye "Online Kahvem" resmi gönderisi + o an açık TÜM masalara anlık haber ("Tebrik et" bu gönderiyi beğenir).
+  rpcValue('canak_official_post', { p_text: `${who} ${gameLbl} çanağını patlattı: +${fmtChips(amt)} çip! Tebrikler!` })
+    .catch(() => null)
+    .then((postId) => {
+      const news: CanakNews = { game, gameLbl, uid, name: who, amount: amt, postId: postId && postId > 0 ? postId : 0 };
+      canakBus.emit('burst', news);
+    });
   return amt;
 }
 

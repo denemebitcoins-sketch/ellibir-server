@@ -11,6 +11,7 @@ import { DEFAULT_RULES } from '../../../packages/engine/src/rules';
 import { clearHandOrder, reconcileHandOrder } from '../clientView';
 import { CmdError } from '../gameCommands';
 import { requireVerifiedUser, settleMatch, isGameBanned, isChatBanned, filterChatText, keepSeatPresence, deductDiamonds, canakBurst, fetchCanak, deductEntry, refundEntryOnce, normalizeRoomBet, normalizeRoomOption, authUserIdFromClient, resolveClientProfileMeta, entryHouseAmount, displayProfileRole } from '../supabase';
+import { onCanakNews } from '../canakBus';
 import type { MatchProgressionAward } from '../supabase';
 import { payloadWithinLimit, RoomMessageGuard } from '../roomMessageGuard';
 import { GIFT_DIAMONDS, GIFT_HOURS, GIFT_NAMES, normalizeGiftRequest, giftRecipientsAllowed } from '../gifts';
@@ -195,7 +196,19 @@ export class EllibirRoom extends Room {
     return this.messageGuard.allow(sessionId, 'chat', 1, 2500) && this.messageGuard.allow(sessionId, 'chatMin', 8, 60_000);
   }
 
+  /* 21.11 ÇANAK HABERİ: herhangi bir masada çanak patlayınca O AN masada olan herkese ('canakNews').
+     Patlatanın kendi masasına sameTable=true gider (istemci üst şerit gösterir; patlatan tam ekran kutlamayı zaten görür). */
+  private offCanakNews: (() => void) | null = null;
+  private listenCanakNews() {
+    this.offCanakNews = onCanakNews((n) => {
+      if (this.clients.length === 0) return;
+      const sameTable = [...this.seatUsers.values()].includes(n.uid);
+      this.broadcast('canakNews', { ...n, sameTable });
+    });
+  }
+
   onCreate(options: any) {
+    this.listenCanakNews(); // 21.11 çanak haberi
     // ÇEKİRDEK-SEVİYE STALE-CLOSE KALKANI: reconnect sonrası ESKİ socket kapanışı çekirdekte
     // CANLI client'a eşlenip clients listesinden düşürüyor, oda boşalınca DISPOSE oluyordu
     // (hook'ta yutmak yetmiyor — silme hook'tan ÖNCE). KESİN AYRAÇ: mevcut transport (client.ref)
@@ -1205,7 +1218,7 @@ export class EllibirRoom extends Room {
     const uid = w != null && w >= 0 ? this.seatUsers.get(w) : undefined;
     const p = ellibirCanakChance(Boolean(hr.okeyFinish), Boolean(hr.pairFinish));
     if (!uid || p <= 0 || Math.random() >= p) { this.refreshCanak(); return; }
-    canakBurst('51', uid, this.seatNames.get(w) ?? '').then((amt) => {
+    canakBurst('51', uid, this.seatNames.get(w) ?? '', this.gameKey === 'ihale' ? 'İhale' : '51').then((amt) => {
       if (amt <= 0 || !this.game) { this.refreshCanak(); return; }
       this.canakAmount = 0;
       const name = this.seatNames.get(w) ?? `Oyuncu ${w + 1}`;
@@ -1577,6 +1590,7 @@ export class EllibirRoom extends Room {
   }
 
   onDispose() {
+    this.offCanakNews?.(); this.offCanakNews = null; // 21.11
     this.afk.reset();
     this.readyGate.dispose();
     this.disposed = true;
