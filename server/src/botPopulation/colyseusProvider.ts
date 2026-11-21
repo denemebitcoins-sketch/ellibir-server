@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { matchMaker, Room } from '@colyseus/core';
 import { PopulationRoomProvider, PopulationTablePlan } from './director';
 import { PopulationRoomBinding } from './roomBinding';
-import { PopulationRoomSession } from './roomSession';
+import { PopulationRoomSession, isLeaseLost, TRANSIENT_GRACE_MS } from './roomSession';
 import { PopulationRoomLease, PopulationStorage } from './storage';
 
 /** A salon shows ONE card per table number (per game, and per variant for okey) whatever the
@@ -187,11 +187,15 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
           await this.release(held); this.held.delete(key); continue;
         }
         held.lease = await held.storage.heartbeatRoom(key, held.lease.owner_id, held.lease.token);
+        (held as any).lastOkAt = Date.now();
         held.binding?.session?.setAuthority(true);
       } catch (error) {
         if (held.cleanupOnly) { firstError ??= error; continue; }
-        held.binding?.session?.setAuthority(false);
         firstError ??= error;
+        // 21.11: geçici DB hatasında (zaman aşımı/ağ) masa kilitlenmez/kapatılmaz; kira (4 dk) içinde tekrar denenir.
+        const lastOk = Number((held as any).lastOkAt ?? Date.now());
+        if (!isLeaseLost(error) && Date.now() - lastOk <= TRANSIENT_GRACE_MS) continue;
+        held.binding?.session?.setAuthority(false);
         try {
           const recorded = (await held.storage.rooms()).find(h => h.room_key === key);
           const lost = !recorded || recorded.owner_id !== held.lease.owner_id || recorded.token !== held.lease.token

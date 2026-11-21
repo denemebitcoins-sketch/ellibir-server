@@ -24,6 +24,14 @@ interface Occupant { character: CharacterRecord; lease: CharacterLease; }
 /** Server-process capability only: never construct from client join options.
  * Holds no game AI. Existing room engines consume its explicit bot seat identities.
  */
+/** 21.11: veritabanı kesintisine tolerans (sunucu tarafı). Kira süresi DB'de 4 dk (20261121_population_lease_4min); bu süre ondan kısa olmalı. */
+export const TRANSIENT_GRACE_MS = 210_000;
+/** Kesin kira kaybı mı (yoksa zaman aşımı/ağ gibi geçici hata mı)? */
+export function isLeaseLost(error: unknown): boolean {
+  const m = String((error as any)?.message ?? error ?? '');
+  return /lease_lost|room_host_busy/i.test(m) && !/timeout|aborted|fetch failed|network|ECONN|5\d\d/i.test(m);
+}
+
 export class PopulationRoomSession {
   private readonly occupants = new Map<number, Occupant>();
   private readonly pendingSeats = new Set<number>();
@@ -124,12 +132,19 @@ export class PopulationRoomSession {
     this.renewing = this.renewAll().finally(() => { this.renewing = null; });
     return this.renewing;
   }
+  private lastRenewOkAt = Date.now();
   private async renewAll() {
     if (this.disposed) return;
     try {
       for (const o of this.occupants.values()) o.lease = await this.storage.heartbeat(o.character.id, this.owner, o.lease.token);
       this.fenced = false;
-    } catch (error) { this.fenced = true; throw error; }
+      this.lastRenewOkAt = Date.now();
+    } catch (error) {
+      // 21.11: veritabanı geçici olarak yanıt vermezse (zaman aşımı/ağ) masa DONMASIN — kira (4 dk) dolmadan
+      // en fazla TRANSIENT_GRACE_MS boyunca oyun sürer. Yalnız kesin "kira kaybedildi" cevabında kilitlenir.
+      this.fenced = isLeaseLost(error) || Date.now() - this.lastRenewOkAt > TRANSIENT_GRACE_MS;
+      throw error;
+    }
     finally { this.host.changed(); }
   }
 
