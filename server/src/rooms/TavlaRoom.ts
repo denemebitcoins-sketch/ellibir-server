@@ -294,7 +294,22 @@ export class TavlaRoom extends Room {
     // ── SOSYAL KATMAN: 51/OKEY ile birebir ──
     this.onMessage('chat', (client, raw) => {
       const seat = this.seats.get(client.sessionId);
-      if (seat == null) return;
+      if (seat == null) {
+        // 21.11: YÖNETİM izleyici masa sohbetine yazabilir (rol DB'den doğrulanmış; herkes "Yönetim" etiketiyle görür).
+        const meta = this.spectatorMeta.get(client.sessionId);
+        if (!meta || meta.role !== 'admin' || !this.spectators.has(client.sessionId)) return;
+        if (!payloadWithinLimit(raw, 1024) || !this.chatRateOk(client.sessionId)) {
+          client.send('chatBlocked', { reason: 'Çok hızlı yazıyorsun, birkaç saniye bekle.' });
+          return;
+        }
+        const atext = String(typeof raw === 'string' ? raw : (raw?.text ?? '')).slice(0, 200).trim();
+        if (!atext) return;
+        const aname = this.spectatorNames.get(client.sessionId) ?? 'Yönetim';
+        filterChatText(atext)
+          .then((filtered) => this.broadcast('chat', { seat: -1, name: aname, text: filtered, admin: true }))
+          .catch(() => client.send('chatBlocked', { reason: 'Mesaj doğrulanamadı; tekrar dene.' }));
+        return;
+      }
       if (!payloadWithinLimit(raw, 1024) || !this.chatRateOk(client.sessionId)) {
         client.send('chatBlocked', { reason: 'Çok hızlı yazıyorsun, birkaç saniye bekle.' });
         return;
