@@ -155,7 +155,8 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
       held.binding = new PopulationRoomBinding(storage, owner, plan.key, plan.bet);
       const listing = await matchMaker.handleCreateRoom(name, {
         mode, table: plan.table, bet: plan.bet,
-        ...(name === 'okey' ? { variant: plan.game, rules: { variant: plan.game } } : {}),
+        rules: populationShortRules(name, plan.game),
+        ...(name === 'okey' ? { variant: plan.game } : {}),
         _populationBinding: held.binding,
       });
       held.room = matchMaker.getLocalRoomById(listing.roomId);
@@ -238,4 +239,12 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
     await this.release(held);
     this.held.delete(session.room);
   }
+}
+
+/** 22.11: Bot masaları KISA kurulur — yeni gelen oyuncu ilk maçını bitirebilsin (3 el / tavlada 3 sayı). */
+export const POPULATION_SHORT_HANDS = 3;
+export function populationShortRules(roomName: string, game: string): Record<string, unknown> {
+  if (roomName === 'okey') return { variant: game, totalEls: POPULATION_SHORT_HANDS };
+  if (roomName === 'tavla') return { targetScore: POPULATION_SHORT_HANDS };
+  return { totalHands: POPULATION_SHORT_HANDS }; // 51 + ihale
 }
