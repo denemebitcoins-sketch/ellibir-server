@@ -1,4 +1,10 @@
 import type { OkeyGameState } from './game';
+import { bankoPlayerMultOf } from './game';
+/** BANKO sayı bilinci + güvenli ıskarta (24.11 simülasyonu, "D + güvenli" ayarı).
+ *  base/late: boştaki taş sayısının ağırlığı (el ilerledikçe artar); useMult: kendi çarpanı yüksekse daha da artar;
+ *  minPairs: bankoluda çift planına ancak ≥4 çiftle gidilir; safety: sağdakinin attığına benzeyen ATILABİLİR taş tercih edilir. */
+export const OKEY_BOT_TUNING = { base: 3, late: 15, useMult: true, multCap: 4, minPairs: 4, safety: 1, lateBreak: 0 };
+const CFG = OKEY_BOT_TUNING;
 import {
   applyOkeyMove,
   bestYuzbirMeldOpening,
@@ -32,11 +38,18 @@ function synergy(hand: readonly OkeyTile[], tile: OkeyTile, state: OkeyGameState
   return score;
 }
 
+/** El ilerlemesi: yalnız AÇIK bilgi (botun kendi attığı taş sayısı, ~12 tur ≈ geç el). Desteye bakmaz. */
+function turnProgress(state: OkeyGameState): number {
+  return Math.max(0, Math.min(1, (state.players[state.turn]?.discardCount ?? 0) / 12));
+}
+
 function handValue(hand: readonly OkeyTile[], state: OkeyGameState, cache: OkeyGroupingCache, knowledge: OkeyBotKnowledge): number {
   const groups = bestGrouping([...hand], state.okeyColor, state.okeyRank, state.rules.variant !== 'yuzbir', false, cache);
   const covered = new Set(groups.flat().map(t => t.id));
   const loose = hand.filter(t => !covered.has(t.id));
-  let score = covered.size * 1000 + loose.reduce((sum, t) => sum + synergy(loose, t, state, knowledge), 0);
+  const prog = turnProgress(state);
+  const synW = 1 - CFG.lateBreak * prog;
+  let score = covered.size * 1000 + synW * loose.reduce((sum, t) => sum + synergy(loose, t, state, knowledge), 0);
   // Pair and meld plans are alternatives, never overlapping contributions.
   if (state.rules.variant !== 'yuzbir') {
     const counts = new Map<string, number>();
@@ -50,11 +63,58 @@ function handValue(hand: readonly OkeyTile[], state: OkeyGameState, cache: OkeyG
     for (const count of counts.values()) { pairs += Math.floor(count / 2); singles += count % 2; }
     const matched = Math.min(singles, wilds);
     pairs += matched + Math.floor((wilds - matched) / 2);
-    score = Math.max(score, pairs * 2000);
+    if (state.rules.variant !== 'banko' || pairs >= CFG.minPairs) score = Math.max(score, pairs * 2000);
   }
-  if (state.rules.variant === 'banko' || state.rules.variant === 'yuzbir')
+  if (state.rules.variant === 'yuzbir')
     score -= loose.reduce((sum, t) => sum + identityOf(t, state.okeyColor, state.okeyRank).rank, 0);
+  if (state.rules.variant === 'banko') {
+    const progress = turnProgress(state);
+    const mult = bankoPlayerMultOf(state, -1, state.turn);
+    let w = CFG.base + CFG.late * progress;
+    if (CFG.useMult) w *= Math.min(CFG.multCap, mult / 2);
+    score -= w * loose.reduce((sum, t) => sum + identityOf(t, state.okeyColor, state.okeyRank).rank, 0);
+  }
   return score;
+}
+
+/** Sağdaki (sıradaki) oyuncunun kendi attıklarına benzeyen taş ona yaramaz → güvenli ıskarta. */
+function discardSafety(state: OkeyGameState, tile: OkeyTile): number {
+  const id = identityOf(tile, state.okeyColor, state.okeyRank);
+  if (id.wild) return 0;
+  const next = state.discards[(state.turn + 1) % 4] ?? [];
+  let safe = 0;
+  for (const d of next) {
+    const o = identityOf(d, state.okeyColor, state.okeyRank);
+    if (o.wild) continue;
+    if (o.color === id.color && o.rank === id.rank) safe = Math.max(safe, 10);
+    else if (o.color === id.color && Math.abs(o.rank - id.rank) === 1) safe = Math.max(safe, 5);
+    else if (o.rank === id.rank) safe = Math.max(safe, 4);
+    else if (o.color === id.color && Math.abs(o.rank - id.rank) === 2) safe = Math.max(safe, 3);
+  }
+  return safe;
+}
+
+/** Per/seri dışında kalan ve (çift planı varsa) çifte girmeyen taşlar. */
+function throwableIds(hand: readonly OkeyTile[], state: OkeyGameState, cache: OkeyGroupingCache): Set<string> {
+  const groups = bestGrouping([...hand], state.okeyColor, state.okeyRank, state.rules.variant !== 'yuzbir', false, cache);
+  const covered = new Set(groups.flat().map(t => t.id));
+  const byKey = new Map<string, OkeyTile[]>();
+  let wilds = 0;
+  for (const t of hand) {
+    const id = identityOf(t, state.okeyColor, state.okeyRank);
+    if (id.wild) { wilds++; continue; }
+    const k = id.color + id.rank; byKey.set(k, [...(byKey.get(k) ?? []), t]);
+  }
+  let pairs = 0; for (const l of byKey.values()) pairs += Math.floor(l.length / 2);
+  const pairPlan = pairs * 2000 > covered.size * 1000;
+  const out = new Set<string>();
+  for (const t of hand) {
+    if (isOkeyTile(t, state.okeyColor, state.okeyRank)) continue;
+    const id = identityOf(t, state.okeyColor, state.okeyRank);
+    if (pairPlan) { if ((byKey.get(id.color + id.rank)?.length ?? 0) < 2) out.add(t.id); }
+    else if (!covered.has(t.id)) out.add(t.id);
+  }
+  return out;
 }
 
 function chooseDiscard(hand: readonly OkeyTile[], state: OkeyGameState, cache: OkeyGroupingCache, knowledge: OkeyBotKnowledge): OkeyTile | null {
@@ -64,9 +124,12 @@ function chooseDiscard(hand: readonly OkeyTile[], state: OkeyGameState, cache: O
     const safe = choices.filter(t => !isYuzbirIslekDiscard(state, t));
     if (safe.length) choices = safe;
   }
+  // GÜVENLİ ATIŞ yalnız ATILABİLİR taşlar arasında: per/seri/çiftteki taş ADAY bile olmaz.
+  const throwable = CFG.safety > 0 && state.rules.variant !== 'yuzbir' ? throwableIds(hand, state, cache) : null;
   let best: OkeyTile | null = null, bestScore = -Infinity;
   for (const tile of choices) {
-    const score = handValue(hand.filter(t => t.id !== tile.id), state, cache, knowledge) - knowledge.discardRisk(tile);
+    let score = handValue(hand.filter(t => t.id !== tile.id), state, cache, knowledge) - knowledge.discardRisk(tile);
+    if (throwable && throwable.has(tile.id)) score += CFG.safety * discardSafety(state, tile);
     if (score > bestScore) { bestScore = score; best = tile; }
   }
   return best;

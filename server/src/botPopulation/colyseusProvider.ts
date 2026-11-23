@@ -174,6 +174,8 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
       if (!recorded || recorded.owner_id !== owner || recorded.token !== held.lease.token || recorded.room_id !== held.room.roomId) throw error;
       held.lease = recorded;
     }
+    // 24.11: salon etiketi gerçek kısa ayarı göstersin — boş kalınca SQL varsayılanı "9 el / 11 el / 5 puan" yazıyordu.
+    await storage.setRoomInfo?.(plan.key, owner, held.lease.token, plan.info ?? populationShortInfo(plan.game));
     const session = held.binding!.session!;
     session.acceptNewMatches(true);
     return session;
@@ -243,6 +245,9 @@ export class ColyseusPopulationProvider implements PopulationRoomProvider {
 
 /** 22.11: Bot masaları KISA kurulur — yeni gelen oyuncu ilk maçını bitirebilsin (3 el / tavlada 3 sayı). */
 export const POPULATION_SHORT_HANDS = 3;
+export function populationShortInfo(game: string): string {
+  return game === 'tavla' ? `${POPULATION_SHORT_HANDS} puan` : `${POPULATION_SHORT_HANDS} el`;
+}
 export function populationShortRules(roomName: string, game: string): Record<string, unknown> {
   if (roomName === 'okey') return { variant: game, totalEls: POPULATION_SHORT_HANDS };
   if (roomName === 'tavla') return { targetScore: POPULATION_SHORT_HANDS };
